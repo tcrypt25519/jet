@@ -1,0 +1,10 @@
+cargo-features = ["edition2024"]
+
+[workspace]
+members = [
+    "crates/jet",
+    "crates/jet_runtime"
+]
+
+resolver = "3"
+

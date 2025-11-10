@@ -1,0 +1,31 @@
+cargo-features = ["edition2024"]
+
+[package]
+name = "jet"
+edition = "2024"
+license = "MIT"
+authors = ["Tyler Smith"]
+version = "0.1.0"
+description = "An LLVM environment for EVM contracts."
+
+[lib]
+name = "jet"
+crate-type = ["lib"]
+
+[[bin]]
+name = "jetdbg"
+
+[dependencies]
+log = "0.4"
+simple_logger = "5.0.0"
+inkwell = { rev = "6c0fb56b3554e939f9ca61b465043d6a84fb7b95", features = ["llvm18-0", "llvm-sys-180"], git = "https://github.com/TheDan64/inkwell.git" }
+llvm-sys = { package = "llvm-sys", version = "180.0.0" }
+clap = { version = "4.5.4", features = ["derive"] }
+serde = { version = "1.0.201", features = ["derive"] }
+syntect = "5.2.0"
+libc = "0.2.154"
+paste = "1.0.15"
+thiserror = "1.0.61"
+jet_runtime = { path = "../jet_runtime" }
+hex = "0.4.3"
+
