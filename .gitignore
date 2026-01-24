@@ -1,0 +1,32 @@
+# General
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+*.swp
+*.swo
+scratch
+
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# C/C++ and LLVM
+*.o
+*.a
+*.so
+*.dll
+*.dylib
+*.ll.tmp
+
+# Python
+__pycache__/
+*.pyc
+
+# Ansible
+*.retry
+
+# Editors
+.vscode/
+.idea/
