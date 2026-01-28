@@ -1,0 +1,296 @@
+warning: /storage/emulated/0/code/jet/crates/jet/Cargo.toml: the cargo feature `edition2024` has been stabilized in the 1.85 release and is no longer necessary to be listed in the manifest
+  See https://doc.rust-lang.org/cargo/reference/manifest.html#the-edition-field for more information about using this feature.
+warning: /storage/emulated/0/code/jet/Cargo.toml: the cargo feature `edition2024` has been stabilized in the 1.85 release and is no longer necessary to be listed in the manifest
+  See https://doc.rust-lang.org/cargo/reference/manifest.html#the-edition-field for more information about using this feature.
+warning: /storage/emulated/0/code/jet/crates/jet_runtime/Cargo.toml: the cargo feature `edition2024` has been stabilized in the 1.85 release and is no longer necessary to be listed in the manifest
+  See https://doc.rust-lang.org/cargo/reference/manifest.html#the-edition-field for more information about using this feature.
+   Compiling llvm-sys v180.0.0
+    Checking syntect v5.3.0
+error: failed to run custom build command for `llvm-sys v180.0.0`
+
+Caused by:
+  process didn't exit successfully: `/data/data/com.termux/files/home/.cargo-target/debug/build/llvm-sys-b151cb668e0dc789/build-script-build` (exit status: 101)
+  --- stdout
+  cargo:rerun-if-env-changed=LLVM_SYS_180_PREFIX
+  cargo:rerun-if-env-changed=LLVM_SYS_180_IGNORE_BLOCKLIST
+  cargo:rerun-if-env-changed=LLVM_SYS_180_STRICT_VERSIONING
+  cargo:rerun-if-env-changed=LLVM_SYS_180_NO_CLEAN_CFLAGS
+  cargo:rerun-if-env-changed=LLVM_SYS_180_USE_DEBUG_MSVCRT
+  cargo:rerun-if-env-changed=LLVM_SYS_180_FFI_WORKAROUND
+  OUT_DIR = Some(/data/data/com.termux/files/home/.cargo-target/debug/build/llvm-sys-34c0b191eedfbf8b/out)
+  OPT_LEVEL = Some(0)
+  TARGET = Some(aarch64-linux-android)
+  CARGO_ENCODED_RUSTFLAGS = Some()
+  HOST = Some(aarch64-linux-android)
+  cargo:rerun-if-env-changed=CC_aarch64-linux-android
+  CC_aarch64-linux-android = None
+  cargo:rerun-if-env-changed=CC_aarch64_linux_android
+  CC_aarch64_linux_android = None
+  cargo:rerun-if-env-changed=HOST_CC
+  HOST_CC = None
+  cargo:rerun-if-env-changed=CC
+  CC = None
+  cargo:rerun-if-env-changed=CC_ENABLE_DEBUG_OUTPUT
+  RUSTC_WRAPPER = None
+  cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+  CRATE_CC_NO_DEFAULTS = None
+  DEBUG = Some(true)
+  cargo:rerun-if-env-changed=CFLAGS
+  CFLAGS = Some(-I/data/data/com.termux/files/usr/include  -DEXPERIMENTAL_KEY_INSTRUCTIONS -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS )
+  cargo:rerun-if-env-changed=CC_SHELL_ESCAPED_FLAGS
+  CC_SHELL_ESCAPED_FLAGS = None
+  cargo:rerun-if-env-changed=HOST_CFLAGS
+  HOST_CFLAGS = None
+  cargo:rerun-if-env-changed=CFLAGS_aarch64_linux_android
+  CFLAGS_aarch64_linux_android = None
+  cargo:rerun-if-env-changed=CFLAGS_aarch64-linux-android
+  CFLAGS_aarch64-linux-android = None
+  cargo:rerun-if-env-changed=AR_aarch64-linux-android
+  AR_aarch64-linux-android = None
+  cargo:rerun-if-env-changed=AR_aarch64_linux_android
+  AR_aarch64_linux_android = None
+  cargo:rerun-if-env-changed=HOST_AR
+  HOST_AR = None
+  cargo:rerun-if-env-changed=AR
+  AR = None
+  LLVM (http://llvm.org/):
+    LLVM version 21.1.8
+    Optimized build.
+  cargo:rerun-if-env-changed=ARFLAGS
+  ARFLAGS = None
+  cargo:rerun-if-env-changed=HOST_ARFLAGS
+  HOST_ARFLAGS = None
+  cargo:rerun-if-env-changed=ARFLAGS_aarch64_linux_android
+  ARFLAGS_aarch64_linux_android = None
+  cargo:rerun-if-env-changed=ARFLAGS_aarch64-linux-android
+  ARFLAGS_aarch64-linux-android = None
+  LLVM (http://llvm.org/):
+    LLVM version 21.1.8
+    Optimized build.
+  cargo:rustc-link-lib=static=targetwrappers
+  cargo:rustc-link-search=native=/data/data/com.termux/files/home/.cargo-target/debug/build/llvm-sys-34c0b191eedfbf8b/out
+  cargo:config_path=llvm-config
+  cargo:libdir=/data/data/com.termux/files/usr/lib
+
+  cargo:rustc-link-search=native=/data/data/com.termux/files/usr/lib
+
+  failed to get static libraries from llvm-config: "llvm-config" "--libnames" "--link-static"
+
+  Caused by:
+      status=exit status: 1
+      stdout=
+      stderr=llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMDemangle.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMSupport.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMTableGen.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMTargetParser.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMBinaryFormat.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMBitstreamReader.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMRemarks.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMCore.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMFuzzerCLI.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMBitReader.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMMC.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMAsmParser.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMIRReader.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMMCParser.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMTextAPI.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMObject.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMDebugInfoDWARFLowLevel.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMDebugInfoDWARF.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMDebugInfoGSYM.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMDebugInfoCodeView.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMDebugInfoMSF.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMDebugInfoPDB.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMDebugInfoBTF.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMSymbolize.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMProfileData.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMAnalysis.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMBitWriter.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMTransformUtils.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMAggressiveInstCombine.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMInstCombine.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMScalarOpts.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMFuzzMutate.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMFileCheck.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMInterfaceStub.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMIRPrinter.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMCGData.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMCodeGenTypes.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMObjCARCOpts.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMTarget.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMCodeGen.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMSelectionDAG.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMAsmPrinter.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMMIRParser.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMGlobalISel.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMDWARFLinker.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMDWARFLinkerClassic.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMDWARFLinkerParallel.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMObjectYAML.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMFrontendOffloading.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMFrontendAtomic.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMFrontendDirective.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMFrontendOpenMP.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMLinker.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMSandboxIR.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMVectorize.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMInstrumentation.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMipo.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMCFGuard.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMCoroutines.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMHipStdPar.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMPasses.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMExtensions.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMFrontendDriver.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMFrontendHLSL.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMFrontendOpenACC.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMLTO.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMMCDisassembler.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMMCA.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMObjCopy.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMOption.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMDebugInfoLogicalView.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMDWARFCFIChecker.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMDWP.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMOrcShared.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMOrcTargetProcess.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMRuntimeDyld.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMExecutionEngine.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMInterpreter.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMJITLink.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMMCJIT.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMWindowsDriver.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMOrcJIT.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMOrcDebugging.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMAArch64Info.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMAArch64Utils.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMAArch64Desc.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMAArch64CodeGen.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMAArch64AsmParser.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMAArch64Disassembler.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMAMDGPUInfo.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMAMDGPUUtils.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMAMDGPUDesc.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMAMDGPUCodeGen.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMAMDGPUAsmParser.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMAMDGPUDisassembler.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMAMDGPUTargetMCA.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMARMInfo.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMARMUtils.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMARMDesc.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMARMCodeGen.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMARMAsmParser.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMARMDisassembler.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMAVRInfo.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMAVRDesc.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMAVRCodeGen.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMAVRAsmParser.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMAVRDisassembler.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMBPFInfo.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMBPFDesc.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMBPFCodeGen.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMBPFAsmParser.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMBPFDisassembler.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMHexagonInfo.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMHexagonDesc.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMHexagonAsmParser.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMHexagonCodeGen.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMHexagonDisassembler.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMLanaiInfo.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMLanaiDesc.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMLanaiAsmParser.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMLanaiCodeGen.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMLanaiDisassembler.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMLoongArchInfo.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMLoongArchDesc.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMLoongArchCodeGen.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMLoongArchAsmParser.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMLoongArchDisassembler.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMMipsInfo.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMMipsDesc.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMMipsCodeGen.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMMipsAsmParser.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMMipsDisassembler.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMMSP430Info.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMMSP430Desc.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMMSP430CodeGen.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMMSP430AsmParser.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMMSP430Disassembler.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMNVPTXInfo.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMNVPTXDesc.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMNVPTXCodeGen.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMPowerPCInfo.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMPowerPCDesc.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMPowerPCCodeGen.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMPowerPCAsmParser.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMPowerPCDisassembler.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMRISCVInfo.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMRISCVDesc.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMRISCVCodeGen.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMRISCVAsmParser.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMRISCVDisassembler.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMRISCVTargetMCA.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMSparcInfo.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMSparcDesc.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMSparcCodeGen.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMSparcAsmParser.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMSparcDisassembler.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMSPIRVAnalysis.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMSPIRVInfo.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMSPIRVDesc.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMSPIRVCodeGen.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMSystemZInfo.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMSystemZDesc.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMSystemZCodeGen.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMSystemZAsmParser.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMSystemZDisassembler.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMVEInfo.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMVEDesc.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMVECodeGen.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMVEAsmParser.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMVEDisassembler.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMWebAssemblyInfo.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMWebAssemblyDesc.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMWebAssemblyUtils.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMWebAssemblyCodeGen.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMWebAssemblyAsmParser.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMWebAssemblyDisassembler.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMX86Info.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMX86Desc.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMX86CodeGen.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMX86AsmParser.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMX86Disassembler.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMX86TargetMCA.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMXCoreInfo.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMXCoreDesc.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMXCoreCodeGen.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMXCoreDisassembler.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMARCInfo.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMARCDesc.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMARCCodeGen.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMARCDisassembler.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMCSKYInfo.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMCSKYDesc.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMCSKYCodeGen.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMCSKYAsmParser.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMCSKYDisassembler.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMM68kInfo.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMM68kDesc.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMM68kCodeGen.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMM68kAsmParser.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMM68kDisassembler.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMLineEditor.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMCoverage.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMTextAPIBinaryReader.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMTelemetry.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMDlltoolDriver.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMLibDriver.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMXRay.a
+      llvm-config: error: missing: /data/data/com.termux/files/usr/lib/libLLVMWindowsManifest.a
+
+  --- stderr
+
+  thread 'main' (755) panicked at /data/data/com.termux/files/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/llvm-sys-180.0.0/build.rs:465:5:
+  failed to get linking libraries from llvm-config
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+warning: build failed, waiting for other jobs to finish...
