@@ -186,37 +186,75 @@ and is no longer necessary
 **Goal:** Install LLVM 21 and prepare the build environment
 
 **Tasks:**
-1. **Install LLVM 21**
-   ```bash
-   # Remove or keep LLVM 18 (for comparison)
-   # Install LLVM 21
-   wget https://apt.llvm.org/llvm.sh
-   chmod +x llvm.sh
-   sudo ./llvm.sh 21
 
-   # Install development headers
-   sudo apt-get install llvm-21-dev
-   ```
+#### 1. Install LLVM 21 (Platform-Specific)
 
-2. **Update Environment Variables**
-   - Update `Makefile`:
-     ```makefile
-     export LLVM_SYS_210_PREFIX=/usr/lib/llvm-21
-     ```
-   - Or set in shell:
-     ```bash
-     export LLVM_SYS_210_PREFIX=/usr/lib/llvm-21
-     ```
+**Ubuntu/Debian:**
+```bash
+# Install LLVM 21
+wget https://apt.llvm.org/llvm.sh
+chmod +x llvm.sh
+sudo ./llvm.sh 21
 
-3. **Verify Installation**
-   ```bash
-   llvm-config-21 --version
-   ls /usr/lib/llvm-21/include/llvm-c/
-   ```
+# Install development headers
+sudo apt-get install llvm-21-dev
+```
+
+**macOS (ARM, Homebrew):**
+```bash
+brew install llvm
+```
+
+**Termux:**
+```bash
+pkg install llvm
+```
+
+#### 2. Set Environment Variable `LLVM_SYS_211_PREFIX`
+
+**Ubuntu/Debian:**
+```bash
+export LLVM_SYS_211_PREFIX=/usr/lib/llvm-21
+```
+
+**macOS (ARM, Homebrew):**
+```bash
+export LLVM_SYS_211_PREFIX="$(brew --prefix llvm)"
+```
+
+**Termux:**
+```bash
+export LLVM_SYS_211_PREFIX="$PREFIX"
+```
+
+Add to your shell profile (`.bashrc`, `.zshrc`, etc.) for persistence.
+
+#### 3. Update Cargo Dependencies
+
+Enable Inkwell feature flag `llvm21-1` in both `crates/jet/Cargo.toml` and `crates/jet_runtime/Cargo.toml`:
+```toml
+inkwell = { version = "0.8.0", features = ["llvm21-1"] }
+```
+
+#### 4. Verify Installation
+```bash
+# Check LLVM version
+llvm-config-21 --version  # Ubuntu/Debian
+llvm-config --version     # macOS/Termux
+
+# Verify headers exist
+ls /usr/lib/llvm-21/include/llvm-c/  # Ubuntu/Debian
+ls "$(brew --prefix llvm)/include/llvm-c/"  # macOS
+ls "$PREFIX/include/llvm-c/"  # Termux
+
+# Verify environment variable
+echo $LLVM_SYS_211_PREFIX
+```
 
 **Success Criteria:**
 - LLVM 21 installed with development headers
-- `llvm-config-21` accessible
+- `LLVM_SYS_211_PREFIX` environment variable set correctly
+- `llvm-config` accessible and reports version 21.x
 - Headers visible at expected path
 
 ---
@@ -585,9 +623,16 @@ For each failing test:
 1. **Update README.md**
    - Change LLVM version from 18 to 21
    - Update installation instructions
-   - Update environment variables:
+   - Update environment variables (platform-specific):
      ```shell
-     export LLVM_SYS_210_PREFIX=/usr/local/opt/llvm
+     # macOS (ARM, Homebrew)
+     export LLVM_SYS_211_PREFIX="$(brew --prefix llvm)"
+
+     # Ubuntu/Debian
+     export LLVM_SYS_211_PREFIX=/usr/lib/llvm-21
+
+     # Termux
+     export LLVM_SYS_211_PREFIX="$PREFIX"
      ```
    - Update Ubuntu install commands:
      ```shell
@@ -597,7 +642,7 @@ For each failing test:
 
 2. **Update Makefile**
    ```makefile
-   export LLVM_SYS_210_PREFIX=/usr/lib/llvm-21
+   export LLVM_SYS_211_PREFIX=/usr/lib/llvm-21
    export RUST_BACKTRACE=1
    ```
 
@@ -664,18 +709,28 @@ For each failing test:
 
 ## Rollback Strategy
 
-If the LLVM 21 upgrade proves too difficult:
+If LLVM 21 installation or upgrade proves too difficult, the fallback strategy is to hand off to a different coding agent. The current agent should:
 
-### Fallback Option 1: Stick with LLVM 18
-1. Install `llvm-18-dev` package
-2. Use Inkwell 0.4.0 stable release with `llvm18-0` feature
-3. Fix only the build issues, not the upgrade
-4. Plan upgrade for later
+1. **Document the specific issue encountered**
+   - Exact error messages
+   - Platform and environment details
+   - Steps already attempted
+   - Point of failure in the plan
 
-### Fallback Option 2: Try LLVM 19 or 20
-1. LLVM 19 or 20 may have fewer breaking changes
-2. Adjust feature flags accordingly
-3. Test incremental upgrade path
+2. **Commit all progress made**
+   - Ensure all documentation updates are committed
+   - Push any partial fixes or changes
+   - Update this plan with lessons learned
+
+3. **Prepare handoff notes**
+   - What worked
+   - What didn't work
+   - Suggested alternative approaches
+   - Known blockers
+
+This ensures continuity and prevents duplicate work by the next agent.
+
+**Note:** Falling back to LLVM 18 is not the strategy. The goal is LLVM 21 upgrade, and if installation is blocked, a different agent will be tried rather than abandoning the upgrade goal.
 
 ---
 
@@ -797,7 +852,7 @@ fatal error: llvm-c/Target.h: No such file or directory
 ```
 LLVM version mismatch: expected 21.x, found 18.x
 ```
-**Solution:** Set `LLVM_SYS_210_PREFIX` environment variable
+**Solution:** Set `LLVM_SYS_211_PREFIX` environment variable correctly for your platform (see Phase 1)
 
 ### Error: Inkwell API Not Found
 ```
