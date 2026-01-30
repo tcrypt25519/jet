@@ -15,46 +15,22 @@ efficiency and speed of EVM contract execution.
 
 ### Prerequisites
 
-To build and run Jet, you'll need the following:
-
 - Rust (latest stable version)
-- LLVM 18.0
+- LLVM 21
 
-### Setting Up the Build Environment
+### Building
 
-1. Install Rust:
-    ```shell
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-    ```
+```shell
+# Install dependencies (handles LLVM and platform-specific packages)
+make install-llvm
 
-2. Install LLVM 18.0:
-    - On macOS (using Homebrew):
-      ```shell
-      brew install llvm@18
-      ```
-    - On Ubuntu:
-      ```shell
-      wget https://apt.llvm.org/llvm.sh
-      chmod +x llvm.sh
-      sudo ./llvm.sh 18
-      ```
+# Build
+make build
+```
 
-3. Clone the Jet repository:
-    ```shell
-    git clone https://github.com/tyler-smith/jet.git
-    cd jet
-    ```
+### Platform-Specific Notes
 
-### Building the Project
-
-1. Set up the LLVM environment variable:
-    ```shell
-    export LLVM_SYS_180_PREFIX=/usr/local/opt/llvm
-    ```
-2. Build the project:
-    ```shell
-    make build
-    ```
+**Termux:** Requires `gcc-default` and `ndk-multilib-native-static` packages (installed by `make install-llvm`)
 
 ### Running jetdbg
 
