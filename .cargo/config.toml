@@ -1,0 +1,9 @@
+[target.aarch64-linux-android]
+linker = "clang"
+rustflags = [
+    "-C", "link-arg=-nostdlib++",
+    "-C", "link-arg=-L/data/data/com.termux/files/usr/lib",
+    "-C", "link-arg=-lc++_shared",
+    "-C", "link-arg=-L/data/data/com.termux/files/usr/lib/gcc/aarch64-linux-android/15.2.0",
+    "-C", "link-arg=-lgcc",
+]
