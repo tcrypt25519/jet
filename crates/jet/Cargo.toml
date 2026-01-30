@@ -1,5 +1,3 @@
-cargo-features = ["edition2024"]
-
 [package]
 name = "jet"
 edition = "2024"
@@ -18,8 +16,7 @@ name = "jetdbg"
 [dependencies]
 log = "0.4"
 simple_logger = "5.0.0"
-inkwell = { rev = "6c0fb56b3554e939f9ca61b465043d6a84fb7b95", features = ["llvm18-0", "llvm-sys-180"], git = "https://github.com/TheDan64/inkwell.git" }
-llvm-sys = { package = "llvm-sys", version = "180.0.0" }
+inkwell = { git = "https://github.com/TheDan64/inkwell.git", features = ["llvm21-1"] }
 clap = { version = "4.5.4", features = ["derive"] }
 serde = { version = "1.0.201", features = ["derive"] }
 syntect = "5.2.0"

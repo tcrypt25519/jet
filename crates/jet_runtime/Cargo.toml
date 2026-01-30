@@ -1,5 +1,3 @@
-cargo-features = ["edition2024"]
-
 [package]
 name = "jet_runtime"
 version = "0.1.0"
@@ -11,11 +9,8 @@ crate-type = ["dylib", "lib"]
 [dependencies]
 log = "0.4"
 simple_logger = "5.0.0"
-inkwell = { rev = "6c0fb56b3554e939f9ca61b465043d6a84fb7b95", features = ["llvm18-0", "llvm-sys-180"], git = "https://github.com/TheDan64/inkwell.git" }
+inkwell = { git = "https://github.com/TheDan64/inkwell.git", features = ["llvm21-1"] }
 sha3 = "0.10.8"
 hex = "0.4.3"
 colored = "2.1.0"
-
-[build-dependencies]
-cc = "1.0"
 
