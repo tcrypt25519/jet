@@ -1,5 +1,12 @@
-export LLVM_SYS_180_PREFIX=/usr/local/opt/llvm
+LLVM_VERSION := 21
+LLVM_PREFIX := $(shell bash scripts/detect-llvm.sh)
+
+export LLVM_SYS_$(LLVM_VERSION)1_PREFIX=$(LLVM_PREFIX)
 export RUST_BACKTRACE=1
+
+.PHONY: install-llvm
+install-llvm: ## Install LLVM 21 for your platform
+	@bash scripts/install-llvm.sh
 
 .PHONY: build
 build: ## Build the project
@@ -28,4 +35,3 @@ commit-check: check build test clippy ## Full check to run before commits
 .PHONY: help
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
-
