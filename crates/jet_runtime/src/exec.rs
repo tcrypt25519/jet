@@ -49,7 +49,7 @@ impl Context {
             stack: [[0; 32]; STACK_SIZE_WORDS as usize],
             memory_ptr,
             memory_len: 0,
-            memory_cap: WORD_SIZE_BYTES * MEMORY_INITIAL_SIZE_WORDS,
+            memory_cap: memory_size as u32,  // Use calculated memory_size
         }
     }
 

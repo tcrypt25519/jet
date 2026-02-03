@@ -74,6 +74,8 @@ pub unsafe extern "C" fn mem_store(ctx: *mut Context, loc: *const u32, val: *con
     let end = end_loc as usize;
     
     // Access memory through pointer
+    // Note: Using memory_cap (not memory_len) because EVM can write anywhere in allocated buffer
+    // memory_len tracks usage but memory can expand; bounds checking is a TODO
     unsafe {
         let memory_slice = std::slice::from_raw_parts_mut(ctx.memory_ptr, ctx.memory_cap as usize);
         memory_slice[start..end].copy_from_slice(word_ref);
@@ -98,6 +100,8 @@ pub unsafe extern "C" fn mem_store_byte(ctx: *mut Context, loc: *const u32, val:
     // }
     
     // Access memory through pointer
+    // Note: Using memory_cap (not memory_len) because EVM can write anywhere in allocated buffer
+    // memory_len tracks usage but memory can expand; bounds checking is a TODO
     unsafe {
         let memory_slice = std::slice::from_raw_parts_mut(ctx.memory_ptr, ctx.memory_cap as usize);
         memory_slice[loc as usize] = byte;
@@ -124,6 +128,8 @@ pub unsafe extern "C" fn mem_load(ctx: *const Context, loc: *const u32) -> *cons
     let end = end_loc as usize;
 
     // Access memory through pointer
+    // Note: Using memory_cap (not memory_len) because EVM can read anywhere in allocated buffer
+    // memory_len tracks usage but memory can expand; bounds checking is a TODO
     unsafe {
         let memory_slice = std::slice::from_raw_parts(ctx.memory_ptr, ctx.memory_cap as usize);
         memory_slice[start..end].as_ptr() as *const Word
