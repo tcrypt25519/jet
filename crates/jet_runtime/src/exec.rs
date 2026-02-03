@@ -21,7 +21,8 @@ pub struct Context {
     sub_call: Option<Box<Context>>,
     stack: [Word; STACK_SIZE_WORDS as usize],
 
-    pub(crate) memory: [u8; (WORD_SIZE_BYTES * MEMORY_INITIAL_SIZE_WORDS) as usize],
+    // Changed to pointer-based memory layout as per layout-mismatch-analysis.md
+    pub(crate) memory_ptr: *mut u8,
     pub(crate) memory_len: u32,
     pub(crate) memory_cap: u32,
 }
@@ -29,7 +30,16 @@ pub struct Context {
 impl Context {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
-        let init_memory_buf = [0u8; (WORD_SIZE_BYTES * MEMORY_INITIAL_SIZE_WORDS) as usize];
+        // Allocate memory buffer on the heap
+        let memory_size = (WORD_SIZE_BYTES * MEMORY_INITIAL_SIZE_WORDS) as usize;
+        let memory_layout = std::alloc::Layout::from_size_align(memory_size, 32)
+            .expect("Failed to create memory layout");
+        let memory_ptr = unsafe { std::alloc::alloc_zeroed(memory_layout) };
+        
+        if memory_ptr.is_null() {
+            panic!("Failed to allocate memory for EVM context");
+        }
+
         Context {
             stack_ptr: 0,
             jump_ptr: 0,
@@ -37,9 +47,9 @@ impl Context {
             return_len: 0,
             sub_call: None,
             stack: [[0; 32]; STACK_SIZE_WORDS as usize],
-            memory: init_memory_buf,
+            memory_ptr,
             memory_len: 0,
-            memory_cap: WORD_SIZE_BYTES * STACK_SIZE_WORDS,
+            memory_cap: WORD_SIZE_BYTES * MEMORY_INITIAL_SIZE_WORDS,
         }
     }
 
@@ -63,7 +73,9 @@ impl Context {
         let offset = self.return_off as usize;
         let end = offset + self.return_len as usize;
         // TODO: Check bounds
-        &self.memory[offset..end]
+        unsafe {
+            std::slice::from_raw_parts(self.memory_ptr.add(offset), end - offset)
+        }
     }
 
     pub fn stack(&self) -> &[Word] {
@@ -71,11 +83,15 @@ impl Context {
     }
 
     pub fn memory(&self) -> &[u8] {
-        &self.memory
+        unsafe {
+            std::slice::from_raw_parts(self.memory_ptr, self.memory_len as usize)
+        }
     }
 
     pub fn memory_mut(&mut self) -> &mut [u8] {
-        &mut self.memory
+        unsafe {
+            std::slice::from_raw_parts_mut(self.memory_ptr, self.memory_len as usize)
+        }
     }
 
     pub fn memory_len(&self) -> u32 {
@@ -146,6 +162,20 @@ impl Context {
     pub(crate) fn init_sub_call(&mut self) -> &mut Context {
         self.sub_call = Some(Box::new(Context::new()));
         self.sub_call.as_mut().unwrap().as_mut()
+    }
+}
+
+impl Drop for Context {
+    fn drop(&mut self) {
+        // Deallocate memory buffer
+        if !self.memory_ptr.is_null() {
+            let memory_size = self.memory_cap as usize;
+            let memory_layout = std::alloc::Layout::from_size_align(memory_size, 32)
+                .expect("Failed to create memory layout");
+            unsafe {
+                std::alloc::dealloc(self.memory_ptr, memory_layout);
+            }
+        }
     }
 }
 

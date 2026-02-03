@@ -72,7 +72,12 @@ pub unsafe extern "C" fn mem_store(ctx: *mut Context, loc: *const u32, val: *con
     // }
     let start = loc as usize;
     let end = end_loc as usize;
-    ctx.memory[start..end].copy_from_slice(word_ref);
+    
+    // Access memory through pointer
+    unsafe {
+        let memory_slice = std::slice::from_raw_parts_mut(ctx.memory_ptr, ctx.memory_cap as usize);
+        memory_slice[start..end].copy_from_slice(word_ref);
+    }
     0
 }
 
@@ -91,7 +96,12 @@ pub unsafe extern "C" fn mem_store_byte(ctx: *mut Context, loc: *const u32, val:
     // if loc >= ctx.memory_len {
     //     return -1; // Out of bounds
     // }
-    ctx.memory[loc as usize] = byte;
+    
+    // Access memory through pointer
+    unsafe {
+        let memory_slice = std::slice::from_raw_parts_mut(ctx.memory_ptr, ctx.memory_cap as usize);
+        memory_slice[loc as usize] = byte;
+    }
     0
 }
 
@@ -113,7 +123,11 @@ pub unsafe extern "C" fn mem_load(ctx: *const Context, loc: *const u32) -> *cons
     let start = loc as usize;
     let end = end_loc as usize;
 
-    ctx.memory[start..end].as_ptr() as *const Word
+    // Access memory through pointer
+    unsafe {
+        let memory_slice = std::slice::from_raw_parts(ctx.memory_ptr, ctx.memory_cap as usize);
+        memory_slice[start..end].as_ptr() as *const Word
+    }
 }
 
 // Contract calls

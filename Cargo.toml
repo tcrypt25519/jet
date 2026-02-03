@@ -1,7 +1,8 @@
 [workspace]
 members = [
     "crates/jet",
-    "crates/jet_runtime"
+    "crates/jet_runtime",
+    "crates/jet_ir"
 ]
 
 resolver = "3"
