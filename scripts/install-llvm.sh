@@ -1,7 +1,12 @@
 #!/bin/bash
 set -e
 
+# LLVM version configuration
 LLVM_VERSION=21
+LLVM_MINOR_VERSION=1
+LLVM_PATCH_VERSION=0
+LLVM_FULL_VERSION="${LLVM_VERSION}.${LLVM_MINOR_VERSION}.${LLVM_PATCH_VERSION}"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLATFORM=$(bash "$SCRIPT_DIR/detect-platform.sh")
 
@@ -28,7 +33,7 @@ case "$PLATFORM" in
                 sudo grep -l "llvm-toolchain-jammy-${LLVM_VERSION}" /etc/apt/sources.list.d/*.list 2>/dev/null | xargs -r sudo rm -f
             fi
 
-            LLVM_RELEASE="${LLVM_VERSION}.1.0"
+            LLVM_RELEASE="${LLVM_FULL_VERSION}"
             ARCH=$(uname -m)
             case "$ARCH" in
                 x86_64)
