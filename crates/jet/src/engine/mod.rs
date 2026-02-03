@@ -2,7 +2,6 @@ use inkwell::{
     OptimizationLevel,
     context::Context,
     execution_engine::{ExecutionEngine, FunctionLookupError, JitFunction},
-    memory_buffer::MemoryBuffer,
     module::Module,
     support::LLVMString,
 };
@@ -12,14 +11,13 @@ use thiserror::Error;
 use jet_runtime::{
     self, builtins, exec,
     exec::{BlockInfo, ContractFunc, ContractRun},
+    RuntimeBuilder,
 };
 
 use crate::{
     builder,
     builder::{env, env::Env, manager::Manager},
 };
-
-const RUNTIME_IR_FILE: &str = "runtime-ir/jet.ll";
 
 #[derive(Error, Debug)]
 #[error(transparent)]
@@ -109,16 +107,8 @@ impl<'ctx> Engine<'ctx> {
 }
 
 fn load_runtime_module(context: &Context) -> Result<Module, Error> {
-    let file_path = std::path::Path::new(RUNTIME_IR_FILE);
-    let ir = MemoryBuffer::create_from_file(file_path);
-    if let Err(e) = ir {
-        error!(
-            "Failed to load runtime IR file: path={}, error={}",
-            file_path.display(),
-            e
-        );
-        return Err(Error::LLVM(e));
-    }
-    let module = context.create_module_from_ir(ir.unwrap())?;
+    // Use RuntimeBuilder to generate runtime IR instead of loading from file
+    let runtime_builder = RuntimeBuilder::new(context, "JetVM Runtime");
+    let module = runtime_builder.build();
     Ok(module)
 }
