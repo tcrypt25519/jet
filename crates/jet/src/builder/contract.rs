@@ -646,7 +646,7 @@ fn build_code_block(
                 let absolute_pc = code_block.offset + pc;
                 return Err(InvalidOpcode {
                     pc: absolute_pc,
-                    opcode: code_block.rom.get(pc).copied().unwrap_or_default(),
+                    opcode: code_block.rom[pc],
                 }
                 .into());
             }
