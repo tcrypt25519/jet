@@ -9,7 +9,7 @@ use log::{info, trace};
 use jet_runtime::exec::ReturnCode;
 
 use crate::{
-    builder::{env::Env, Error, ops},
+    builder::{env::Env, ops, Error, InvalidOpcode},
     instructions,
     instructions::{Instruction, IteratorItem},
 };
@@ -183,7 +183,7 @@ pub fn build(env: &'_ Env<'_>, name: &str, rom: &[u8]) -> Result<(), Error> {
 
     // Build ROM into IR
     let bctx = BuildCtx::new(env, &builder, func);
-    let code_blocks = find_code_blocks(env, func, rom);
+    let code_blocks = find_code_blocks(env, func, rom)?;
     build_contract_body(&bctx, &code_blocks)?;
 
     // Connect the preamble block to the entry block
@@ -198,7 +198,7 @@ fn find_code_blocks<'ctx, 'b>(
     env: &Env<'ctx>,
     func: FunctionValue<'ctx>,
     bytecode: &'b [u8],
-) -> CodeBlocks<'ctx, 'b> {
+) -> Result<CodeBlocks<'ctx, 'b>, Error> {
     trace!("find_code_blocks: Creating code blocks");
     trace!("find_code_blocks: ROM: {:?}", bytecode);
 
@@ -257,8 +257,11 @@ fn find_code_blocks<'ctx, 'b>(
             }
             IteratorItem::Invalid(pc) => {
                 trace!("find_code_blocks: Found invalid instruction at PC {}", pc);
-                // TODO: return error
-                panic!("Invalid instruction at PC {}", pc)
+                return Err(InvalidOpcode {
+                    pc,
+                    opcode: bytecode[pc],
+                }
+                .into());
             }
         }
     }
@@ -279,7 +282,7 @@ fn find_code_blocks<'ctx, 'b>(
         trace!("find_code_blocks:   Block at offset {}:", block.offset);
         trace!("find_code_blocks:   {:?}", block.rom);
     }
-    blocks
+    Ok(blocks)
 }
 
 fn build_contract_body<'ctx, 'b>(
@@ -638,9 +641,14 @@ fn build_code_block(
                     Instruction::PUSH32 => Err(Error::UnexpectedInstruction(Instruction::PUSH32)),
                 }
             }
-            IteratorItem::Invalid(_) => {
+            IteratorItem::Invalid(pc) => {
                 trace!("loop: Invalid");
-                return Err(Error::UnknownInstruction(0));
+                let absolute_pc = code_block.offset + pc;
+                return Err(InvalidOpcode {
+                    pc: absolute_pc,
+                    opcode: code_block.rom.get(pc).copied().unwrap_or_default(),
+                }
+                .into());
             }
         }?
     }
@@ -682,4 +690,3 @@ fn build_jump_table(
     )?;
     Ok(())
 }
-
