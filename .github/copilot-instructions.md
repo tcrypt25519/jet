@@ -13,7 +13,7 @@
   - `crates/jet/src/lib.rs` (exports), `builder/{contract,env,manager,ops}.rs`, `engine/mod.rs`, `instructions.rs`, `bin/jetdbg.rs`, `tests/test_roms.rs` (+ `roms/` fixtures).
   - `crates/jet_runtime/src/{lib,exec,builtins,symbols}.rs`, `binding/mod.rs`.
 - Docs: `docs/architecture*.md`, `docs/jet-description.md`, `docs/TREE.md`, `docs/manifesto.md`, `docs/plans/2026-01-27-restore-build-system.md`, `docs/build-restoration/*`.
-- CI: GitHub Actions workflows present for Copilot code review and Copilot coding agent (`dynamic/copilot-*/copilot`). No other workflows found.
+- CI: No GitHub Actions workflows are defined in this repository (no `.github/workflows` directory present).
 
 ## Toolchain & dependencies
 - Rust: no pinned `rust-toolchain`; workspace uses edition 2024 (`crates/jet`) and 2021 (`crates/jet_runtime`). `cargo` locked crates assuming Rust ≥1.93 (seen during `cargo check`).
