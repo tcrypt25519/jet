@@ -9,11 +9,21 @@ pub mod manager;
 pub(crate) mod ops;
 
 #[derive(Error, Debug)]
+#[error("invalid opcode 0x{opcode:02x} at pc {pc}")]
+pub struct InvalidOpcode {
+    pub pc: usize,
+    pub opcode: u8,
+}
+
+#[derive(Error, Debug)]
 pub enum Error {
     #[error(transparent)]
     Builder(#[from] BuilderError),
     #[error(transparent)]
     LLVM(#[from] LLVMString),
+
+    #[error(transparent)]
+    InvalidOpcode(#[from] InvalidOpcode),
 
     #[error("verify error")]
     Verify,
