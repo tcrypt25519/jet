@@ -216,8 +216,7 @@ fn find_code_blocks<'ctx, 'b>(
             IteratorItem::Instr(pc, instr) => {
                 trace!(
                     "find_code_blocks: Found instruction {:?} at PC {}",
-                    instr,
-                    pc
+                    instr, pc
                 );
                 match instr {
                     // Instructions that terminate a block
@@ -433,15 +432,15 @@ fn build_code_block(
                             ops::jumpi(bctx, jump_block, following_block.basic_block)
                         }
                         (Some(_), None) => {
-                            return Err(Error::invariant_violation("JUMPI without following block"))
+                            return Err(Error::invariant_violation("JUMPI without following block"));
                         }
                         (None, Some(_)) => {
-                            return Err(Error::invariant_violation("JUMPI without jump block"))
+                            return Err(Error::invariant_violation("JUMPI without jump block"));
                         }
                         (None, None) => {
                             return Err(Error::invariant_violation(
                                 "JUMPI without jump or following blocks",
-                            ))
+                            ));
                         }
                     },
 

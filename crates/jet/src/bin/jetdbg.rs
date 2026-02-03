@@ -243,4 +243,3 @@ fn new_test_block_info_hash_history() -> exec::HashHistory {
 
     hash_history
 }
-

@@ -1,9 +1,9 @@
 use inkwell::{
+    OptimizationLevel,
     context::Context,
     execution_engine::{ExecutionEngine, FunctionLookupError, JitFunction},
     memory_buffer::MemoryBuffer,
     module::Module,
-    OptimizationLevel,
     support::LLVMString,
 };
 use log::{error, info, trace};
@@ -122,4 +122,3 @@ fn load_runtime_module(context: &Context) -> Result<Module, Error> {
     let module = context.create_module_from_ir(ir.unwrap())?;
     Ok(module)
 }
-

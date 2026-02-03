@@ -3,12 +3,12 @@ use syntect::{
     easy::HighlightLines,
     highlighting::{Color, Style, ThemeSet},
     parsing::SyntaxSet,
-    util::{as_24_bit_terminal_escaped, LinesWithEndings},
+    util::{LinesWithEndings, as_24_bit_terminal_escaped},
 };
 
 use jet_runtime::exec;
 
-use crate::builder::{contract, env::Env, Error};
+use crate::builder::{Error, contract, env::Env};
 
 pub struct Manager<'ctx> {
     build_env: Env<'ctx>,
@@ -74,4 +74,3 @@ impl<'ctx> Manager<'ctx> {
         println!();
     }
 }
-

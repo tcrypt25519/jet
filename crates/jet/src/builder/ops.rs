@@ -8,7 +8,7 @@ use inkwell::{
 use jet_runtime::exec::ReturnCode;
 
 use crate::{
-    builder::{contract::BuildCtx, Error},
+    builder::{Error, contract::BuildCtx},
     instructions::Instruction,
 };
 
@@ -813,4 +813,3 @@ pub(crate) fn invalid(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
 pub(crate) fn selfdestruct(_bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     Err(Error::UnimplementedInstruction(Instruction::SELFDESTRUCT))
 }
-

@@ -15,4 +15,3 @@ pub const FN_CONTRACT_CALL_RETURN_DATA_COPY: &str = "jet.contracts.call_return_d
 pub const FN_KECCAK256: &str = "jet.ops.keccak256";
 
 pub const FN_CONTRACT_PREFIX: &str = "jet.contracts.";
-

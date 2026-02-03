@@ -1,7 +1,7 @@
 use inkwell::execution_engine::ExecutionEngine;
 use log::error;
 
-use crate::{*, symbols::FN_CONTRACT_PREFIX};
+use crate::{symbols::FN_CONTRACT_PREFIX, *};
 
 pub type Word = [u8; 32];
 pub type Hash = [u8; 32];
@@ -298,4 +298,3 @@ pub fn jet_contract_fn_lookup(jit_engine: &ExecutionEngine, addr_slice: &[u8]) -
         }
     }
 }
-
