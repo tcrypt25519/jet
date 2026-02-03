@@ -32,6 +32,9 @@ make build
 
 **Termux:** Requires `gcc-default` and `ndk-multilib-native-static` packages (installed by `make install-llvm`)
 
+**Ubuntu 24.04 (noble):** The LLVM 21 packages are not published for the noble apt.llvm.org repo yet, so
+`make install-llvm` falls back to the official LLVM 21 binary release for Linux.
+
 ### Running jetdbg
 
 The `jetdbg` command allows you to debug and execute EVM contracts using Jet. To run it:
@@ -43,4 +46,3 @@ cargo run --bin jetdbg
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-

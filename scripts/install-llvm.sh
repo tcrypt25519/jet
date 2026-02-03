@@ -22,8 +22,37 @@ case "$PLATFORM" in
             sudo bash "$SCRIPT_DIR/llvm.sh" ${LLVM_VERSION}
         fi
         sudo apt-get update
-        sudo apt-get install -y llvm-${LLVM_VERSION} llvm-${LLVM_VERSION}-dev clang-${LLVM_VERSION}
-        LLVM_PREFIX="/usr/lib/llvm-${LLVM_VERSION}"
+        if ! apt-cache show "llvm-${LLVM_VERSION}" &> /dev/null; then
+            echo "LLVM ${LLVM_VERSION} packages not found for this distro; falling back to official LLVM binaries."
+            if ls /etc/apt/sources.list.d/*.list >/dev/null 2>&1; then
+                sudo grep -l "llvm-toolchain-jammy-${LLVM_VERSION}" /etc/apt/sources.list.d/*.list 2>/dev/null | xargs -r sudo rm -f
+            fi
+
+            LLVM_RELEASE="${LLVM_VERSION}.1.0"
+            ARCH=$(uname -m)
+            case "$ARCH" in
+                x86_64)
+                    LLVM_TARBALL="LLVM-${LLVM_RELEASE}-Linux-X64.tar.xz"
+                    ;;
+                aarch64|arm64)
+                    LLVM_TARBALL="LLVM-${LLVM_RELEASE}-Linux-ARM64.tar.xz"
+                    ;;
+                *)
+                    echo "ERROR: Unsupported architecture for LLVM binaries: ${ARCH}"
+                    exit 1
+                    ;;
+            esac
+
+            LLVM_URL="https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_RELEASE}/${LLVM_TARBALL}"
+            sudo mkdir -p "/opt/llvm-${LLVM_VERSION}"
+            sudo rm -rf "/opt/llvm-${LLVM_VERSION:?}/"*
+            curl -L "${LLVM_URL}" | sudo tar -xJ --strip-components=1 -C "/opt/llvm-${LLVM_VERSION}"
+            sudo ln -sf "/opt/llvm-${LLVM_VERSION}/bin/llvm-config" "/usr/local/bin/llvm-config-${LLVM_VERSION}"
+            LLVM_PREFIX="/opt/llvm-${LLVM_VERSION}"
+        else
+            sudo apt-get install -y llvm-${LLVM_VERSION} llvm-${LLVM_VERSION}-dev clang-${LLVM_VERSION} libpolly-${LLVM_VERSION}-dev
+            LLVM_PREFIX="/usr/lib/llvm-${LLVM_VERSION}"
+        fi
         ;;
 
     *)
