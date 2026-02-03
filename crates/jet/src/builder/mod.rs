@@ -39,4 +39,3 @@ impl Error {
         Error::InvariantViolation(msg.into())
     }
 }
-

@@ -2,8 +2,8 @@ use inkwell::execution_engine::ExecutionEngine;
 use log::trace;
 
 use crate::{
-    ADDRESS_SIZE_BYTES,
-    exec::{Context, ContractFunc, jet_contract_fn_lookup, ReturnCode, Word}, WORD_SIZE_BYTES,
+    exec::{jet_contract_fn_lookup, Context, ContractFunc, ReturnCode, Word},
+    ADDRESS_SIZE_BYTES, WORD_SIZE_BYTES,
 };
 
 //  Core
@@ -226,4 +226,3 @@ pub extern "C" fn jet_ops_keccak256(buffer: &mut [u8; 32]) -> u8 {
     }
     0
 }
-

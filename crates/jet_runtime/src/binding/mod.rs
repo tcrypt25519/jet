@@ -2,7 +2,7 @@ use std::fmt;
 
 use colored::Colorize;
 
-use crate::{ADDRESS_SIZE_BYTES, exec};
+use crate::{exec, ADDRESS_SIZE_BYTES};
 
 impl fmt::Display for exec::BlockInfo {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -122,4 +122,3 @@ impl fmt::Display for exec::ContractRun {
         )
     }
 }
-
