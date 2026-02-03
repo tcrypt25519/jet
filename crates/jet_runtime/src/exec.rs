@@ -71,10 +71,10 @@ impl Context {
 
     pub fn return_data(&self) -> &[u8] {
         let offset = self.return_off as usize;
-        let end = offset + self.return_len as usize;
+        let len = self.return_len as usize;
         // TODO: Check bounds
         unsafe {
-            std::slice::from_raw_parts(self.memory_ptr.add(offset), end - offset)
+            std::slice::from_raw_parts(self.memory_ptr.add(offset), len)
         }
     }
 
