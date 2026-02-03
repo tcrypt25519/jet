@@ -459,15 +459,12 @@ target triple = "x86_64-apple-macosx14.0.0"
 
 **Recommendation:** Generate target-specific IR at build time or use target-agnostic IR where possible.
 
-#### Duplicated Runtime IR
+#### Runtime IR Location
 
-**Locations:**
+**Location:**
 - `/workspace/runtime-ir/jet.ll`
-- `/workspace/crates/jet/runtime-ir/jet.ll`
 
-**Issue:** Two copies of the same file create synchronization risk.
-
-**Recommendation:** Single source of truth, symlink or copy at build time.
+**Note:** This is the single source of truth for the runtime module layout.
 
 #### Panic in Symbol Loading
 
@@ -581,9 +578,7 @@ pub struct Context {
 ### 4.4 Build System Notes
 
 - **LLVM 18:** The project is hard-pinned to LLVM 18. Do not attempt to upgrade without a full audit.
-- **Runtime IR:** `runtime-ir/jet.ll` is the source of truth for the runtime module layout.
-- `runtime-ir/jet.ll` must be present at compile time (loaded by Engine)
-- Same file duplicated in `crates/jet/runtime-ir/jet.ll`
+- **Runtime IR:** `runtime-ir/jet.ll` is the single source of truth for the runtime module layout and must be present at compile time (loaded by Engine)
 - Target triple hardcoded to `x86_64-apple-macosx14.0.0` (needs platform abstraction)
 
 ### 4.5 Assumed Dependencies
