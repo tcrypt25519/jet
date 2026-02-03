@@ -9,7 +9,7 @@ use log::{info, trace};
 use jet_runtime::exec::ReturnCode;
 
 use crate::{
-    builder::{Error, env::Env, ops},
+    builder::{env::Env, ops, Error, InvalidOpcode},
     instructions,
     instructions::{Instruction, IteratorItem},
 };
@@ -183,7 +183,7 @@ pub fn build(env: &'_ Env<'_>, name: &str, rom: &[u8]) -> Result<(), Error> {
 
     // Build ROM into IR
     let bctx = BuildCtx::new(env, &builder, func);
-    let code_blocks = find_code_blocks(env, func, rom);
+    let code_blocks = find_code_blocks(env, func, rom)?;
     build_contract_body(&bctx, &code_blocks)?;
 
     // Connect the preamble block to the entry block
