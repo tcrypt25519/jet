@@ -4,82 +4,145 @@
 #[cfg(test)]
 mod layout_verification_tests {
     use inkwell::context::Context as LLVMContext;
+    use inkwell::types::AnyTypeEnum;
     use jet_ir::Types;
     use crate::exec::Context;
     use std::mem;
 
+    /// Field indices for exec_ctx structure
+    #[derive(Debug, Clone, Copy)]
+    #[repr(u32)]
+    enum ExecCtxField {
+        StackPtr = 0,
+        JumpPtr = 1,
+        ReturnOffset = 2,
+        ReturnLength = 3,
+        SubCall = 4,
+        Stack = 5,
+        MemoryPtr = 6,
+        MemoryLen = 7,
+        MemoryCap = 8,
+    }
+
+    impl ExecCtxField {
+        const FIELD_COUNT: u32 = 9;
+
+        fn index(self) -> u32 {
+            self as u32
+        }
+
+        fn expected_type_kind(self) -> TypeKind {
+            match self {
+                ExecCtxField::StackPtr => TypeKind::Int,
+                ExecCtxField::JumpPtr => TypeKind::Int,
+                ExecCtxField::ReturnOffset => TypeKind::Int,
+                ExecCtxField::ReturnLength => TypeKind::Int,
+                ExecCtxField::SubCall => TypeKind::Pointer,
+                ExecCtxField::Stack => TypeKind::Array,
+                ExecCtxField::MemoryPtr => TypeKind::Pointer,
+                ExecCtxField::MemoryLen => TypeKind::Int,
+                ExecCtxField::MemoryCap => TypeKind::Int,
+            }
+        }
+    }
+
+    #[derive(Debug, PartialEq)]
+    enum TypeKind {
+        Int,
+        Pointer,
+        Array,
+    }
+
+    fn get_type_kind(ty: AnyTypeEnum) -> TypeKind {
+        if ty.is_int_type() {
+            TypeKind::Int
+        } else if ty.is_pointer_type() {
+            TypeKind::Pointer
+        } else if ty.is_array_type() {
+            TypeKind::Array
+        } else {
+            panic!("Unexpected type kind: {:?}", ty)
+        }
+    }
+
     #[test]
     fn test_context_struct_size() {
-        // Verify the Rust Context struct has expected size
         let context_size = mem::size_of::<Context>();
         
         // Expected: 4 + 4 + 4 + 4 + 8 + (1024 * 32) + 8 + 4 + 4 = 32,808 bytes
-        // Fields: stack_ptr, jump_ptr, return_off, return_len, sub_call, stack, memory_ptr, memory_len, memory_cap
-        
-        println!("Context struct size: {} bytes", context_size);
-        
         // Note: Actual size may be larger due to alignment padding
-        // The minimum expected size is 32,808 bytes
-        assert!(context_size >= 32_808, "Context size {} is less than expected minimum 32,808", context_size);
+        const MIN_EXPECTED_SIZE: usize = 32_808;
+        
+        assert!(
+            context_size >= MIN_EXPECTED_SIZE,
+            "Context size {} is less than expected minimum {}",
+            context_size, MIN_EXPECTED_SIZE
+        );
     }
 
     #[test]
-    fn test_llvm_exec_ctx_type() {
-        // Verify the LLVM exec_ctx type is constructed correctly
+    fn test_llvm_exec_ctx_field_count() {
         let llvm_context = LLVMContext::create();
         let types = Types::new(&llvm_context);
         
-        // Get the exec_ctx type
-        let exec_ctx = types.exec_ctx;
-        
-        // Verify it has the expected number of fields
-        let field_count = exec_ctx.count_fields();
-        assert_eq!(field_count, 9, "exec_ctx should have 9 fields, got {}", field_count);
-        
-        println!("exec_ctx field count: {}", field_count);
+        let field_count = types.exec_ctx.count_fields();
+        assert_eq!(
+            field_count, ExecCtxField::FIELD_COUNT,
+            "exec_ctx should have {} fields, got {}",
+            ExecCtxField::FIELD_COUNT, field_count
+        );
     }
 
     #[test]
-    fn test_memory_ptr_field_offset() {
-        // Verify memory_ptr is at the expected field index (field 6)
+    fn test_exec_ctx_field_types() {
         let llvm_context = LLVMContext::create();
         let types = Types::new(&llvm_context);
         
-        // Field indices in exec_ctx:
-        // 0: stack_ptr (i32)
-        // 1: jump_ptr (i32)
-        // 2: return_offset (i32)
-        // 3: return_length (i32)
-        // 4: sub_call (ptr)
-        // 5: stack ([1024 x i256])
-        // 6: memory_ptr (ptr)
-        // 7: memory_len (i32)
-        // 8: memory_cap (i32)
-        
-        let memory_ptr_field = types.exec_ctx.get_field_type_at_index(6).unwrap();
-        assert!(memory_ptr_field.is_pointer_type(), "Field 6 should be a pointer type");
-        
-        let memory_len_field = types.exec_ctx.get_field_type_at_index(7).unwrap();
-        assert!(memory_len_field.is_int_type(), "Field 7 should be an int type");
-        
-        let memory_cap_field = types.exec_ctx.get_field_type_at_index(8).unwrap();
-        assert!(memory_cap_field.is_int_type(), "Field 8 should be an int type");
+        // Test each field has the expected type
+        let fields_to_test = [
+            ExecCtxField::StackPtr,
+            ExecCtxField::JumpPtr,
+            ExecCtxField::ReturnOffset,
+            ExecCtxField::ReturnLength,
+            ExecCtxField::SubCall,
+            ExecCtxField::Stack,
+            ExecCtxField::MemoryPtr,
+            ExecCtxField::MemoryLen,
+            ExecCtxField::MemoryCap,
+        ];
+
+        for field in fields_to_test {
+            let field_type = types.exec_ctx
+                .get_field_type_at_index(field.index())
+                .unwrap_or_else(|| panic!("Failed to get field type for {:?}", field));
+            
+            let actual_kind = get_type_kind(field_type);
+            let expected_kind = field.expected_type_kind();
+            
+            assert_eq!(
+                actual_kind, expected_kind,
+                "Field {:?} (index {}) has wrong type: expected {:?}, got {:?}",
+                field, field.index(), expected_kind, actual_kind
+            );
+        }
     }
 
     #[test]
-    fn test_stack_field() {
-        // Verify stack is an array of i256
+    fn test_stack_field_details() {
         let llvm_context = LLVMContext::create();
         let types = Types::new(&llvm_context);
         
-        let stack_field = types.exec_ctx.get_field_type_at_index(5).unwrap();
-        assert!(stack_field.is_array_type(), "Field 5 (stack) should be an array type");
+        let stack_field = types.exec_ctx
+            .get_field_type_at_index(ExecCtxField::Stack.index())
+            .unwrap();
+        
+        assert!(stack_field.is_array_type(), "Stack field should be array type");
         
         let stack_array = stack_field.into_array_type();
-        assert_eq!(stack_array.len(), 1024, "Stack array should have 1024 elements");
+        assert_eq!(stack_array.len(), 1024, "Stack should have 1024 elements");
         
         let element_type = stack_array.get_element_type();
-        assert!(element_type.is_int_type(), "Stack element should be int type");
+        assert!(element_type.is_int_type(), "Stack elements should be int type");
         
         let element_int = element_type.into_int_type();
         assert_eq!(element_int.get_bit_width(), 256, "Stack elements should be i256");
