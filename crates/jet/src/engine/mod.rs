@@ -107,7 +107,6 @@ impl<'ctx> Engine<'ctx> {
 }
 
 fn load_runtime_module(context: &Context) -> Result<Module, Error> {
-    // Use RuntimeBuilder to generate runtime IR instead of loading from file
     let runtime_builder = RuntimeBuilder::new(context, "JetVM Runtime");
     let module = runtime_builder.build();
     Ok(module)

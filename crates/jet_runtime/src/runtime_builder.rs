@@ -1,6 +1,4 @@
-/// Runtime builder module - generates LLVM IR for runtime functions.
-/// This module implements ADR-001 by defining runtime functions as IR built with Inkwell
-/// instead of handwritten IR or compiled Rust code.
+/// Runtime builder - generates LLVM IR for runtime functions.
 
 use inkwell::{
     builder::Builder,
@@ -10,8 +8,7 @@ use inkwell::{
 };
 use jet_ir::Types;
 
-/// RuntimeBuilder generates LLVM IR for all runtime functions.
-/// This replaces the handwritten runtime-ir/jet.ll file.
+/// RuntimeBuilder generates LLVM IR for runtime functions.
 pub struct RuntimeBuilder<'ctx> {
     context: &'ctx Context,
     module: Module<'ctx>,

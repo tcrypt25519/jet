@@ -1,6 +1,6 @@
-/// Unified LLVM type system for Jet EVM JIT compiler.
-/// This module defines all LLVM types used by both runtime and contract builders
-/// to ensure consistent memory layouts across the system.
+/// Unified LLVM type system.
+/// Defines all LLVM types used by both runtime and contract builders
+/// to ensure consistent memory layouts.
 
 use inkwell::{
     AddressSpace,
@@ -28,7 +28,7 @@ pub struct Types<'ctx> {
     // Architecture
     pub stack: ArrayType<'ctx>,
 
-    // Memory fields (now individual fields instead of struct)
+    // Memory fields
     pub mem_ptr: PointerType<'ctx>,
     pub mem_len: IntType<'ctx>,
     pub mem_cap: IntType<'ctx>,
@@ -46,8 +46,8 @@ pub struct Types<'ctx> {
 }
 
 impl<'ctx> Types<'ctx> {
-    /// Create a new unified type registry from an LLVM context.
-    /// This uses pointer-based memory representation as per layout-mismatch-analysis.md.
+    /// Create a new type registry from an LLVM context.
+    /// Uses pointer-based memory representation as per ADR-002.
     pub fn new(context: &'ctx Context) -> Self {
         // Primitives
         let i8 = context.i8_type();
@@ -61,8 +61,7 @@ impl<'ctx> Types<'ctx> {
         // Architecture
         let stack = i256.array_type(STACK_SIZE_WORDS);
 
-        // Memory fields - using pointer-based representation
-        // as recommended in docs/layout-mismatch-analysis.md
+        // Memory fields
         let mem_ptr = ptr;
         let mem_len = i32;
         let mem_cap = i32;
@@ -73,7 +72,7 @@ impl<'ctx> Types<'ctx> {
         let return_offset = i32;
         let return_length = i32;
 
-        // Execution context structure with unified memory layout
+        // Execution context structure
         // Field order:
         // 0: stack_ptr (i32)
         // 1: jump_ptr (i32)
@@ -81,7 +80,7 @@ impl<'ctx> Types<'ctx> {
         // 3: return_length (i32)
         // 4: sub_call (ptr)
         // 5: stack ([1024 x i256])
-        // 6: memory_ptr (ptr) - changed from struct to individual fields
+        // 6: memory_ptr (ptr)
         // 7: memory_len (i32)
         // 8: memory_cap (i32)
         let exec_ctx = context.struct_type(
@@ -92,9 +91,9 @@ impl<'ctx> Types<'ctx> {
                 return_length.into(),
                 ptr.into(),
                 stack.into(),
-                mem_ptr.into(),    // Changed: now individual ptr field
-                mem_len.into(),    // Changed: now at struct level
-                mem_cap.into(),    // Changed: now at struct level
+                mem_ptr.into(),
+                mem_len.into(),
+                mem_cap.into(),
             ],
             PACK_STRUCTS,
         );
