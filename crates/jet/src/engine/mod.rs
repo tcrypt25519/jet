@@ -79,14 +79,8 @@ impl<'ctx> Engine<'ctx> {
         // Link in the JIT engine
         ee.add_global_mapping(&sym.jit_engine(), ee as *const ExecutionEngine as usize);
 
-        // Link in runtime functions
-        map_fn(sym.stack_push_ptr(), builtins::stack_push_ptr as usize);
-        map_fn(sym.stack_pop(), builtins::stack_pop as usize);
-        map_fn(sym.stack_peek(), builtins::stack_peek as usize);
-        map_fn(sym.stack_swap(), builtins::stack_swap as usize);
-        map_fn(sym.mem_store(), builtins::mem_store as usize);
-        map_fn(sym.mem_store_byte(), builtins::mem_store_byte as usize);
-        map_fn(sym.mem_load(), builtins::mem_load as usize);
+        // Link in external runtime functions (contract calls and crypto)
+        // Stack and memory operations are now generated as IR, so they don't need linking
         map_fn(sym.contract_call(), builtins::jet_contract_call as usize);
         map_fn(
             sym.contract_call_return_data_copy(),
