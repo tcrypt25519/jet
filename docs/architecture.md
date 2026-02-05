@@ -1,4 +1,4 @@
-# JET Architecture Documentation
+# Jet Architecture Documentation
 
 ## Table of Contents
 
