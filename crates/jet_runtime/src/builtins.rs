@@ -52,7 +52,8 @@ pub unsafe extern "C" fn jet_contract_call(
 
     let ret_dest = unsafe { *ret_dest };
     let ret_len = unsafe { *ret_len };
-    let copy_ret = unsafe { jet_contract_call_return_data_copy(ctx, callee_ctx, ret_dest, 0, ret_len) };
+    let copy_ret =
+        unsafe { jet_contract_call_return_data_copy(ctx, callee_ctx, ret_dest, 0, ret_len) };
     copy_ret as i8
 }
 
