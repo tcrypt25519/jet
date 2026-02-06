@@ -21,7 +21,7 @@ pub struct Context {
     sub_call: Option<Box<Context>>,
     stack: [Word; STACK_SIZE_WORDS as usize],
 
-    // Changed to pointer-based memory layout as per layout-mismatch-analysis.md
+    // Pointer-based memory layout as per ADR-002
     pub(crate) memory_ptr: *mut u8,
     pub(crate) memory_len: u32,
     pub(crate) memory_cap: u32,

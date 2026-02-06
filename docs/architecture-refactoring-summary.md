@@ -1,18 +1,16 @@
-# Architecture Refactoring Summary
+# Runtime Architecture
 
-**Date:** 2026-02-03  
-**Status:** Implemented  
-**Related:** ADR-001, layout-mismatch-analysis.md
+**Related:** ADR-001, ADR-002
 
 ## Overview
 
-This document summarizes the major architectural refactoring that implements ADR-001 and resolves the memory layout mismatches identified in layout-mismatch-analysis.md.
+The Jet runtime uses a unified type system and programmatically generated LLVM IR to ensure type safety and consistency across all components.
 
-## Key Changes
+## Architecture Components
 
-### 1. New `jet_ir` Crate (Shared IR Layer)
+### `jet_ir` Crate (Shared IR Layer)
 
-A new crate `crates/jet_ir` has been introduced to hold shared LLVM IR types and constants:
+The `jet_ir` crate provides shared LLVM IR types and constants used throughout the system:
 
 ```
 crates/jet_ir/
@@ -30,9 +28,9 @@ crates/jet_ir/
 
 **Key Type:** `Types<'ctx>` - Contains all LLVM types (i8, i32, i256, exec_ctx, etc.)
 
-### 2. Runtime Builder (IR Generation)
+### Runtime Builder (IR Generation)
 
-The `jet_runtime` crate now includes a `RuntimeBuilder` that generates LLVM IR programmatically:
+The `RuntimeBuilder` in `jet_runtime` generates LLVM IR programmatically:
 
 **File:** `crates/jet_runtime/src/runtime_builder.rs`
 
@@ -41,17 +39,20 @@ let runtime_builder = RuntimeBuilder::new(context, "JetVM Runtime");
 let module = runtime_builder.build();
 ```
 
-**Features:**
-- Declares forward references to Rust builtins (stack, memory, contract ops)
-- Generates IR functions like `jet.stack.push.i256`
+**Generated Functions:**
+- Stack operations: `jet.stack.push.i256`, `jet.stack.push.ptr`, `jet.stack.pop`, `jet.stack.peek`, `jet.stack.swap`
+- Memory operations: `jet.mem.load`, `jet.mem.store.word`, `jet.mem.store.byte`
 - Uses `Types` from `jet_ir` for consistent type definitions
-- Replaces handwritten `runtime-ir/jet.ll`
 
-### 3. Unified Memory Model
+**External Functions:**
+- Contract calls and return data handling (complex logic in Rust)
+- Crypto operations like keccak256 (requires external dependencies)
 
-The memory layout has been standardized to use **pointer-based representation** across all three layers:
+### Memory Model
 
-#### exec_ctx Structure (Unified Layout)
+The execution context uses pointer-based memory representation as defined in ADR-002:
+
+#### exec_ctx Structure
 
 ```
 struct exec_ctx {
@@ -61,25 +62,20 @@ struct exec_ctx {
     return_length: i32,     // Offset 12
     sub_call: ptr,          // Offset 16
     stack: [1024 x i256],   // Offset 24
-    memory_ptr: ptr,        // Offset 32,792  (CHANGED from inline array)
-    memory_len: i32,        // Offset 32,800  (CHANGED from nested struct)
-    memory_cap: i32,        // Offset 32,804  (CHANGED from nested struct)
+    memory_ptr: ptr,        // Offset 32,792
+    memory_len: i32,        // Offset 32,800
+    memory_cap: i32,        // Offset 32,804
 }
 Total: 32,808 bytes
 ```
 
-**Changes Made:**
-1. **Rust Context** (`crates/jet_runtime/src/exec.rs`): Changed from inline array `[u8; 32768]` to `memory_ptr: *mut u8`
-2. **Types Definition** (`crates/jet_ir/src/types.rs`): Uses individual fields `mem_ptr`, `mem_len`, `mem_cap` instead of nested struct
-3. **Generated IR** (`RuntimeBuilder`): Generates consistent structure using the unified Types
+**Memory Management:**
+- Heap-allocated buffer pointed to by `memory_ptr`
+- `memory_len` tracks current usage
+- `memory_cap` tracks allocated capacity
+- Allows dynamic memory growth as per EVM semantics
 
-**Benefits:**
-- Eliminates 32KB+ size difference between definitions
-- Allows dynamic memory growth
-- Matches EVM semantics
-- Reduces memory layout definitions from 3 to 2
-
-### 4. Crate Dependencies
+### Crate Dependencies
 
 ```
 ┌─────────────┐
@@ -108,17 +104,17 @@ Total: 32,808 bytes
 **Dependency Flow:**
 - `jet` → `jet_ir` + `jet_runtime`
 - `jet_runtime` → `jet_ir`
-- All use the same `Types` definition
+- All components use the same `Types` definition
 
-### 5. Constants Migration
+### Constants
 
-EVM and runtime constants moved to `jet_ir`:
+EVM and runtime constants are defined in `jet_ir`:
 
 ```rust
 // System architecture (EVM-defined)
 pub const WORD_SIZE_BYTES: u32 = 32;
 pub const STACK_SIZE_WORDS: u32 = 1024;
-pub const ADDRESS_SIZE_BYTES: usize = 20;  // Fixed: was 2, now 20 (EVM standard)
+pub const ADDRESS_SIZE_BYTES: usize = 20;
 pub const BLOCK_HASH_HISTORY_SIZE: usize = 256;
 
 // Runtime sizes (Jet-defined)
@@ -129,9 +125,9 @@ pub const SUB_CALL_RETURN_MAX_SIZE_WORDS: u32 = 1024;
 
 ## Implementation Details
 
-### Memory Management
+### Memory Management in Context
 
-The `Context` struct now allocates memory on the heap:
+The `Context` struct allocates memory on the heap:
 
 ```rust
 impl Context {
@@ -153,7 +149,7 @@ impl Drop for Context {
 
 ### Runtime Function Generation
 
-Example of programmatic IR generation:
+IR functions are generated using Inkwell:
 
 ```rust
 fn build_stack_push_i256(&self) -> FunctionValue<'ctx> {
@@ -167,54 +163,20 @@ fn build_stack_push_i256(&self) -> FunctionValue<'ctx> {
 }
 ```
 
-## Benefits Achieved
+## Benefits
 
-1. **Type Safety**: IR generation checked at Rust compile time
-2. **Correctness**: Fixed memory layout mismatches that caused runtime corruption
-3. **Maintainability**: Type changes propagate automatically
-4. **Flexibility**: Easy to add new runtime functions
-5. **Performance**: Better memory efficiency with pointer-based approach
-6. **Alignment with ADR-001**: Runtime fully defined via IR builder, not compiled Rust
-
-## Files Changed
-
-### Added
-- `crates/jet_ir/` (entire crate)
-- `crates/jet_runtime/src/runtime_builder.rs`
-- `runtime-ir/DEPRECATED.md`
-
-### Modified
-- `crates/jet_runtime/src/exec.rs` (Context struct, memory access)
-- `crates/jet_runtime/src/builtins.rs` (memory access through pointer)
-- `crates/jet_runtime/src/lib.rs` (re-exports)
-- `crates/jet/src/builder/env.rs` (removed local Types, use jet_ir)
-- `crates/jet/src/engine/mod.rs` (use RuntimeBuilder)
-- `crates/jet/src/bin/jetdbg.rs` (fix ADDRESS_SIZE_BYTES)
-- `Cargo.toml` (workspace members)
-- Both crate `Cargo.toml` files (dependencies)
-
-### Deprecated
-- `runtime-ir/jet.ll` (no longer loaded, kept for reference)
-
-## Testing Status
-
-- ✅ Code compiles successfully (`cargo check`)
-- ✅ Types are unified across crates
-- ✅ Memory layout consistent
-- ⚠️ Full test suite requires LLVM linking fixes (environment issue)
-
-## Future Work
-
-1. Add more IR-generated runtime functions (currently implemented: `jet.stack.push.i256`, `jet.stack.push.ptr`, `jet.stack.pop`, `jet.stack.peek`, `jet.stack.swap`, `jet.mem.load`, `jet.mem.store.word`, `jet.mem.store.byte`)
-2. Remove deprecated `runtime-ir/jet.ll` after validation
-3. Add layout verification tests
-4. Consider implementing small buffer optimization (SBO) for memory
-5. Update remaining documentation references
+- **Type Safety**: IR generation checked at Rust compile time
+- **Correctness**: Consistent memory layouts prevent corruption
+- **Maintainability**: Type changes propagate automatically
+- **Flexibility**: Easy to add new runtime functions
+- **Performance**: LLVM optimizations apply to generated IR
+- **ADR-001 Compliance**: Runtime defined via IR builder
 
 ## References
 
 - [ADR-001](adrs/adr-001.md): EVM Word Representation and Runtime Implementation Strategy
-- [Layout Mismatch Analysis](layout-mismatch-analysis.md): Critical layout mismatches
+- [ADR-002](adrs/adr-002.md): Pointer-Based Memory Representation
 - [Architecture](architecture.md): System architecture overview
 - Runtime Builder: `crates/jet_runtime/src/runtime_builder.rs`
 - Unified Types: `crates/jet_ir/src/types.rs`
+
