@@ -96,6 +96,17 @@ pub unsafe extern "C" fn jet_contract_call_return_data_copy(
     //     return 3;
     // }
 
+    // Ensure memory is large enough for the write
+    let required_memory_len = dest_offset + requested_ret_len;
+    if ctx.memory_len() < required_memory_len {
+        if required_memory_len > ctx.memory_cap() {
+            // TODO: Expand memory capacity
+            return 5; // Memory expansion needed but not implemented
+        }
+        // Expand memory length to accommodate the write
+        ctx.memory_len = required_memory_len;
+    }
+
     // Copy the data
     let src_range = src_offset as usize..(src_offset + requested_ret_len) as usize;
     let dest_range = dest_offset as usize..(dest_offset + requested_ret_len) as usize;
