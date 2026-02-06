@@ -5,13 +5,12 @@ use inkwell::{
     module::Module,
     support::LLVMString,
 };
-use log::{error, info, trace};
+use log::{info, trace};
 use thiserror::Error;
 
 use jet_runtime::{
-    self, builtins, exec,
+    self, RuntimeBuilder, builtins, exec,
     exec::{BlockInfo, ContractFunc, ContractRun},
-    RuntimeBuilder,
 };
 
 use crate::{
@@ -81,26 +80,32 @@ impl<'ctx> Engine<'ctx> {
 
         // Link in external runtime functions (contract calls and crypto)
         // Stack and memory operations are now generated as IR, so they don't need linking
-        map_fn(sym.contract_call(), builtins::jet_contract_call as usize);
+        map_fn(
+            sym.contract_call(),
+            builtins::jet_contract_call as *const () as usize,
+        );
         map_fn(
             sym.contract_call_return_data_copy(),
-            builtins::jet_contract_call_return_data_copy as usize,
+            builtins::jet_contract_call_return_data_copy as *const () as usize,
         );
-        map_fn(sym.keccak256(), builtins::jet_ops_keccak256 as usize);
+        map_fn(
+            sym.keccak256(),
+            builtins::jet_ops_keccak256 as *const () as usize,
+        );
     }
 
     fn get_contract_exec_fn(
         &self,
         ee: &ExecutionEngine<'ctx>,
         addr: &str,
-    ) -> Result<JitFunction<ContractFunc>, FunctionLookupError> {
+    ) -> Result<JitFunction<'_, ContractFunc>, FunctionLookupError> {
         let name = exec::mangle_contract_fn(addr);
         info!("Looking up contract function {}", name);
         unsafe { ee.get_function(name.as_str()) }
     }
 }
 
-fn load_runtime_module(context: &Context) -> Result<Module, Error> {
+fn load_runtime_module(context: &Context) -> Result<Module<'_>, Error> {
     let runtime_builder = RuntimeBuilder::new(context, "JetVM Runtime");
     let module = runtime_builder.build();
     Ok(module)

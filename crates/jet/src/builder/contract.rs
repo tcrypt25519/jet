@@ -9,7 +9,7 @@ use log::{info, trace};
 use jet_runtime::exec::ReturnCode;
 
 use crate::{
-    builder::{env::Env, ops, Error, InvalidOpcode},
+    builder::{Error, InvalidOpcode, env::Env, ops},
     instructions,
     instructions::{Instruction, IteratorItem},
 };
@@ -156,7 +156,7 @@ impl<'ctx, 'b> CodeBlocks<'ctx, 'b> {
         self.blocks.first()
     }
 
-    pub(crate) fn iter(&self) -> std::slice::Iter<CodeBlock<'ctx, 'b>> {
+    pub(crate) fn iter(&self) -> std::slice::Iter<'_, CodeBlock<'ctx, 'b>> {
         self.blocks.iter()
     }
 
@@ -432,7 +432,9 @@ fn build_code_block(
                             ops::jumpi(bctx, jump_block, following_block.basic_block)
                         }
                         (Some(_), None) => {
-                            return Err(Error::invariant_violation("JUMPI without following block"));
+                            return Err(Error::invariant_violation(
+                                "JUMPI without following block",
+                            ));
                         }
                         (None, Some(_)) => {
                             return Err(Error::invariant_violation("JUMPI without jump block"));

@@ -2,8 +2,8 @@ use inkwell::execution_engine::ExecutionEngine;
 use log::trace;
 
 use crate::{
-    exec::{jet_contract_fn_lookup, Context, ContractFunc, ReturnCode},
     ADDRESS_SIZE_BYTES,
+    exec::{Context, ContractFunc, ReturnCode, jet_contract_fn_lookup},
 };
 
 // Contract calls
@@ -52,7 +52,8 @@ pub unsafe extern "C" fn jet_contract_call(
 
     let ret_dest = unsafe { *ret_dest };
     let ret_len = unsafe { *ret_len };
-    let copy_ret = jet_contract_call_return_data_copy(ctx, callee_ctx, ret_dest, 0, ret_len);
+    let copy_ret =
+        unsafe { jet_contract_call_return_data_copy(ctx, callee_ctx, ret_dest, 0, ret_len) };
     copy_ret as i8
 }
 
@@ -77,7 +78,10 @@ pub unsafe extern "C" fn jet_contract_call_return_data_copy(
     let ret_len = sub_ctx.return_len();
     let mem_len = sub_ctx.memory_len();
 
-    trace!("jet_contracts_call_return_data_copy:\ndest_offset: {}\nrequested_ret_len: {}\n\nret_offset: {}\nret_len: {}\nmem_len: {}", dest_offset, requested_ret_len, ret_offset, ret_len, mem_len);
+    trace!(
+        "jet_contracts_call_return_data_copy:\ndest_offset: {}\nrequested_ret_len: {}\n\nret_offset: {}\nret_len: {}\nmem_len: {}",
+        dest_offset, requested_ret_len, ret_offset, ret_len, mem_len
+    );
 
     // Bounds checks for the memory and return data
     if src_offset + requested_ret_len > ret_len {
@@ -91,6 +95,17 @@ pub unsafe extern "C" fn jet_contract_call_return_data_copy(
     // if ret_offset_end > mem_len {
     //     return 3;
     // }
+
+    // Ensure memory is large enough for the write
+    let required_memory_len = dest_offset + requested_ret_len;
+    if ctx.memory_len() < required_memory_len {
+        if required_memory_len > ctx.memory_cap() {
+            // TODO: Expand memory capacity
+            return 5; // Memory expansion needed but not implemented
+        }
+        // Expand memory length to accommodate the write
+        ctx.memory_len = required_memory_len;
+    }
 
     // Copy the data
     let src_range = src_offset as usize..(src_offset + requested_ret_len) as usize;
