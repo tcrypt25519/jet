@@ -2,7 +2,7 @@ use std::fmt;
 
 use colored::Colorize;
 
-use crate::{exec, ADDRESS_SIZE_BYTES};
+use crate::{ADDRESS_SIZE_BYTES, exec};
 
 impl fmt::Display for exec::BlockInfo {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -16,8 +16,14 @@ impl fmt::Display for exec::BlockInfo {
             self.base_fee(),
             self.blob_base_fee(),
             self.chain_id(),
-            self.hash().iter().take(32).fold(String::new(), |acc, x| acc.clone() + &format!("{:02X}", x)),
-            self.coinbase().iter().take(ADDRESS_SIZE_BYTES).fold(String::new(), |acc, x| acc.clone() + &format!("{:02X}", x))
+            self.hash()
+                .iter()
+                .take(32)
+                .fold(String::new(), |acc, x| acc.clone() + &format!("{:02X}", x)),
+            self.coinbase()
+                .iter()
+                .take(ADDRESS_SIZE_BYTES)
+                .fold(String::new(), |acc, x| acc.clone() + &format!("{:02X}", x))
         )
     }
 }

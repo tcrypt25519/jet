@@ -1,0 +1,18 @@
+# Configuration for cargo-nextest
+# See https://nexte.st/book/configuration.html
+
+[profile.default]
+# Run tests with all available threads by default
+test-threads = "num-cpus"
+
+# Default number of retries for failed tests
+retries = 0
+
+# Show output for failed tests immediately
+failure-output = "immediate"
+
+# Show output for passing tests on failure
+success-output = "never"
+
+# Test execution strategy
+fail-fast = false

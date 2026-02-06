@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # Disable incremental compilation for CI builds
+  CARGO_INCREMENTAL: 0
+  # More precise error messages
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  ci:
+    name: CI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install LLVM 21
+        run: |
+          bash scripts/install-llvm.sh
+          echo "LLVM_SYS_211_PREFIX=$(bash scripts/detect-llvm.sh)" >> $GITHUB_ENV
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Check all targets
+        run: cargo check --all-targets --all-features
+
+      - name: Build
+        run: cargo build --verbose --all-features
+
+      - name: Run tests with nextest
+        run: cargo nextest run --all-features --no-fail-fast
+
+      - name: Run doctests
+        run: cargo test --doc --all-features

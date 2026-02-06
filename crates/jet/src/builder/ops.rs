@@ -282,8 +282,7 @@ fn load_int<'a>(
 
 fn call_return_to_ptr(ret: CallSiteValue) -> PointerValue {
     let value_ref = ret.as_value_ref();
-    let word_ptr = unsafe { PointerValue::new(value_ref) };
-    word_ptr
+    unsafe { PointerValue::new(value_ref) }
 }
 
 // Block info getter helpers

@@ -35,7 +35,7 @@ impl Context {
         let memory_layout = std::alloc::Layout::from_size_align(memory_size, 32)
             .expect("Failed to create memory layout");
         let memory_ptr = unsafe { std::alloc::alloc_zeroed(memory_layout) };
-        
+
         if memory_ptr.is_null() {
             panic!("Failed to allocate memory for EVM context");
         }
@@ -49,7 +49,7 @@ impl Context {
             stack: [[0; 32]; STACK_SIZE_WORDS as usize],
             memory_ptr,
             memory_len: 0,
-            memory_cap: memory_size as u32,  // Use calculated memory_size
+            memory_cap: memory_size as u32, // Use calculated memory_size
         }
     }
 
@@ -73,9 +73,7 @@ impl Context {
         let offset = self.return_off as usize;
         let len = self.return_len as usize;
         // TODO: Check bounds
-        unsafe {
-            std::slice::from_raw_parts(self.memory_ptr.add(offset), len)
-        }
+        unsafe { std::slice::from_raw_parts(self.memory_ptr.add(offset), len) }
     }
 
     pub fn stack(&self) -> &[Word] {
@@ -83,15 +81,11 @@ impl Context {
     }
 
     pub fn memory(&self) -> &[u8] {
-        unsafe {
-            std::slice::from_raw_parts(self.memory_ptr, self.memory_len as usize)
-        }
+        unsafe { std::slice::from_raw_parts(self.memory_ptr, self.memory_len as usize) }
     }
 
     pub fn memory_mut(&mut self) -> &mut [u8] {
-        unsafe {
-            std::slice::from_raw_parts_mut(self.memory_ptr, self.memory_len as usize)
-        }
+        unsafe { std::slice::from_raw_parts_mut(self.memory_ptr, self.memory_len as usize) }
     }
 
     pub fn memory_len(&self) -> u32 {
@@ -117,6 +111,7 @@ impl Context {
 
     /// Puts the word into the stack and increments to the stack pointer.
     /// Returns false if the stack is full, true otherwise.
+    #[allow(dead_code)]
     pub(crate) fn stack_push(&mut self, word: Word) -> bool {
         if self.stack_ptr >= STACK_SIZE_WORDS {
             return false;
@@ -127,6 +122,7 @@ impl Context {
     }
 
     /// Pops a word from the stack and decrements the stack pointer.
+    #[allow(dead_code)]
     pub(crate) fn stack_pop(&mut self) -> &Word {
         // TODO: Handle bounds by making this function return a second value
         // if ctx.stack_ptr == 0 {
@@ -137,6 +133,7 @@ impl Context {
     }
 
     /// Peeks at a word in the stack without changing the stack pointer.
+    #[allow(dead_code)]
     pub(crate) fn stack_peek(&self, peek_idx: u32) -> &Word {
         // TODO: Handle bounds by making this function return a second value
         // if peek_idx >= ctx.stack_ptr {
@@ -148,6 +145,7 @@ impl Context {
 
     /// Swaps the top word of the stack with the word at the given index.
     /// Returns false if the given index is out of bounds, true otherwise.
+    #[allow(dead_code)]
     pub(crate) fn stack_swap(&mut self, swap_idx: u32) -> bool {
         if swap_idx >= self.stack_ptr - 1 {
             return false;

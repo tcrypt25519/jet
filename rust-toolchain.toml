@@ -1,0 +1,10 @@
+[toolchain]
+# Use stable Rust by default for building and testing
+channel = "stable"
+
+# Specify the profile - minimal is faster to install
+profile = "default"
+
+# Note: For formatting and linting, use nightly Rust explicitly
+# Install with: rustup toolchain install nightly --component rustfmt,clippy
+# The Makefile uses cargo +nightly for fmt and clippy commands

@@ -6,8 +6,8 @@ use inkwell::{
     values::{FunctionValue, GlobalValue},
 };
 
-use jet_runtime;
 use jet_ir::Types;
+use jet_runtime;
 
 #[derive(serde::Serialize, Clone, Debug, Default)]
 pub struct Options {
