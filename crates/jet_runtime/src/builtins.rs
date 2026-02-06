@@ -77,7 +77,10 @@ pub unsafe extern "C" fn jet_contract_call_return_data_copy(
     let ret_len = sub_ctx.return_len();
     let mem_len = sub_ctx.memory_len();
 
-    trace!("jet_contracts_call_return_data_copy:\ndest_offset: {}\nrequested_ret_len: {}\n\nret_offset: {}\nret_len: {}\nmem_len: {}", dest_offset, requested_ret_len, ret_offset, ret_len, mem_len);
+    trace!(
+        "jet_contracts_call_return_data_copy:\ndest_offset: {}\nrequested_ret_len: {}\n\nret_offset: {}\nret_len: {}\nmem_len: {}",
+        dest_offset, requested_ret_len, ret_offset, ret_len, mem_len
+    );
 
     // Bounds checks for the memory and return data
     if src_offset + requested_ret_len > ret_len {

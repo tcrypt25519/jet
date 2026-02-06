@@ -9,9 +9,8 @@ use log::{error, info, trace};
 use thiserror::Error;
 
 use jet_runtime::{
-    self, builtins, exec,
+    self, RuntimeBuilder, builtins, exec,
     exec::{BlockInfo, ContractFunc, ContractRun},
-    RuntimeBuilder,
 };
 
 use crate::{

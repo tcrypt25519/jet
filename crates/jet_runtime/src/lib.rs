@@ -1,8 +1,8 @@
 pub mod binding;
 pub mod builtins;
 pub mod exec;
-pub mod symbols;
 pub mod runtime_builder;
+pub mod symbols;
 
 #[cfg(test)]
 mod layout_tests;

@@ -2,7 +2,7 @@ use std::fmt;
 
 use colored::Colorize;
 
-use crate::{exec, ADDRESS_SIZE_BYTES};
+use crate::{ADDRESS_SIZE_BYTES, exec};
 
 impl fmt::Display for exec::BlockInfo {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

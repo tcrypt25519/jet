@@ -1,7 +1,6 @@
 /// Unified LLVM type system.
 /// Defines all LLVM types used by both runtime and contract builders
 /// to ensure consistent memory layouts.
-
 use inkwell::{
     AddressSpace,
     context::Context,
@@ -101,15 +100,15 @@ impl<'ctx> Types<'ctx> {
         // Block information structure
         let block_info = context.struct_type(
             &[
-                i64.into(),   // timestamp
-                i64.into(),   // number
-                i64.into(),   // gaslimit
-                i64.into(),   // chainid
-                i64.into(),   // selfbalance
-                i64.into(),   // basefee
-                i64.into(),   // prevrandao
-                i256.into(),  // difficulty
-                i160.into(),  // coinbase
+                i64.into(),  // timestamp
+                i64.into(),  // number
+                i64.into(),  // gaslimit
+                i64.into(),  // chainid
+                i64.into(),  // selfbalance
+                i64.into(),  // basefee
+                i64.into(),  // prevrandao
+                i256.into(), // difficulty
+                i160.into(), // coinbase
             ],
             PACK_STRUCTS,
         );

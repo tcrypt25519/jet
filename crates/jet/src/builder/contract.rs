@@ -432,7 +432,9 @@ fn build_code_block(
                             ops::jumpi(bctx, jump_block, following_block.basic_block)
                         }
                         (Some(_), None) => {
-                            return Err(Error::invariant_violation("JUMPI without following block"));
+                            return Err(Error::invariant_violation(
+                                "JUMPI without following block",
+                            ));
                         }
                         (None, Some(_)) => {
                             return Err(Error::invariant_violation("JUMPI without jump block"));

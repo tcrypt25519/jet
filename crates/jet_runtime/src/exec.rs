@@ -35,7 +35,7 @@ impl Context {
         let memory_layout = std::alloc::Layout::from_size_align(memory_size, 32)
             .expect("Failed to create memory layout");
         let memory_ptr = unsafe { std::alloc::alloc_zeroed(memory_layout) };
-        
+
         if memory_ptr.is_null() {
             panic!("Failed to allocate memory for EVM context");
         }
@@ -49,7 +49,7 @@ impl Context {
             stack: [[0; 32]; STACK_SIZE_WORDS as usize],
             memory_ptr,
             memory_len: 0,
-            memory_cap: memory_size as u32,  // Use calculated memory_size
+            memory_cap: memory_size as u32, // Use calculated memory_size
         }
     }
 
@@ -73,9 +73,7 @@ impl Context {
         let offset = self.return_off as usize;
         let len = self.return_len as usize;
         // TODO: Check bounds
-        unsafe {
-            std::slice::from_raw_parts(self.memory_ptr.add(offset), len)
-        }
+        unsafe { std::slice::from_raw_parts(self.memory_ptr.add(offset), len) }
     }
 
     pub fn stack(&self) -> &[Word] {
@@ -83,15 +81,11 @@ impl Context {
     }
 
     pub fn memory(&self) -> &[u8] {
-        unsafe {
-            std::slice::from_raw_parts(self.memory_ptr, self.memory_len as usize)
-        }
+        unsafe { std::slice::from_raw_parts(self.memory_ptr, self.memory_len as usize) }
     }
 
     pub fn memory_mut(&mut self) -> &mut [u8] {
-        unsafe {
-            std::slice::from_raw_parts_mut(self.memory_ptr, self.memory_len as usize)
-        }
+        unsafe { std::slice::from_raw_parts_mut(self.memory_ptr, self.memory_len as usize) }
     }
 
     pub fn memory_len(&self) -> u32 {
