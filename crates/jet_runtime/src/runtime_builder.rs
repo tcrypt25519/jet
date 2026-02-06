@@ -92,7 +92,8 @@ impl<'ctx> RuntimeBuilder<'ctx> {
     fn build_stack_push_i256(&self) -> FunctionValue<'ctx> {
         let fn_type = self.context.bool_type().fn_type(
             &[
-                self.context.ptr_type(inkwell::AddressSpace::default())
+                self.context
+                    .ptr_type(inkwell::AddressSpace::default())
                     .into(),
                 self.types.i256.into(),
             ],
@@ -168,7 +169,8 @@ impl<'ctx> RuntimeBuilder<'ctx> {
     fn build_stack_push_word(&self) -> FunctionValue<'ctx> {
         let fn_type = self.context.bool_type().fn_type(
             &[
-                self.context.ptr_type(inkwell::AddressSpace::default())
+                self.context
+                    .ptr_type(inkwell::AddressSpace::default())
                     .into(),
                 self.types.ptr.into(),
             ],
@@ -247,7 +249,10 @@ impl<'ctx> RuntimeBuilder<'ctx> {
     /// Pops a word from the stack and returns pointer to it.
     fn build_stack_pop(&self) -> FunctionValue<'ctx> {
         let fn_type = self.types.ptr.fn_type(
-            &[self.context.ptr_type(inkwell::AddressSpace::default()).into()],
+            &[self
+                .context
+                .ptr_type(inkwell::AddressSpace::default())
+                .into()],
             false,
         );
 
@@ -307,7 +312,8 @@ impl<'ctx> RuntimeBuilder<'ctx> {
     fn build_stack_peek(&self) -> FunctionValue<'ctx> {
         let fn_type = self.types.ptr.fn_type(
             &[
-                self.context.ptr_type(inkwell::AddressSpace::default())
+                self.context
+                    .ptr_type(inkwell::AddressSpace::default())
                     .into(),
                 self.types.i8.into(),
             ],
@@ -369,7 +375,8 @@ impl<'ctx> RuntimeBuilder<'ctx> {
     fn build_stack_swap(&self) -> FunctionValue<'ctx> {
         let fn_type = self.context.bool_type().fn_type(
             &[
-                self.context.ptr_type(inkwell::AddressSpace::default())
+                self.context
+                    .ptr_type(inkwell::AddressSpace::default())
                     .into(),
                 self.types.i8.into(),
             ],
@@ -468,7 +475,8 @@ impl<'ctx> RuntimeBuilder<'ctx> {
     fn build_mem_load(&self) -> FunctionValue<'ctx> {
         let fn_type = self.types.ptr.fn_type(
             &[
-                self.context.ptr_type(inkwell::AddressSpace::default())
+                self.context
+                    .ptr_type(inkwell::AddressSpace::default())
                     .into(),
                 self.types.ptr.into(),
             ],
@@ -517,7 +525,8 @@ impl<'ctx> RuntimeBuilder<'ctx> {
     fn build_mem_store_word(&self) -> FunctionValue<'ctx> {
         let fn_type = self.types.i8.fn_type(
             &[
-                self.context.ptr_type(inkwell::AddressSpace::default())
+                self.context
+                    .ptr_type(inkwell::AddressSpace::default())
                     .into(),
                 self.types.ptr.into(),
                 self.types.ptr.into(),
@@ -577,7 +586,8 @@ impl<'ctx> RuntimeBuilder<'ctx> {
     fn build_mem_store_byte(&self) -> FunctionValue<'ctx> {
         let fn_type = self.types.i8.fn_type(
             &[
-                self.context.ptr_type(inkwell::AddressSpace::default())
+                self.context
+                    .ptr_type(inkwell::AddressSpace::default())
                     .into(),
                 self.types.ptr.into(),
                 self.types.ptr.into(),
