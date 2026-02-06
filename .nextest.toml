@@ -16,25 +16,3 @@ success-output = "never"
 
 # Test execution strategy
 fail-fast = false
-
-[profile.ci]
-# CI-specific configuration
-# Retry flaky tests
-retries = 2
-
-# Reduce parallelism in CI to avoid resource contention
-test-threads = 2
-
-# Show standard output for failed tests
-failure-output = "immediate-final"
-
-# Store test results
-# archive = { format = "junit", path = "target/nextest/ci/junit.xml" }
-
-[profile.default.junit]
-# JUnit output configuration (if needed)
-path = "target/nextest/default/junit.xml"
-
-[profile.ci.junit]
-# JUnit output for CI
-path = "target/nextest/ci/junit.xml"

@@ -23,34 +23,13 @@ jobs:
 
       - name: Install LLVM 21
         run: |
-          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
-          echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-21 main" | sudo tee /etc/apt/sources.list.d/llvm.list
-          sudo apt-get update
-          sudo apt-get install -y llvm-21-dev libpolly-21-dev
+          bash scripts/install-llvm.sh
+          echo "LLVM_SYS_211_PREFIX=$(bash scripts/detect-llvm.sh)" >> $GITHUB_ENV
 
-      - name: Set LLVM environment
-        run: echo "LLVM_SYS_211_PREFIX=/usr/lib/llvm-21" >> $GITHUB_ENV
-
-      - name: Cache cargo registry
-        uses: actions/cache@v4
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
         with:
-          path: ~/.cargo/registry/index
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-registry-
-
-      - name: Cache cargo git
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/git
-          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-git-
-
-      - name: Cache cargo build
-        uses: actions/cache@v4
-        with:
-          path: target
-          key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-build-
+          cache-on-failure: true
 
       - name: Install Rust nightly with components
         uses: dtolnay/rust-toolchain@nightly
@@ -70,13 +49,13 @@ jobs:
         uses: taiki-e/install-action@nextest
 
       - name: Check all targets
-        run: cargo check --all-targets --all-features
+        run: cargo +stable check --all-targets --all-features
 
       - name: Build
-        run: cargo build --verbose --all-features
+        run: cargo +stable build --verbose --all-features
 
       - name: Run tests with nextest
-        run: cargo nextest run --all-features --no-fail-fast
+        run: cargo +stable nextest run --all-features --no-fail-fast
 
       - name: Run doctests
-        run: cargo test --doc --all-features
+        run: cargo +stable test --doc --all-features
