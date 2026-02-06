@@ -187,9 +187,17 @@ Successfully implemented ADR-001 and resolved critical memory layout mismatches 
 ## Known Limitations & Future Work
 
 ### Current Limitations
-1. Only one IR function generated (`jet.stack.push.i256`)
-   - Other runtime functions still use Rust builtins
-   - Easy to add more as needed
+1. Eight IR runtime functions generated:
+   - `jet.stack.push.i256` - Push i256 value onto stack
+   - `jet.stack.push.ptr` - Push word by pointer onto stack
+   - `jet.stack.pop` - Pop word from stack
+   - `jet.stack.peek` - Peek at stack element
+   - `jet.stack.swap` - Swap stack elements
+   - `jet.mem.load` - Load word from memory
+   - `jet.mem.store.word` - Store word to memory
+   - `jet.mem.store.byte` - Store byte to memory
+   - Remaining runtime behavior still uses Rust builtins (contract calls, crypto)
+   - Pattern is established; additional IR helpers can be added incrementally
 
 2. Memory expansion not implemented
    - TODOs in place for proper bounds checking

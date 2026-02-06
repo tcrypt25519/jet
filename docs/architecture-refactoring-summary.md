@@ -205,7 +205,7 @@ fn build_stack_push_i256(&self) -> FunctionValue<'ctx> {
 
 ## Future Work
 
-1. Add more IR-generated runtime functions (currently only `jet.stack.push.i256`)
+1. Add more IR-generated runtime functions (currently implemented: `jet.stack.push.i256`, `jet.stack.push.ptr`, `jet.stack.pop`, `jet.stack.peek`, `jet.stack.swap`, `jet.mem.load`, `jet.mem.store.word`, `jet.mem.store.byte`)
 2. Remove deprecated `runtime-ir/jet.ll` after validation
 3. Add layout verification tests
 4. Consider implementing small buffer optimization (SBO) for memory

@@ -166,7 +166,7 @@ impl<'ctx> RuntimeBuilder<'ctx> {
             false,
         );
         
-        let function = self.module.add_function("jet.stack.push.word", fn_type, None);
+        let function = self.module.add_function("jet.stack.push.ptr", fn_type, None);
         let entry_block = self.context.append_basic_block(function, "entry");
         self.builder.position_at_end(entry_block);
 
