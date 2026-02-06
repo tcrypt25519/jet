@@ -9,7 +9,7 @@ use log::{info, trace};
 use jet_runtime::exec::ReturnCode;
 
 use crate::{
-    builder::{env::Env, ops, Error, InvalidOpcode},
+    builder::{Error, InvalidOpcode, env::Env, ops},
     instructions,
     instructions::{Instruction, IteratorItem},
 };
