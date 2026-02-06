@@ -27,6 +27,10 @@ impl<'ctx> RuntimeBuilder<'ctx> {
 
     /// Build all runtime functions and return the module containing them.
     pub fn build(self) -> Module<'ctx> {
+        // Add global variable for JIT engine pointer
+        self.module
+            .add_global(self.types.ptr, None, crate::symbols::JIT_ENGINE);
+
         // Generate IR-based runtime functions for stack operations
         self.build_stack_push_i256();
         self.build_stack_push_word();
