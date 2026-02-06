@@ -168,8 +168,9 @@ impl Context {
     /// Returns an error if memory allocation for the sub-context fails.
     pub(crate) fn init_sub_call(&mut self) -> Result<&mut Context> {
         self.sub_call = Some(Box::new(Context::new()?));
-        // Safe: we just assigned Some to sub_call on line 170
-        Ok(self.sub_call.as_mut().unwrap().as_mut())
+        self.sub_call
+            .as_deref_mut()
+            .ok_or_else(|| RuntimeError::InvariantViolation("init_sub_call: sub_call was None after allocation".to_string()))
     }
 }
 

@@ -10,10 +10,13 @@ use crate::{
 //
 
 /// Error codes returned by jet_contract_call
+const ERR_SUCCESS: i8 = 0;
 const ERR_LOOKUP_FAILED: i8 = 1;
 const ERR_INVOCATION_FAILED: i8 = 2;
+const ERR_COPY_FAILED: i8 = 3;
 const ERR_INVALID_JIT_ENGINE: i8 = -1;
 const ERR_INVALID_CTX: i8 = -1;
+const ERR_INVALID_POINTER: i8 = -3;
 const ERR_SUB_CTX_CREATION_FAILED: i8 = -2;
 
 /// Calls the contract at the given address.
@@ -28,8 +31,10 @@ const ERR_SUB_CTX_CREATION_FAILED: i8 = -2;
 /// - `0`: Success
 /// - `1`: Contract lookup failed
 /// - `2`: Contract invocation failed  
+/// - `3`: Return data copy failed
 /// - `-1`: Invalid JIT engine or context pointer
 /// - `-2`: Sub-context creation failed
+/// - `-3`: Invalid addr, ret_dest, or ret_len pointer
 pub unsafe extern "C" fn jet_contract_call(
     ctx: *mut Context,
     jit_engine: *const ExecutionEngine,
@@ -37,11 +42,16 @@ pub unsafe extern "C" fn jet_contract_call(
     ret_dest: *const u32,
     ret_len: *const u32,
 ) -> i8 {
-    // Look up the contract function
+    // Validate all input pointers
     let jit_engine = match unsafe { jit_engine.as_ref() } {
         Some(engine) => engine,
         None => return ERR_INVALID_JIT_ENGINE,
     };
+    
+    if addr.is_null() || ret_dest.is_null() || ret_len.is_null() {
+        return ERR_INVALID_POINTER;
+    }
+    
     let addr_slice = unsafe { std::slice::from_raw_parts(addr, ADDRESS_SIZE_BYTES) };
     let fn_ptr = jet_contract_fn_lookup(jit_engine, addr_slice);
     if fn_ptr == 0 {
@@ -71,14 +81,23 @@ pub unsafe extern "C" fn jet_contract_call(
 
     // Copy return data
     if callee_ctx.return_len() == 0 {
-        return 0; // Success, but no return data
+        return ERR_SUCCESS;
     }
 
     let ret_dest = unsafe { *ret_dest };
     let ret_len = unsafe { *ret_len };
-    let copy_ret = jet_contract_call_return_data_copy(ctx, callee_ctx, ret_dest, 0, ret_len);
-    copy_ret as i8
+    let copy_result = jet_contract_call_return_data_copy(ctx, callee_ctx, ret_dest, 0, ret_len);
+    
+    // Map copy result to documented error codes
+    match copy_result {
+        0 => ERR_SUCCESS,
+        _ => ERR_COPY_FAILED,
+    }
 }
+
+/// Error codes returned by jet_contract_call_return_data_copy
+const ERR_COPY_INVALID_PTR: u8 = 1;
+const ERR_COPY_BOUNDS: u8 = 2;
 
 /// Copies return data from the sub context to the parent context.
 ///
@@ -86,6 +105,12 @@ pub unsafe extern "C" fn jet_contract_call(
 ///
 /// This function is unsafe because it dereferences the given pointers. The caller must ensure
 /// that all the pointers are valid.
+/// 
+/// # Returns
+/// 
+/// - `0`: Success
+/// - `1`: Invalid context or sub-context pointer
+/// - `2`: Bounds check failed
 pub unsafe extern "C" fn jet_contract_call_return_data_copy(
     ctx: *mut Context,
     sub_ctx: *const Context,
@@ -95,11 +120,11 @@ pub unsafe extern "C" fn jet_contract_call_return_data_copy(
 ) -> u8 {
     let ctx = match unsafe { ctx.as_mut() } {
         Some(ctx) => ctx,
-        None => return 255, // Invalid context pointer
+        None => return ERR_COPY_INVALID_PTR,
     };
     let sub_ctx = match unsafe { sub_ctx.as_ref() } {
         Some(ctx) => ctx,
-        None => return 255, // Invalid sub-context pointer
+        None => return ERR_COPY_INVALID_PTR,
     };
 
     // Get return and memory data from the callee
@@ -111,11 +136,11 @@ pub unsafe extern "C" fn jet_contract_call_return_data_copy(
 
     // Bounds checks for the memory and return data
     if src_offset + requested_ret_len > ret_len {
-        return 3;
+        return ERR_COPY_BOUNDS;
     }
     let ret_offset_end = ret_offset + requested_ret_len;
     if ret_offset_end > ret_len {
-        return 4;
+        return ERR_COPY_BOUNDS;
     }
     // TODO: Enable this check after adding memory len handling
     // if ret_offset_end > mem_len {

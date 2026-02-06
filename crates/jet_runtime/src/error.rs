@@ -11,6 +11,9 @@ pub enum RuntimeError {
 
     #[error("Invalid pointer dereference")]
     NullPointer,
+
+    #[error("Invariant violation: {0}")]
+    InvariantViolation(String),
 }
 
 pub type Result<T> = std::result::Result<T, RuntimeError>;

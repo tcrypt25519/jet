@@ -145,8 +145,9 @@ impl<'ctx, 'b> CodeBlocks<'ctx, 'b> {
             is_jumpdest: false,
             terminates: false,
         });
-        // Safe: we just pushed a block to self.blocks on line 141
-        Ok(self.blocks.last_mut().unwrap())
+        self.blocks
+            .last_mut()
+            .ok_or_else(|| Error::InvariantViolation("CodeBlocks::add: no block after push".to_string()))
     }
 
     pub(crate) fn len(&self) -> usize {
