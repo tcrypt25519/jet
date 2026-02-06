@@ -19,22 +19,17 @@ This document describes the development workflow, tooling, and CI/CD setup for t
 
 ### Installation
 
-Run the following command to install all required development tools:
+Run the following command to install required development tools:
 
 ```bash
 make install-tools
 ```
 
-This will:
-- Install `cargo-nextest` for running tests
-- Install Rust nightly toolchain with `rustfmt` and `clippy`
+This will install `cargo-nextest` for running tests.
 
-Alternatively, install manually:
+You'll also need the nightly toolchain for formatting and linting:
 
 ```bash
-# Install cargo-nextest
-cargo install cargo-nextest --locked
-
 # Install nightly toolchain with components
 rustup toolchain install nightly --component rustfmt,clippy
 ```
@@ -141,49 +136,37 @@ This runs:
 
 ## Continuous Integration
 
-The CI pipeline runs on GitHub Actions with the following jobs:
+The CI pipeline runs on GitHub Actions as a single sequential job with the following steps:
 
-### 1. Format Check (`fmt`)
-- **Toolchain**: Nightly Rust
-- **Action**: Checks code formatting with `rustfmt`
-- **Command**: `cargo fmt --all -- --check`
+### CI Workflow Steps
 
-### 2. Clippy Lint (`clippy`)
-- **Toolchain**: Nightly Rust
-- **Action**: Runs Clippy with strict warnings
-- **Command**: `cargo clippy --all-targets --all-features -- -D warnings`
-
-### 3. Build and Test (`build-and-test`)
-- **Toolchain**: Stable Rust
-- **Action**: Builds the project and runs all tests
-- **Test Runner**: `cargo-nextest`
-- **Commands**:
-  - `cargo build --verbose --all-features`
-  - `cargo nextest run --all-features --no-fail-fast`
-  - `cargo test --doc --all-features` (doctests)
-
-### 4. Cargo Check (`check`)
-- **Toolchain**: Stable Rust
-- **Action**: Verifies the project compiles
-- **Command**: `cargo check --all-targets --all-features`
+1. **Install LLVM 21** - Uses `scripts/install-llvm.sh`
+2. **Install Rust nightly** - With rustfmt and clippy components
+3. **Check formatting** - `cargo fmt --all -- --check` (using nightly)
+4. **Run clippy** - `cargo clippy --all-targets --all-features -- -D warnings` (using nightly)
+5. **Install Rust stable** - Becomes the default toolchain
+6. **Install cargo-nextest** - Test runner
+7. **Check compilation** - `cargo check --all-targets --all-features`
+8. **Build** - `cargo build --verbose --all-features`
+9. **Run tests** - `cargo nextest run --all-features --no-fail-fast`
+10. **Run doctests** - `cargo test --doc --all-features`
 
 ### CI Features
 
-- **Caching**: Cargo registry, git dependencies, and build artifacts are cached
-- **Parallel Jobs**: All jobs run in parallel for faster feedback
-- **LLVM Setup**: Automatically installs LLVM 21 on Ubuntu runners
+- **Sequential execution**: Steps run in order, failing fast on errors
+- **Smart caching**: Uses `Swatinem/rust-cache` for optimized Rust artifact caching
+- **Nightly for linting**: Formatting and clippy use nightly Rust
+- **Stable for building**: Compilation and tests use stable Rust
+- **LLVM Setup**: Automatically installs LLVM 21 using project scripts
 - **Strict Mode**: Warnings are treated as errors (`-D warnings`)
 
 ## Configuration Files
 
 ### `.nextest.toml`
-Configures cargo-nextest behavior:
-- Default profile for local development
-- CI profile with retries for flaky tests
-- JUnit output for CI integration
+Configures cargo-nextest test runner behavior with sensible defaults.
 
 ### `rust-toolchain.toml`
-Specifies the default Rust toolchain (stable) and components.
+Specifies stable Rust as the default toolchain for building and testing.
 
 ### `.github/workflows/ci.yml`
 GitHub Actions workflow configuration.
@@ -196,7 +179,7 @@ GitHub Actions workflow configuration.
 
 2. **Use nightly for formatting and linting**
    - The CI enforces this
-   - Run `make fmt` and `make clippy` which use nightly automatically
+   - `make fmt` and `make clippy` use `cargo +nightly` automatically
 
 3. **Use stable for building and testing**
    - Ensures compatibility with stable Rust

@@ -2,11 +2,9 @@
 # Use stable Rust by default for building and testing
 channel = "stable"
 
-# Components needed for development
-components = ["rustfmt", "clippy"]
-
 # Specify the profile - minimal is faster to install
 profile = "default"
 
-# Note: For formatting and linting in CI, we use nightly explicitly
-# Install nightly with: rustup toolchain install nightly --component rustfmt,clippy
+# Note: For formatting and linting, use nightly Rust explicitly
+# Install with: rustup toolchain install nightly --component rustfmt,clippy
+# The Makefile uses cargo +nightly for fmt and clippy commands
