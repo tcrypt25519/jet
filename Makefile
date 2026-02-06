@@ -36,20 +36,20 @@ check: ## Run Cargo check
 	cargo check --all-targets --all-features
 
 .PHONY: fmt
-fmt: ## Format code with nightly rustfmt
-	cargo +nightly fmt --all
+fmt: ## Format code with rustfmt
+	cargo fmt --all
 
 .PHONY: fmt-check
-fmt-check: ## Check code formatting with nightly rustfmt
-	cargo +nightly fmt --all -- --check
+fmt-check: ## Check code formatting with rustfmt
+	cargo fmt --all -- --check
 
 .PHONY: clippy
-clippy: ## Run clippy with nightly
-	cargo +nightly clippy --all-targets --all-features -- -D warnings
+clippy: ## Run clippy
+	cargo clippy --all-targets --all-features -- -D warnings
 
 .PHONY: clippy-fix
 clippy-fix: ## Run clippy with automatic fixes
-	cargo +nightly clippy --all-targets --all-features --fix
+	cargo clippy --all-targets --all-features --fix
 
 .PHONY: install-tools
 install-tools: ## Install cargo-nextest
