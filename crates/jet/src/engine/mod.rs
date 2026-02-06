@@ -5,7 +5,7 @@ use inkwell::{
     module::Module,
     support::LLVMString,
 };
-use log::{error, info, trace};
+use log::{info, trace};
 use thiserror::Error;
 
 use jet_runtime::{

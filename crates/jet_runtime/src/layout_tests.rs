@@ -119,7 +119,14 @@ mod layout_verification_tests {
                 .get_field_type_at_index(field.index())
                 .unwrap_or_else(|| panic!("Failed to get field type for {:?}", field));
 
-            let actual_kind = get_type_kind(field_type.into());
+            let actual_kind = get_type_kind(match field_type {
+                inkwell::types::BasicTypeEnum::ArrayType(t) => t.into(),
+                inkwell::types::BasicTypeEnum::FloatType(t) => t.into(),
+                inkwell::types::BasicTypeEnum::IntType(t) => t.into(),
+                inkwell::types::BasicTypeEnum::PointerType(t) => t.into(),
+                inkwell::types::BasicTypeEnum::StructType(t) => t.into(),
+                inkwell::types::BasicTypeEnum::VectorType(t) => t.into(),
+            });
             let expected_kind = field.expected_type_kind();
 
             assert_eq!(

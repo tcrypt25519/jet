@@ -156,7 +156,7 @@ impl<'ctx, 'b> CodeBlocks<'ctx, 'b> {
         self.blocks.first()
     }
 
-    pub(crate) fn iter(&self) -> std::slice::Iter<CodeBlock<'ctx, 'b>> {
+    pub(crate) fn iter(&self) -> std::slice::Iter<'_, CodeBlock<'ctx, 'b>> {
         self.blocks.iter()
     }
 
