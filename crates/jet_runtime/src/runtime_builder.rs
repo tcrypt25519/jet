@@ -664,8 +664,13 @@ mod tests {
 
         // Verify the module has expected functions
         assert!(module.get_function("jet.stack.push.i256").is_some());
-        assert!(module.get_function("jet.stack.push.word").is_some());
+        assert!(module.get_function("jet.stack.push.ptr").is_some());
+        assert!(module.get_function("jet.stack.pop").is_some());
+        assert!(module.get_function("jet.stack.peek").is_some());
+        assert!(module.get_function("jet.stack.swap").is_some());
         assert!(module.get_function("jet.mem.load").is_some());
+        assert!(module.get_function("jet.mem.store.word").is_some());
+        assert!(module.get_function("jet.mem.store.byte").is_some());
     }
 
     #[test]
