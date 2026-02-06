@@ -111,6 +111,7 @@ impl Context {
 
     /// Puts the word into the stack and increments to the stack pointer.
     /// Returns false if the stack is full, true otherwise.
+    #[allow(dead_code)]
     pub(crate) fn stack_push(&mut self, word: Word) -> bool {
         if self.stack_ptr >= STACK_SIZE_WORDS {
             return false;
@@ -121,6 +122,7 @@ impl Context {
     }
 
     /// Pops a word from the stack and decrements the stack pointer.
+    #[allow(dead_code)]
     pub(crate) fn stack_pop(&mut self) -> &Word {
         // TODO: Handle bounds by making this function return a second value
         // if ctx.stack_ptr == 0 {
@@ -131,6 +133,7 @@ impl Context {
     }
 
     /// Peeks at a word in the stack without changing the stack pointer.
+    #[allow(dead_code)]
     pub(crate) fn stack_peek(&self, peek_idx: u32) -> &Word {
         // TODO: Handle bounds by making this function return a second value
         // if peek_idx >= ctx.stack_ptr {
@@ -142,6 +145,7 @@ impl Context {
 
     /// Swaps the top word of the stack with the word at the given index.
     /// Returns false if the given index is out of bounds, true otherwise.
+    #[allow(dead_code)]
     pub(crate) fn stack_swap(&mut self, swap_idx: u32) -> bool {
         if swap_idx >= self.stack_ptr - 1 {
             return false;
