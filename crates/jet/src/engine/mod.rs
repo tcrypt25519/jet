@@ -80,12 +80,18 @@ impl<'ctx> Engine<'ctx> {
 
         // Link in external runtime functions (contract calls and crypto)
         // Stack and memory operations are now generated as IR, so they don't need linking
-        map_fn(sym.contract_call(), builtins::jet_contract_call as *const () as usize);
+        map_fn(
+            sym.contract_call(),
+            builtins::jet_contract_call as *const () as usize,
+        );
         map_fn(
             sym.contract_call_return_data_copy(),
             builtins::jet_contract_call_return_data_copy as *const () as usize,
         );
-        map_fn(sym.keccak256(), builtins::jet_ops_keccak256 as *const () as usize);
+        map_fn(
+            sym.keccak256(),
+            builtins::jet_ops_keccak256 as *const () as usize,
+        );
     }
 
     fn get_contract_exec_fn(
