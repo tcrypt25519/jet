@@ -13,4 +13,5 @@ inkwell = { git = "https://github.com/TheDan64/inkwell.git", features = ["llvm21
 sha3 = "0.10.8"
 hex = "0.4.3"
 colored = "2.1.0"
+jet_ir = { path = "../jet_ir" }
 

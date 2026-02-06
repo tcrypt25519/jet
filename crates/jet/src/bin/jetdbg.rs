@@ -214,7 +214,8 @@ fn new_test_block_info() -> exec::BlockInfo {
         25, 26, 27, 28, 29, 30, 31,
     ];
     let hash_history = new_test_block_info_hash_history();
-    let coinbase = [1, 0];
+    // Updated to use 20-byte address (EVM standard)
+    let coinbase = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
     exec::BlockInfo::new(
         42,
