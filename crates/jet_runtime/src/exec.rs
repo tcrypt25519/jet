@@ -168,9 +168,8 @@ impl Context {
     /// Returns an error if memory allocation for the sub-context fails.
     pub(crate) fn init_sub_call(&mut self) -> Result<&mut Context> {
         self.sub_call = Some(Box::new(Context::new()?));
-        Ok(self.sub_call.as_mut()
-            .ok_or(RuntimeError::NullPointer)?
-            .as_mut())
+        // SAFETY: We just set sub_call to Some above, so as_mut() will always succeed
+        Ok(unsafe { self.sub_call.as_mut().unwrap_unchecked().as_mut() })
     }
 }
 

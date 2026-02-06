@@ -145,8 +145,8 @@ impl<'ctx, 'b> CodeBlocks<'ctx, 'b> {
             is_jumpdest: false,
             terminates: false,
         });
-        self.blocks.last_mut()
-            .ok_or_else(|| Error::InvariantViolation("Failed to get last block after add".to_string()))
+        // SAFETY: We just pushed a block, so last_mut() will always return Some
+        Ok(unsafe { self.blocks.last_mut().unwrap_unchecked() })
     }
 
     pub(crate) fn len(&self) -> usize {
