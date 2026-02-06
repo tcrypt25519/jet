@@ -1,6 +1,5 @@
 /// Memory layout verification tests.
 /// Ensures consistency between Rust Context struct and LLVM IR exec_ctx type.
-
 #[cfg(test)]
 mod layout_verification_tests {
     use crate::exec::Context;
@@ -120,7 +119,7 @@ mod layout_verification_tests {
                 .get_field_type_at_index(field.index())
                 .unwrap_or_else(|| panic!("Failed to get field type for {:?}", field));
 
-            let actual_kind = get_type_kind(field_type);
+            let actual_kind = get_type_kind(field_type.into());
             let expected_kind = field.expected_type_kind();
 
             assert_eq!(
