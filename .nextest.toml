@@ -1,0 +1,40 @@
+# Configuration for cargo-nextest
+# See https://nexte.st/book/configuration.html
+
+[profile.default]
+# Run tests with all available threads by default
+test-threads = "num-cpus"
+
+# Default number of retries for failed tests
+retries = 0
+
+# Show output for failed tests immediately
+failure-output = "immediate"
+
+# Show output for passing tests on failure
+success-output = "never"
+
+# Test execution strategy
+fail-fast = false
+
+[profile.ci]
+# CI-specific configuration
+# Retry flaky tests
+retries = 2
+
+# Reduce parallelism in CI to avoid resource contention
+test-threads = 2
+
+# Show standard output for failed tests
+failure-output = "immediate-final"
+
+# Store test results
+# archive = { format = "junit", path = "target/nextest/ci/junit.xml" }
+
+[profile.default.junit]
+# JUnit output configuration (if needed)
+path = "target/nextest/default/junit.xml"
+
+[profile.ci.junit]
+# JUnit output for CI
+path = "target/nextest/ci/junit.xml"
