@@ -126,6 +126,7 @@ mod layout_verification_tests {
                 inkwell::types::BasicTypeEnum::PointerType(t) => t.into(),
                 inkwell::types::BasicTypeEnum::StructType(t) => t.into(),
                 inkwell::types::BasicTypeEnum::VectorType(t) => t.into(),
+                inkwell::types::BasicTypeEnum::ScalableVectorType(t) => t.into(),
             });
             let expected_kind = field.expected_type_kind();
 
