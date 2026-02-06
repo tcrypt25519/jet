@@ -1,4 +1,4 @@
-/// Shared LLVM IR types and function registry for Jet EVM JIT compiler.
+/// Shared LLVM IR types and constants.
 /// This crate contains the unified type system used by both the runtime builder
 /// and contract builder to ensure consistent memory layouts.
 
