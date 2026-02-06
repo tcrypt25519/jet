@@ -22,7 +22,11 @@ case "$PLATFORM" in
             sudo bash "$SCRIPT_DIR/llvm.sh" ${LLVM_VERSION}
         fi
         sudo apt-get update
-        sudo apt-get install -y llvm-${LLVM_VERSION} llvm-${LLVM_VERSION}-dev clang-${LLVM_VERSION}
+        sudo apt-get install -y \
+            llvm-${LLVM_VERSION} \
+            llvm-${LLVM_VERSION}-dev \
+            clang-${LLVM_VERSION} \
+            libpolly-${LLVM_VERSION}-dev
         LLVM_PREFIX="/usr/lib/llvm-${LLVM_VERSION}"
         ;;
 
