@@ -145,9 +145,8 @@ impl<'ctx, 'b> CodeBlocks<'ctx, 'b> {
             is_jumpdest: false,
             terminates: false,
         });
-        // SAFETY: Safe because we just pushed a block to self.blocks on line 141,
-        // guaranteeing that the vector is non-empty and last_mut() returns Some
-        Ok(unsafe { self.blocks.last_mut().unwrap_unchecked() })
+        // Safe: we just pushed a block to self.blocks on line 141
+        Ok(self.blocks.last_mut().unwrap())
     }
 
     pub(crate) fn len(&self) -> usize {

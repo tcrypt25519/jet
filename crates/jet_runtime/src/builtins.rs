@@ -9,12 +9,27 @@ use crate::{
 // Contract calls
 //
 
+/// Error codes returned by jet_contract_call
+const ERR_LOOKUP_FAILED: i8 = 1;
+const ERR_INVOCATION_FAILED: i8 = 2;
+const ERR_INVALID_JIT_ENGINE: i8 = -1;
+const ERR_INVALID_CTX: i8 = -1;
+const ERR_SUB_CTX_CREATION_FAILED: i8 = -2;
+
 /// Calls the contract at the given address.
 ///
 /// # Safety
 ///
 /// This function is unsafe because it dereferences the given pointers. The caller must ensure that
 /// all the pointers are valid.
+/// 
+/// # Returns
+/// 
+/// - `0`: Success
+/// - `1`: Contract lookup failed
+/// - `2`: Contract invocation failed  
+/// - `-1`: Invalid JIT engine or context pointer
+/// - `-2`: Sub-context creation failed
 pub unsafe extern "C" fn jet_contract_call(
     ctx: *mut Context,
     jit_engine: *const ExecutionEngine,
@@ -25,25 +40,25 @@ pub unsafe extern "C" fn jet_contract_call(
     // Look up the contract function
     let jit_engine = match unsafe { jit_engine.as_ref() } {
         Some(engine) => engine,
-        None => return -1, // Invalid JIT engine pointer
+        None => return ERR_INVALID_JIT_ENGINE,
     };
     let addr_slice = unsafe { std::slice::from_raw_parts(addr, ADDRESS_SIZE_BYTES) };
     let fn_ptr = jet_contract_fn_lookup(jit_engine, addr_slice);
     if fn_ptr == 0 {
-        return 1; // Lookup failed
+        return ERR_LOOKUP_FAILED;
     }
 
     // Instantiate a sub context
     let caller_ctx = match unsafe { ctx.as_mut() } {
         Some(ctx) => ctx,
-        None => return -1, // Invalid context pointer
+        None => return ERR_INVALID_CTX,
     };
     
     let callee_ctx = match caller_ctx.init_sub_call() {
         Ok(ctx) => ctx,
         Err(e) => {
             log::error!("Failed to create sub-context: {}", e);
-            return -2; // Failed to create sub-context
+            return ERR_SUB_CTX_CREATION_FAILED;
         }
     };
 
@@ -51,7 +66,7 @@ pub unsafe extern "C" fn jet_contract_call(
     let contract_func: ContractFunc = unsafe { std::mem::transmute(fn_ptr) };
     let result = unsafe { contract_func(callee_ctx) };
     if result != ReturnCode::ExplicitReturn && result != ReturnCode::ImplicitReturn {
-        return 2; // Invocation failed
+        return ERR_INVOCATION_FAILED;
     }
 
     // Copy return data
