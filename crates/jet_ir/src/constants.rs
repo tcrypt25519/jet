@@ -1,6 +1,5 @@
 /// EVM and Jet runtime constants.
 /// These are used consistently across runtime and compiler.
-
 // System architecture; These are defined by the EVM
 pub const WORD_SIZE_BYTES: u32 = 32;
 pub const STACK_SIZE_WORDS: u32 = 1024;
