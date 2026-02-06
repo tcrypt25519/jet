@@ -168,7 +168,8 @@ impl Context {
     /// Returns an error if memory allocation for the sub-context fails.
     pub(crate) fn init_sub_call(&mut self) -> Result<&mut Context> {
         self.sub_call = Some(Box::new(Context::new()?));
-        // SAFETY: We just set sub_call to Some above, so as_mut() will always succeed
+        // SAFETY: Safe because we just assigned Some to sub_call on line 170,
+        // so as_mut() is guaranteed to return Some
         Ok(unsafe { self.sub_call.as_mut().unwrap_unchecked().as_mut() })
     }
 }
@@ -178,9 +179,13 @@ impl Drop for Context {
         // Deallocate memory buffer
         if !self.memory_ptr.is_null() {
             let memory_size = self.memory_cap as usize;
-            if let Ok(memory_layout) = std::alloc::Layout::from_size_align(memory_size, 32) {
-                unsafe {
+            match std::alloc::Layout::from_size_align(memory_size, 32) {
+                Ok(memory_layout) => unsafe {
                     std::alloc::dealloc(self.memory_ptr, memory_layout);
+                },
+                Err(e) => {
+                    // Log the error but don't panic in drop
+                    log::error!("Failed to create memory layout during dealloc: {}", e);
                 }
             }
         }

@@ -145,7 +145,8 @@ impl<'ctx, 'b> CodeBlocks<'ctx, 'b> {
             is_jumpdest: false,
             terminates: false,
         });
-        // SAFETY: We just pushed a block, so last_mut() will always return Some
+        // SAFETY: Safe because we just pushed a block to self.blocks on line 141,
+        // guaranteeing that the vector is non-empty and last_mut() returns Some
         Ok(unsafe { self.blocks.last_mut().unwrap_unchecked() })
     }
 

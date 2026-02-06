@@ -41,7 +41,10 @@ pub unsafe extern "C" fn jet_contract_call(
     
     let callee_ctx = match caller_ctx.init_sub_call() {
         Ok(ctx) => ctx,
-        Err(_) => return -2, // Failed to create sub-context
+        Err(e) => {
+            log::error!("Failed to create sub-context: {}", e);
+            return -2; // Failed to create sub-context
+        }
     };
 
     // Execute the contract function
