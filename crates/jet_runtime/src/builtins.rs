@@ -2,8 +2,8 @@ use inkwell::execution_engine::ExecutionEngine;
 use log::trace;
 
 use crate::{
-    exec::{jet_contract_fn_lookup, Context, ContractFunc, ReturnCode},
     ADDRESS_SIZE_BYTES,
+    exec::{Context, ContractFunc, ReturnCode, jet_contract_fn_lookup},
 };
 
 // Contract calls

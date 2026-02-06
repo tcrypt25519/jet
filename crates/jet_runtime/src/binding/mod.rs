@@ -16,8 +16,14 @@ impl fmt::Display for exec::BlockInfo {
             self.base_fee(),
             self.blob_base_fee(),
             self.chain_id(),
-            self.hash().iter().take(32).fold(String::new(), |acc, x| acc.clone() + &format!("{:02X}", x)),
-            self.coinbase().iter().take(ADDRESS_SIZE_BYTES).fold(String::new(), |acc, x| acc.clone() + &format!("{:02X}", x))
+            self.hash()
+                .iter()
+                .take(32)
+                .fold(String::new(), |acc, x| acc.clone() + &format!("{:02X}", x)),
+            self.coinbase()
+                .iter()
+                .take(ADDRESS_SIZE_BYTES)
+                .fold(String::new(), |acc, x| acc.clone() + &format!("{:02X}", x))
         )
     }
 }
