@@ -1,15 +1,13 @@
 use std::str::FromStr;
 
 use inkwell::{
-    AddressSpace,
     context::Context,
     module::Module,
     values::{FunctionValue, GlobalValue},
 };
 
 use jet_runtime;
-
-const PACK_STRUCTS: bool = true;
+use jet_ir::Types;
 
 #[derive(serde::Serialize, Clone, Debug, Default)]
 pub struct Options {
@@ -61,116 +59,6 @@ impl FromStr for Mode {
             "release" => Ok(Self::Release),
             "debug" => Ok(Self::Debug),
             _ => Err(()),
-        }
-    }
-}
-
-pub struct Types<'ctx> {
-    // Primitives
-    pub i8: inkwell::types::IntType<'ctx>,
-    pub i32: inkwell::types::IntType<'ctx>,
-    pub i64: inkwell::types::IntType<'ctx>,
-    pub i160: inkwell::types::IntType<'ctx>,
-    pub i256: inkwell::types::IntType<'ctx>,
-    pub ptr: inkwell::types::PointerType<'ctx>,
-    pub word_bytes: inkwell::types::ArrayType<'ctx>,
-
-    // Architecture
-    pub stack: inkwell::types::ArrayType<'ctx>,
-
-    pub mem_len: inkwell::types::IntType<'ctx>,
-    pub mem_cap: inkwell::types::IntType<'ctx>,
-    pub mem: inkwell::types::StructType<'ctx>,
-
-    // Runtime
-    pub stack_ptr: inkwell::types::IntType<'ctx>,
-    pub jump_ptr: inkwell::types::IntType<'ctx>,
-    pub return_offset: inkwell::types::IntType<'ctx>,
-    pub return_length: inkwell::types::IntType<'ctx>,
-
-    pub exec_ctx: inkwell::types::StructType<'ctx>,
-    pub block_info: inkwell::types::StructType<'ctx>,
-    pub contract_fn: inkwell::types::FunctionType<'ctx>,
-}
-
-impl<'ctx> Types<'ctx> {
-    fn new(context: &'ctx Context) -> Self {
-        // Primitives
-        let i8 = context.i8_type();
-        let i32 = context.i32_type();
-        let i64 = context.i64_type();
-        let i160 = context.custom_width_int_type(160);
-        let i256 = context.custom_width_int_type(256);
-        let ptr = context.ptr_type(AddressSpace::default());
-        let word_bytes = i8.array_type(32);
-
-        // Architecture
-        let stack = i256.array_type(jet_runtime::STACK_SIZE_WORDS);
-
-        let mem_len = context.i32_type();
-        let mem_cap = context.i32_type();
-        let mem = context.struct_type(&[ptr.into(), mem_len.into(), mem_cap.into()], PACK_STRUCTS);
-
-        // Registers
-        let stack_ptr = context.i32_type();
-        let jump_ptr = context.i32_type();
-        let return_offset = context.i32_type();
-        let return_length = context.i32_type();
-
-        let exec_ctx = context.struct_type(
-            &[
-                stack_ptr.into(),
-                jump_ptr.into(),
-                return_offset.into(),
-                return_length.into(),
-                ptr.into(),
-                stack.into(),
-                mem.into(),
-            ],
-            PACK_STRUCTS,
-        );
-
-        let block_info = context.struct_type(
-            &[
-                i64.into(),
-                i64.into(),
-                i64.into(),
-                i64.into(),
-                i64.into(),
-                i64.into(),
-                i64.into(),
-                i256.into(),
-                i160.into(),
-            ],
-            PACK_STRUCTS,
-        );
-
-        // contract func sig: func(ctx: &exec_ctx, block_info: &BlockInfo) i8
-        let contract_fn = context.i8_type().fn_type(&[ptr.into(), ptr.into()], false);
-
-        Self {
-            i8,
-            i32,
-            i64,
-            i160,
-            i256,
-            ptr,
-            word_bytes,
-
-            stack,
-
-            mem_len,
-            mem_cap,
-            mem,
-
-            stack_ptr,
-            jump_ptr,
-            return_offset,
-            return_length,
-
-            exec_ctx,
-            block_info,
-            contract_fn,
         }
     }
 }
