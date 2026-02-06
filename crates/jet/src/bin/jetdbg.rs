@@ -197,7 +197,10 @@ fn main() -> Result<(), Error> {
         Some(level) => SimpleLogger::new().with_level(level),
         None => SimpleLogger::new().with_level(log::LevelFilter::Trace),
     };
-    logger.init().unwrap();
+    logger.init().map_err(|e| {
+        eprintln!("Failed to initialize logger: {}", e);
+        std::process::exit(1);
+    }).ok();
 
     // Dispatch command
     match cli.cmd {

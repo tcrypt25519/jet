@@ -44,14 +44,28 @@ impl<'ctx> Manager<'ctx> {
 
     fn verify_contract(&self, addr: &str) -> bool {
         let func_name = exec::mangle_contract_fn(addr);
-        let func = self.build_env.module().get_function(&func_name).unwrap();
-        func.verify(true)
+        self.build_env.module()
+            .get_function(&func_name)
+            .map(|func| func.verify(true))
+            .unwrap_or(false)
     }
 
     fn print_ir(&self) {
         let ts = ThemeSet::load_defaults();
-        let ps = SyntaxSet::load_from_folder("contrib/syntaxes").unwrap();
-        let syntax = ps.find_syntax_by_extension("ll").unwrap();
+        let ps = match SyntaxSet::load_from_folder("contrib/syntaxes") {
+            Ok(ps) => ps,
+            Err(e) => {
+                eprintln!("Warning: Failed to load syntax set: {}", e);
+                return;
+            }
+        };
+        let syntax = match ps.find_syntax_by_extension("ll") {
+            Some(syntax) => syntax,
+            None => {
+                eprintln!("Warning: Failed to find LLVM syntax");
+                return;
+            }
+        };
 
         let mut theme = ts.themes["base16-eighties.dark"].clone();
         theme.settings.background = Some(Color {
@@ -67,9 +81,16 @@ impl<'ctx> Manager<'ctx> {
 
         println!();
         for line in LinesWithEndings::from(s.as_str()) {
-            let ranges: Vec<(Style, &str)> = h.highlight_line(line, &ps).unwrap();
-            let escaped = as_24_bit_terminal_escaped(&ranges[..], true);
-            print!("    {}", escaped);
+            match h.highlight_line(line, &ps) {
+                Ok(ranges) => {
+                    let escaped = as_24_bit_terminal_escaped(&ranges[..], true);
+                    print!("    {}", escaped);
+                }
+                Err(e) => {
+                    eprintln!("Warning: Failed to highlight line: {}", e);
+                    print!("    {}", line);
+                }
+            }
         }
         println!();
     }

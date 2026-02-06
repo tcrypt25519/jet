@@ -137,7 +137,7 @@ impl<'ctx, 'b> CodeBlocks<'ctx, 'b> {
         offset: usize,
         basic_block: BasicBlock<'ctx>,
         // bb_ctor: fn(usize) -> BasicBlock<'ctx>,
-    ) -> &mut CodeBlock<'ctx, 'b> {
+    ) -> Result<&mut CodeBlock<'ctx, 'b>, Error> {
         self.blocks.push(CodeBlock {
             offset,
             rom: &[],
@@ -145,7 +145,8 @@ impl<'ctx, 'b> CodeBlocks<'ctx, 'b> {
             is_jumpdest: false,
             terminates: false,
         });
-        self.blocks.last_mut().unwrap()
+        self.blocks.last_mut()
+            .ok_or_else(|| Error::InvariantViolation("Failed to get last block after add".to_string()))
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -174,7 +175,7 @@ pub fn build(env: &'_ Env<'_>, name: &str, rom: &[u8]) -> Result<(), Error> {
     info!(
         "Created function {} in module {}",
         name,
-        env.module().get_name().to_str().unwrap()
+        env.module().get_name().to_str().unwrap_or("<invalid UTF-8>")
     );
 
     // Create the preamble block
@@ -187,7 +188,8 @@ pub fn build(env: &'_ Env<'_>, name: &str, rom: &[u8]) -> Result<(), Error> {
     build_contract_body(&bctx, &code_blocks)?;
 
     // Connect the preamble block to the entry block
-    let entry_block = code_blocks.first().unwrap();
+    let entry_block = code_blocks.first()
+        .ok_or_else(|| Error::InvariantViolation("No code blocks found".to_string()))?;
     bctx.builder.position_at_end(preamble_block);
     bctx.builder
         .build_unconditional_branch(entry_block.basic_block)?;
@@ -205,7 +207,7 @@ fn find_code_blocks<'ctx, 'b>(
     let create_bb = || env.context().append_basic_block(func, "block");
 
     let mut blocks = CodeBlocks::new();
-    let mut current_block: &mut CodeBlock = blocks.add(0, create_bb());
+    let mut current_block: &mut CodeBlock = blocks.add(0, create_bb())?;
     let mut current_block_starting_pc = 0usize;
 
     for item in instructions::Iterator::new(bytecode) {
@@ -236,7 +238,7 @@ fn find_code_blocks<'ctx, 'b>(
                         trace!("find_code_blocks: Found JUMPI");
                         current_block.rom = &bytecode[current_block_starting_pc..pc + 1];
                         current_block_starting_pc = pc + 1;
-                        current_block = blocks.add(current_block_starting_pc, create_bb());
+                        current_block = blocks.add(current_block_starting_pc, create_bb())?;
                     }
 
                     Instruction::JUMPDEST => {
@@ -246,7 +248,7 @@ fn find_code_blocks<'ctx, 'b>(
                         }
 
                         current_block_starting_pc = pc + 1;
-                        current_block = blocks.add(current_block_starting_pc, create_bb());
+                        current_block = blocks.add(current_block_starting_pc, create_bb())?;
                         current_block.set_is_jumpdest();
                     }
                     _ => {

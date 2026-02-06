@@ -23,7 +23,10 @@ pub unsafe extern "C" fn jet_contract_call(
     ret_len: *const u32,
 ) -> i8 {
     // Look up the contract function
-    let jit_engine = unsafe { jit_engine.as_ref() }.unwrap();
+    let jit_engine = match unsafe { jit_engine.as_ref() } {
+        Some(engine) => engine,
+        None => return -1, // Invalid JIT engine pointer
+    };
     let addr_slice = unsafe { std::slice::from_raw_parts(addr, ADDRESS_SIZE_BYTES) };
     let fn_ptr = jet_contract_fn_lookup(jit_engine, addr_slice);
     if fn_ptr == 0 {
@@ -31,12 +34,15 @@ pub unsafe extern "C" fn jet_contract_call(
     }
 
     // Instantiate a sub context
-    let caller_ctx = unsafe { ctx.as_mut() }.unwrap();
-    let callee_ctx = caller_ctx.init_sub_call();
-
-    // let callee_ctx = caller_ctx.sub_ctx_mut().unwrap();
-    // let callee_ctx_ptr = callee_ctx as *mut Context;
-    // caller_ctx.set_sub_call(callee_ctx_ptr as usize);
+    let caller_ctx = match unsafe { ctx.as_mut() } {
+        Some(ctx) => ctx,
+        None => return -1, // Invalid context pointer
+    };
+    
+    let callee_ctx = match caller_ctx.init_sub_call() {
+        Ok(ctx) => ctx,
+        Err(_) => return -2, // Failed to create sub-context
+    };
 
     // Execute the contract function
     let contract_func: ContractFunc = unsafe { std::mem::transmute(fn_ptr) };
@@ -69,8 +75,14 @@ pub unsafe extern "C" fn jet_contract_call_return_data_copy(
     src_offset: u32,
     requested_ret_len: u32,
 ) -> u8 {
-    let ctx = unsafe { ctx.as_mut() }.unwrap();
-    let sub_ctx = unsafe { sub_ctx.as_ref() }.unwrap();
+    let ctx = match unsafe { ctx.as_mut() } {
+        Some(ctx) => ctx,
+        None => return 255, // Invalid context pointer
+    };
+    let sub_ctx = match unsafe { sub_ctx.as_ref() } {
+        Some(ctx) => ctx,
+        None => return 255, // Invalid sub-context pointer
+    };
 
     // Get return and memory data from the callee
     let ret_offset = sub_ctx.return_off();
