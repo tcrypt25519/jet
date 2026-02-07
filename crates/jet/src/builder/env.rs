@@ -185,23 +185,19 @@ pub struct Env<'ctx> {
 }
 
 impl<'ctx> Env<'ctx> {
-    pub fn new(context: &'ctx Context, module: Module<'ctx>, opts: Options) -> Self {
+    pub fn new(context: &'ctx Context, module: Module<'ctx>, opts: Options) -> Result<Self, super::Error> {
         let types = Types::new(context);
-        let runtime_fns = Symbols::new(&module);
+        let runtime_fns = Symbols::new(&module).ok_or_else(|| {
+            super::Error::InvariantViolation("Failed to load all runtime functions".to_string())
+        })?;
 
-        if runtime_fns.is_none() {
-            panic!("Failed to load all runtime functions");
-        }
-
-        Self {
+        Ok(Self {
             opts,
-
             context,
             module,
-
             types,
-            symbols: runtime_fns.unwrap(),
-        }
+            symbols: runtime_fns,
+        })
     }
 
     pub fn context(&self) -> &'ctx Context {

@@ -32,8 +32,8 @@ pub struct Engine<'ctx> {
 
 impl<'ctx> Engine<'ctx> {
     pub fn new(context: &'ctx Context, build_opts: env::Options) -> Result<Self, Error> {
-        let runtime_module = load_runtime_module(context).unwrap();
-        let build_env = Env::new(context, runtime_module, build_opts);
+        let runtime_module = load_runtime_module(context)?;
+        let build_env = Env::new(context, runtime_module, build_opts)?;
         let build_manager = Manager::new(build_env);
 
         Ok(Engine { build_manager })
@@ -62,7 +62,8 @@ impl<'ctx> Engine<'ctx> {
         };
 
         trace!("Running function...");
-        let ctx = exec::Context::new();
+        let ctx = exec::Context::new()
+            .map_err(|e| Error::Build(builder::Error::Runtime(e)))?;
         let result = unsafe { contract_exec_fn.call(&ctx as *const exec::Context) };
         trace!("Function returned");
 
