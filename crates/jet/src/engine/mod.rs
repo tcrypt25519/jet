@@ -9,7 +9,7 @@ use log::{info, trace};
 use thiserror::Error;
 
 use jet_runtime::{
-    self, RuntimeBuilder, builtins, exec,
+    RuntimeBuilder, builtins, exec,
     exec::{BlockInfo, ContractFunc, ContractRun},
 };
 
