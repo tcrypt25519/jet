@@ -153,24 +153,15 @@ unsafe fn return_data_copy_impl(
         None => return CopyError::InvalidPtr,
     };
 
-    // Get return and memory data from the callee
-    let ret_offset = sub_ctx.return_off();
+    // Get return data from the callee
     let ret_len = sub_ctx.return_len();
-    let mem_len = sub_ctx.memory_len();
 
     trace!(
-        "jet_contracts_call_return_data_copy:\ndest_offset: {}\nrequested_ret_len: {}\n\nret_offset: {}\nret_len: {}\nmem_len: {}",
-        dest_offset, requested_ret_len, ret_offset, ret_len, mem_len
+        "jet_contracts_call_return_data_copy:\ndest_offset: {}\nrequested_ret_len: {}\n\nret_len: {}",
+        dest_offset, requested_ret_len, ret_len
     );
 
-    // Validate return data is within sub_ctx memory bounds (Issue 3)
-    let ret_end = match ret_offset.checked_add(ret_len) {
-        Some(end) => end,
-        None => return CopyError::ArithmeticOverflow,
-    };
-    if ret_end > mem_len {
-        return CopyError::BoundsCheckFailed;
-    }
+    // TODO: Validate ret_offset + ret_len <= memory_len once memory_len is tracked by MSTORE
 
     // Bounds check: validate src_offset + requested_ret_len doesn't overflow and is within ret_len
     let src_end = match src_offset.checked_add(requested_ret_len) {
