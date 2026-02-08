@@ -201,6 +201,22 @@ unsafe fn return_data_copy_impl(
 //  Utils
 //
 
+pub extern "C" fn jet_ops_exp(base: &mut [u8; 32], exp: &[u8; 32]) -> i8 {
+    use ruint::aliases::U256;
+    let mut b = U256::from_be_bytes(*base);
+    let mut e = U256::from_be_bytes(*exp);
+    let mut result = U256::from(1u64);
+    while e > U256::ZERO {
+        if e & U256::from(1u64) != U256::ZERO {
+            result = result.wrapping_mul(b);
+        }
+        b = b.wrapping_mul(b);
+        e >>= 1_usize;
+    }
+    *base = result.to_be_bytes();
+    0
+}
+
 pub extern "C" fn jet_ops_keccak256(buffer: &mut [u8; 32]) -> u8 {
     // Hash the bytes
     use sha3::{Digest, Keccak256};

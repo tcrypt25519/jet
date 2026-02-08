@@ -89,6 +89,13 @@ impl<'ctx> RuntimeBuilder<'ctx> {
             self.types.i8.fn_type(&[self.types.ptr.into()], false),
             None,
         );
+
+        // Arithmetic operations
+        self.module.add_function(
+            "jet.ops.exp",
+            self.types.i8.fn_type(&[self.types.ptr.into(), self.types.ptr.into()], false),
+            None,
+        );
     }
 
     /// Build jet.stack.push.i256 function in IR.

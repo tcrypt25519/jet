@@ -13,5 +13,6 @@ pub const FN_MEM_LOAD: &str = "jet.mem.load";
 pub const FN_CONTRACT_CALL: &str = "jet.contract.call";
 pub const FN_CONTRACT_CALL_RETURN_DATA_COPY: &str = "jet.contracts.call_return_data_copy";
 pub const FN_KECCAK256: &str = "jet.ops.keccak256";
+pub const FN_EXP: &str = "jet.ops.exp";
 
 pub const FN_CONTRACT_PREFIX: &str = "jet.contracts.";
