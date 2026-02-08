@@ -49,7 +49,7 @@ helpers (like return-data copying) can enforce bounds safely.
    - Keep `memory_len` in bytes so that `MSIZE` is correct when implemented.
 
 3. **Extend to other memory opcodes**
-   - MLOAD, CALLDATACOPY, RETURNDATACOPY, CODECOPY, SHA3, RETURN, and REVERT also
+   - MLOAD, CALLDATACOPY, RETURNDATACOPY, CODECOPY, KECCAK256, RETURN, and REVERT also
      access memory and should use the same helper so that reads expand memory in the same way
      as writes.
 
