@@ -42,7 +42,7 @@ jobs:
         run: cargo fmt --all
 
       - name: Commit formatting fixes
-        uses: tcrypt25519/ci/.github/actions/commit-changes@master
+        uses: tcrypt25519/ci/.github/actions/commit-changes@main
         with:
           commit-message: "style: apply rustfmt formatting 🤖"
 
