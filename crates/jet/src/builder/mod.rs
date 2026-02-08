@@ -42,6 +42,9 @@ pub enum Error {
 
     #[error("invalid bit-width: {}", .0)]
     InvalidBitWidth(u32),
+
+    #[error(transparent)]
+    Runtime(#[from] jet_runtime::RuntimeError),
 }
 
 impl Error {

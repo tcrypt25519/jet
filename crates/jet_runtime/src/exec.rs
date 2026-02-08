@@ -1,7 +1,11 @@
 use inkwell::execution_engine::ExecutionEngine;
 use log::error;
 
-use crate::{symbols::FN_CONTRACT_PREFIX, *};
+use crate::{
+    error::{Result, RuntimeError},
+    symbols::FN_CONTRACT_PREFIX,
+    *,
+};
 
 pub type Word = [u8; 32];
 pub type Hash = [u8; 32];
@@ -28,19 +32,20 @@ pub struct Context {
 }
 
 impl Context {
-    #[allow(clippy::new_without_default)]
-    pub fn new() -> Self {
+    pub fn new() -> Result<Self> {
         // Allocate memory buffer on the heap
         let memory_size = (WORD_SIZE_BYTES * MEMORY_INITIAL_SIZE_WORDS) as usize;
         let memory_layout = std::alloc::Layout::from_size_align(memory_size, 32)
-            .expect("Failed to create memory layout");
+            .map_err(|e| RuntimeError::MemoryLayout(e.to_string()))?;
         let memory_ptr = unsafe { std::alloc::alloc_zeroed(memory_layout) };
 
         if memory_ptr.is_null() {
-            panic!("Failed to allocate memory for EVM context");
+            return Err(RuntimeError::MemoryAllocation(
+                "Failed to allocate memory for EVM context".to_string(),
+            ));
         }
 
-        Context {
+        Ok(Context {
             stack_ptr: 0,
             jump_ptr: 0,
             return_off: 0,
@@ -50,7 +55,7 @@ impl Context {
             memory_ptr,
             memory_len: 0,
             memory_cap: memory_size as u32, // Use calculated memory_size
-        }
+        })
     }
 
     pub fn stack_ptr(&self) -> u32 {
@@ -69,10 +74,19 @@ impl Context {
         self.return_len
     }
 
+    /// Returns the return data slice from memory.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that `return_off + return_len` does not exceed `memory_len`
+    /// and that the memory pointer is valid. Use caution when calling this method, as it
+    /// creates an unsafe slice without bounds checking.
+    ///
+    /// This validation should be performed before setting `return_off` and `return_len`,
+    /// or at call sites before using this method.
     pub fn return_data(&self) -> &[u8] {
         let offset = self.return_off as usize;
         let len = self.return_len as usize;
-        // TODO: Check bounds
         unsafe { std::slice::from_raw_parts(self.memory_ptr.add(offset), len) }
     }
 
@@ -157,9 +171,15 @@ impl Context {
     }
 
     /// Creates a new context and sets it as the sub context.
-    pub(crate) fn init_sub_call(&mut self) -> &mut Context {
-        self.sub_call = Some(Box::new(Context::new()));
-        self.sub_call.as_mut().unwrap().as_mut()
+    ///
+    /// Returns a mutable reference to the newly created sub-context.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if memory allocation for the sub-context fails.
+    pub(crate) fn init_sub_call(&mut self) -> Result<&mut Context> {
+        self.sub_call = Some(Box::new(Context::new()?));
+        Ok(self.sub_call.as_deref_mut().expect("just assigned"))
     }
 }
 
@@ -168,10 +188,14 @@ impl Drop for Context {
         // Deallocate memory buffer
         if !self.memory_ptr.is_null() {
             let memory_size = self.memory_cap as usize;
-            let memory_layout = std::alloc::Layout::from_size_align(memory_size, 32)
-                .expect("Failed to create memory layout");
-            unsafe {
-                std::alloc::dealloc(self.memory_ptr, memory_layout);
+            match std::alloc::Layout::from_size_align(memory_size, 32) {
+                Ok(memory_layout) => unsafe {
+                    std::alloc::dealloc(self.memory_ptr, memory_layout);
+                },
+                Err(e) => {
+                    // Log the error but don't panic in drop
+                    log::error!("Failed to create memory layout during dealloc: {}", e);
+                }
             }
         }
     }
