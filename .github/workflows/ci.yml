@@ -23,10 +23,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Cache LLVM 21
+        id: cache-llvm
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/llvm-21-install.tar.gz
+          key: llvm-21-${{ runner.os }}-${{ runner.arch }}-${{ env.ImageOS }}-${{ hashFiles('scripts/install-llvm.sh', 'scripts/llvm.sh') }}
+
+      - name: Restore LLVM from cache
+        if: steps.cache-llvm.outputs.cache-hit == 'true'
+        run: |
+          sudo tar -xzf ${{ runner.temp }}/llvm-21-install.tar.gz -C /
+
       - name: Install LLVM 21
+        if: steps.cache-llvm.outputs.cache-hit != 'true'
         run: |
           bash scripts/install-llvm.sh
-          echo "LLVM_SYS_211_PREFIX=$(bash scripts/detect-llvm.sh)" >> $GITHUB_ENV
+          sudo tar -czf ${{ runner.temp }}/llvm-21-install.tar.gz -C / \
+            usr/lib/llvm-21 \
+            usr/bin/llvm-config-21
+
+      - name: Set LLVM environment variable
+        run: echo "LLVM_SYS_211_PREFIX=$(bash scripts/detect-llvm.sh)" >> $GITHUB_ENV
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
