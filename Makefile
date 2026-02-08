@@ -11,13 +11,6 @@ ifneq ($(wildcard /data/data/com.termux),)
 export CARGO_TARGET_DIR := /data/data/com.termux/files/home/.cargo/jet-target
 endif
 
-# On Termux (Android) the project lives on a FUSE mount (/storage/emulated/0)
-# that does not support the executable bit, so build artifacts must be placed
-# on the data partition instead.
-ifneq ($(wildcard /data/data/com.termux),)
-export CARGO_TARGET_DIR := /data/data/com.termux/files/home/.cargo/jet-target
-endif
-
 .PHONY: install-llvm
 install-llvm: ## Install LLVM 21 for your platform
 	@bash scripts/install-llvm.sh
