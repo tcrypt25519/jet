@@ -8,9 +8,7 @@ Thumbs.db
 scratch
 
 # Rust
-/target/
-**/*.rs.bk
-Cargo.lock
+target/
 
 # C/C++ and LLVM
 *.o
