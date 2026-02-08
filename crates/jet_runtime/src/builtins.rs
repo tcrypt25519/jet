@@ -202,18 +202,34 @@ unsafe fn return_data_copy_impl(
 //
 
 pub extern "C" fn jet_ops_exp(base: &mut [u8; 32], exp: &[u8; 32]) -> i8 {
-    use ruint::aliases::U256;
-    let mut b = U256::from_be_bytes(*base);
-    let mut e = U256::from_be_bytes(*exp);
-    let mut result = U256::from(1u64);
-    while e > U256::ZERO {
-        if e & U256::from(1u64) != U256::ZERO {
+    // Stack words are stored little-endian (PUSH immediates are reversed on load).
+    use bnum::types::U256;
+    let read = |b: &[u8; 32]| {
+        U256::from_digits([
+            u64::from_le_bytes(b[0..8].try_into().unwrap()),
+            u64::from_le_bytes(b[8..16].try_into().unwrap()),
+            u64::from_le_bytes(b[16..24].try_into().unwrap()),
+            u64::from_le_bytes(b[24..32].try_into().unwrap()),
+        ])
+    };
+
+    let mut b = read(base);
+    let mut e = read(exp);
+    let mut result = U256::ONE;
+
+    while e != U256::ZERO {
+        if e & U256::ONE != U256::ZERO {
             result = result.wrapping_mul(b);
         }
         b = b.wrapping_mul(b);
-        e >>= 1_usize;
+        e >>= 1u32;
     }
-    *base = result.to_be_bytes();
+
+    let d = result.digits();
+    base[0..8].copy_from_slice(&d[0].to_le_bytes());
+    base[8..16].copy_from_slice(&d[1].to_le_bytes());
+    base[16..24].copy_from_slice(&d[2].to_le_bytes());
+    base[24..32].copy_from_slice(&d[3].to_le_bytes());
     0
 }
 
