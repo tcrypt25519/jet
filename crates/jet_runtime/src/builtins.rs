@@ -9,12 +9,37 @@ use crate::{
 // Contract calls
 //
 
+/// Error codes returned by jet_contract_call
+#[repr(i8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ContractCallError {
+    Success = 0,
+    LookupFailed = 1,
+    InvocationFailed = 2,
+    CopyFailed = 3,
+    InvalidJitEngine = -1,
+    InvalidCtx = -2,
+    InvalidPointer = -3,
+    SubCtxCreationFailed = -4,
+}
+
 /// Calls the contract at the given address.
 ///
 /// # Safety
 ///
 /// This function is unsafe because it dereferences the given pointers. The caller must ensure that
 /// all the pointers are valid.
+///
+/// # Returns
+///
+/// - `0`: Success
+/// - `1`: Contract lookup failed
+/// - `2`: Contract invocation failed  
+/// - `3`: Return data copy failed
+/// - `-1`: Invalid JIT engine pointer
+/// - `-2`: Invalid context pointer
+/// - `-3`: Invalid addr, ret_dest, or ret_len pointer
+/// - `-4`: Sub-context creation failed
 pub unsafe extern "C" fn jet_contract_call(
     ctx: *mut Context,
     jit_engine: *const ExecutionEngine,
@@ -22,39 +47,70 @@ pub unsafe extern "C" fn jet_contract_call(
     ret_dest: *const u32,
     ret_len: *const u32,
 ) -> i8 {
-    // Look up the contract function
-    let jit_engine = unsafe { jit_engine.as_ref() }.unwrap();
+    // Validate all input pointers
+    let jit_engine = match unsafe { jit_engine.as_ref() } {
+        Some(engine) => engine,
+        None => return ContractCallError::InvalidJitEngine as i8,
+    };
+
+    if addr.is_null() || ret_dest.is_null() || ret_len.is_null() {
+        return ContractCallError::InvalidPointer as i8;
+    }
+
     let addr_slice = unsafe { std::slice::from_raw_parts(addr, ADDRESS_SIZE_BYTES) };
     let fn_ptr = jet_contract_fn_lookup(jit_engine, addr_slice);
     if fn_ptr == 0 {
-        return 1; // Lookup failed
+        return ContractCallError::LookupFailed as i8;
     }
 
     // Instantiate a sub context
-    let caller_ctx = unsafe { ctx.as_mut() }.unwrap();
-    let callee_ctx = caller_ctx.init_sub_call();
+    let caller_ctx = match unsafe { ctx.as_mut() } {
+        Some(ctx) => ctx,
+        None => return ContractCallError::InvalidCtx as i8,
+    };
 
-    // let callee_ctx = caller_ctx.sub_ctx_mut().unwrap();
-    // let callee_ctx_ptr = callee_ctx as *mut Context;
-    // caller_ctx.set_sub_call(callee_ctx_ptr as usize);
+    let callee_ctx = match caller_ctx.init_sub_call() {
+        Ok(ctx) => ctx,
+        Err(e) => {
+            log::error!("Failed to create sub-context: {}", e);
+            return ContractCallError::SubCtxCreationFailed as i8;
+        }
+    };
 
     // Execute the contract function
     let contract_func: ContractFunc = unsafe { std::mem::transmute(fn_ptr) };
     let result = unsafe { contract_func(callee_ctx) };
     if result != ReturnCode::ExplicitReturn && result != ReturnCode::ImplicitReturn {
-        return 2; // Invocation failed
+        return ContractCallError::InvocationFailed as i8;
     }
 
     // Copy return data
     if callee_ctx.return_len() == 0 {
-        return 0; // Success, but no return data
+        return ContractCallError::Success as i8;
     }
 
     let ret_dest = unsafe { *ret_dest };
     let ret_len = unsafe { *ret_len };
-    let copy_ret =
-        unsafe { jet_contract_call_return_data_copy(ctx, callee_ctx, ret_dest, 0, ret_len) };
-    copy_ret as i8
+    let copy_result = unsafe { return_data_copy_impl(ctx, callee_ctx, ret_dest, 0, ret_len) };
+
+    match copy_result {
+        CopyError::Success => ContractCallError::Success as i8,
+        err => {
+            log::error!("Return data copy failed: {:?}", err);
+            ContractCallError::CopyFailed as i8
+        }
+    }
+}
+
+/// Error codes returned by jet_contract_call_return_data_copy
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CopyError {
+    Success = 0,
+    InvalidPtr = 1,
+    BoundsCheckFailed = 2,
+    ArithmeticOverflow = 3,
+    MemoryExpansionNeeded = 4,
 }
 
 /// Copies return data from the sub context to the parent context.
@@ -63,6 +119,14 @@ pub unsafe extern "C" fn jet_contract_call(
 ///
 /// This function is unsafe because it dereferences the given pointers. The caller must ensure
 /// that all the pointers are valid.
+///
+/// # Returns
+///
+/// - `0`: Success
+/// - `1`: Invalid context or sub-context pointer
+/// - `2`: Bounds check failed
+/// - `3`: Arithmetic overflow in offset calculations
+/// - `4`: Memory expansion needed but not implemented
 pub unsafe extern "C" fn jet_contract_call_return_data_copy(
     ctx: *mut Context,
     sub_ctx: *const Context,
@@ -70,49 +134,68 @@ pub unsafe extern "C" fn jet_contract_call_return_data_copy(
     src_offset: u32,
     requested_ret_len: u32,
 ) -> u8 {
-    let ctx = unsafe { ctx.as_mut() }.unwrap();
-    let sub_ctx = unsafe { sub_ctx.as_ref() }.unwrap();
+    unsafe { return_data_copy_impl(ctx, sub_ctx, dest_offset, src_offset, requested_ret_len) as u8 }
+}
 
-    // Get return and memory data from the callee
-    let ret_offset = sub_ctx.return_off();
+unsafe fn return_data_copy_impl(
+    ctx: *mut Context,
+    sub_ctx: *const Context,
+    dest_offset: u32,
+    src_offset: u32,
+    requested_ret_len: u32,
+) -> CopyError {
+    let ctx = match unsafe { ctx.as_mut() } {
+        Some(ctx) => ctx,
+        None => return CopyError::InvalidPtr,
+    };
+    let sub_ctx = match unsafe { sub_ctx.as_ref() } {
+        Some(ctx) => ctx,
+        None => return CopyError::InvalidPtr,
+    };
+
+    // Get return data from the callee
     let ret_len = sub_ctx.return_len();
-    let mem_len = sub_ctx.memory_len();
 
     trace!(
-        "jet_contracts_call_return_data_copy:\ndest_offset: {}\nrequested_ret_len: {}\n\nret_offset: {}\nret_len: {}\nmem_len: {}",
-        dest_offset, requested_ret_len, ret_offset, ret_len, mem_len
+        "jet_contracts_call_return_data_copy:\ndest_offset: {}\nrequested_ret_len: {}\n\nret_len: {}",
+        dest_offset, requested_ret_len, ret_len
     );
 
-    // Bounds checks for the memory and return data
-    if src_offset + requested_ret_len > ret_len {
-        return 3;
+    // TODO: Validate ret_offset + ret_len <= memory_len once memory_len is tracked by MSTORE
+
+    // Bounds check: validate src_offset + requested_ret_len doesn't overflow and is within ret_len
+    let src_end = match src_offset.checked_add(requested_ret_len) {
+        Some(end) => end,
+        None => return CopyError::ArithmeticOverflow,
+    };
+    if src_end > ret_len {
+        return CopyError::BoundsCheckFailed;
     }
-    let ret_offset_end = ret_offset + requested_ret_len;
-    if ret_offset_end > ret_len {
-        return 4;
-    }
-    // TODO: Enable this check after adding memory len handling
-    // if ret_offset_end > mem_len {
-    //     return 3;
-    // }
+
+    // Validate destination range doesn't overflow
+    let required_memory_len = match dest_offset.checked_add(requested_ret_len) {
+        Some(len) => len,
+        None => return CopyError::ArithmeticOverflow,
+    };
 
     // Ensure memory is large enough for the write
-    let required_memory_len = dest_offset + requested_ret_len;
     if ctx.memory_len() < required_memory_len {
         if required_memory_len > ctx.memory_cap() {
             // TODO: Expand memory capacity
-            return 5; // Memory expansion needed but not implemented
+            return CopyError::MemoryExpansionNeeded;
         }
         // Expand memory length to accommodate the write
         ctx.memory_len = required_memory_len;
     }
 
-    // Copy the data
-    let src_range = src_offset as usize..(src_offset + requested_ret_len) as usize;
-    let dest_range = dest_offset as usize..(dest_offset + requested_ret_len) as usize;
+    // Copy the data - all bounds have been validated
+    let src_start = src_offset as usize;
+    let src_range = src_start..src_end as usize;
+    let dest_start = dest_offset as usize;
+    let dest_range = dest_start..required_memory_len as usize;
     let dest = &mut ctx.memory_mut()[dest_range];
     dest.copy_from_slice(&sub_ctx.return_data()[src_range]);
-    0
+    CopyError::Success
 }
 
 //  Utils
