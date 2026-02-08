@@ -60,6 +60,7 @@ helpers (like return-data copying) can enforce bounds safely.
 
 5. **Tests**
    - Add tests in `crates/jet/tests/test_roms.rs` (or runtime-level tests) to validate that:
-     - MSTORE at offsets `0`, `31`, and `32` expands memory to `32`, `32`, and `64` bytes.
+     - MSTORE at offsets `0`, `31`, and `32` expands memory to `32`, `64`, and `64` bytes.
      - MSTORE8 at offsets `0`, `31`, and `32` expands memory to `32`, `32`, and `64` bytes.
      - Memory expansion is word-aligned and monotonic.
+ 
