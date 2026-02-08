@@ -1,7 +1,7 @@
 use log::info;
 use syntect::{
     easy::HighlightLines,
-    highlighting::{Color, Style, ThemeSet},
+    highlighting::{Color, ThemeSet},
     parsing::SyntaxSet,
     util::{LinesWithEndings, as_24_bit_terminal_escaped},
 };
