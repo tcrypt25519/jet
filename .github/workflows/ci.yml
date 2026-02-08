@@ -18,6 +18,8 @@ jobs:
   ci:
     name: CI
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -36,8 +38,13 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Check formatting
-        run: cargo fmt --all -- --check
+      - name: Apply formatting fixes
+        run: cargo fmt --all
+
+      - name: Commit formatting fixes
+        uses: tcrypt25519/ci/.github/actions/commit-changes@master
+        with:
+          commit-message: "style: apply rustfmt formatting 🤖"
 
       - name: Run clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
