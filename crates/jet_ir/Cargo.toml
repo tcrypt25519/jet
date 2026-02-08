@@ -7,4 +7,4 @@ authors = ["Tyler Smith"]
 description = "Shared LLVM IR types and function registry for Jet EVM JIT compiler."
 
 [dependencies]
-inkwell = { git = "https://github.com/TheDan64/inkwell.git", features = ["llvm21-1"] }
+inkwell = { git = "https://github.com/TheDan64/inkwell.git", features = ["llvm21-1-prefer-dynamic"] }

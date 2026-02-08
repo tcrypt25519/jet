@@ -16,7 +16,7 @@ name = "jetdbg"
 [dependencies]
 log = "0.4"
 simple_logger = "5.0.0"
-inkwell = { git = "https://github.com/TheDan64/inkwell.git", features = ["llvm21-1"] }
+inkwell = { git = "https://github.com/TheDan64/inkwell.git", features = ["llvm21-1-prefer-dynamic"] }
 clap = { version = "4.5.4", features = ["derive"] }
 serde = { version = "1.0.201", features = ["derive"] }
 syntect = "5.2.0"

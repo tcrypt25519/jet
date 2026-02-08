@@ -14,6 +14,12 @@ LLVM usage is limited to code generation (`inkwell` / `llvm-sys`), and neither
 of those crates requires the Polly library or its headers.
 
 Additionally, `libpolly-21-dev` is absent from both Termux and the Ubuntu 24.04
-repos (including the apt.llvm.org channel), so requiring it causes `apt-get
-install` to fail entirely — taking `llvm-21-dev` (which *is* needed) down with
-it under `set -e`.
+repos (including the apt.llvm.org channel). The `llvm-sys` build script discovers
+Polly via `llvm-config --libs` (because the official apt.llvm.org packages ship
+LLVM compiled with Polly enabled) and emits `-l static=Polly -l static=PollyISL`. Without the static
+archives those link lines fail.
+
+The fix is to use the `llvm21-1-prefer-dynamic` inkwell feature so that `llvm-sys`
+links against the monolithic `libLLVM-21.so` instead of individual static
+archives. Polly is already compiled into that shared library, so no separate
+package is needed.
