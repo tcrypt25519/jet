@@ -476,15 +476,15 @@ pub(crate) fn signextend(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
         .into_int_value();
 
     // shift = 248 - 8 * b_safe  (moves sign bit at position 8*b+7 to bit 255)
-    let b8 = bctx.builder.build_int_mul(b_safe, const_8, "signextend_b8")?;
+    let b8 = bctx
+        .builder
+        .build_int_mul(b_safe, const_8, "signextend_b8")?;
     let shift = bctx
         .builder
         .build_int_sub(const_248, b8, "signextend_shift")?;
 
     // (x << shift) >>arithmetic shift  — sign-extends from the original sign bit
-    let shl = bctx
-        .builder
-        .build_left_shift(x, shift, "signextend_shl")?;
+    let shl = bctx.builder.build_left_shift(x, shift, "signextend_shl")?;
     let extended = bctx
         .builder
         .build_right_shift(shl, shift, true, "signextend_sar")?;
