@@ -45,11 +45,15 @@ struct BuildArgs {
 }
 
 #[derive(Error, Debug)]
-#[error(transparent)]
 enum Error {
+    #[error(transparent)]
     Clap(#[from] clap::Error),
+    #[error(transparent)]
     Build(#[from] jet::builder::Error),
+    #[error(transparent)]
     Engine(#[from] jet::engine::Error),
+    #[error("Failed to initialize logger: {0}")]
+    Logger(#[from] log::SetLoggerError),
 }
 
 fn build_cmd(args: BuildArgs) -> Result<(), Error> {
@@ -197,10 +201,7 @@ fn main() -> Result<(), Error> {
         Some(level) => SimpleLogger::new().with_level(level),
         None => SimpleLogger::new().with_level(log::LevelFilter::Trace),
     };
-    logger.init().map_err(|e| {
-        eprintln!("Failed to initialize logger: {}", e);
-        std::process::exit(1);
-    }).ok();
+    logger.init()?;
 
     // Dispatch command
     match cli.cmd {

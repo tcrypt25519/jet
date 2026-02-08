@@ -9,9 +9,6 @@ pub enum RuntimeError {
     #[error("Failed to create memory layout: {0}")]
     MemoryLayout(String),
 
-    #[error("Invalid pointer dereference")]
-    NullPointer,
-
     #[error("Invariant violation: {0}")]
     InvariantViolation(String),
 }

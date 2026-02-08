@@ -70,10 +70,19 @@ impl Context {
         self.return_len
     }
 
+    /// Returns the return data slice from memory.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that `return_off + return_len` does not exceed `memory_len`
+    /// and that the memory pointer is valid. Use caution when calling this method, as it
+    /// creates an unsafe slice without bounds checking.
+    ///
+    /// This validation should be performed before setting `return_off` and `return_len`,
+    /// or at call sites before using this method.
     pub fn return_data(&self) -> &[u8] {
         let offset = self.return_off as usize;
         let len = self.return_len as usize;
-        // TODO: Check bounds
         unsafe { std::slice::from_raw_parts(self.memory_ptr.add(offset), len) }
     }
 
@@ -166,9 +175,7 @@ impl Context {
     /// Returns an error if memory allocation for the sub-context fails.
     pub(crate) fn init_sub_call(&mut self) -> Result<&mut Context> {
         self.sub_call = Some(Box::new(Context::new()?));
-        self.sub_call
-            .as_deref_mut()
-            .ok_or_else(|| RuntimeError::InvariantViolation("init_sub_call: sub_call was None after allocation".to_string()))
+        Ok(self.sub_call.as_deref_mut().expect("just assigned"))
     }
 }
 

@@ -91,12 +91,14 @@ pub unsafe extern "C" fn jet_contract_call(
 
     let ret_dest = unsafe { *ret_dest };
     let ret_len = unsafe { *ret_len };
-    let copy_result = jet_contract_call_return_data_copy(ctx, callee_ctx, ret_dest, 0, ret_len);
+    let copy_result = unsafe { return_data_copy_impl(ctx, callee_ctx, ret_dest, 0, ret_len) };
 
-    // Map copy result to documented error codes
     match copy_result {
-        0 => ContractCallError::Success as i8,
-        _ => ContractCallError::CopyFailed as i8,
+        CopyError::Success => ContractCallError::Success as i8,
+        err => {
+            log::error!("Return data copy failed: {:?}", err);
+            ContractCallError::CopyFailed as i8
+        }
     }
 }
 
@@ -107,6 +109,8 @@ enum CopyError {
     Success = 0,
     InvalidPtr = 1,
     BoundsCheckFailed = 2,
+    ArithmeticOverflow = 3,
+    MemoryExpansionNeeded = 4,
 }
 
 /// Copies return data from the sub context to the parent context.
@@ -115,12 +119,14 @@ enum CopyError {
 ///
 /// This function is unsafe because it dereferences the given pointers. The caller must ensure
 /// that all the pointers are valid.
-/// 
+///
 /// # Returns
-/// 
+///
 /// - `0`: Success
 /// - `1`: Invalid context or sub-context pointer
 /// - `2`: Bounds check failed
+/// - `3`: Arithmetic overflow in offset calculations
+/// - `4`: Memory expansion needed but not implemented
 pub unsafe extern "C" fn jet_contract_call_return_data_copy(
     ctx: *mut Context,
     sub_ctx: *const Context,
@@ -128,13 +134,23 @@ pub unsafe extern "C" fn jet_contract_call_return_data_copy(
     src_offset: u32,
     requested_ret_len: u32,
 ) -> u8 {
+    unsafe { return_data_copy_impl(ctx, sub_ctx, dest_offset, src_offset, requested_ret_len) as u8 }
+}
+
+unsafe fn return_data_copy_impl(
+    ctx: *mut Context,
+    sub_ctx: *const Context,
+    dest_offset: u32,
+    src_offset: u32,
+    requested_ret_len: u32,
+) -> CopyError {
     let ctx = match unsafe { ctx.as_mut() } {
         Some(ctx) => ctx,
-        None => return CopyError::InvalidPtr as u8,
+        None => return CopyError::InvalidPtr,
     };
     let sub_ctx = match unsafe { sub_ctx.as_ref() } {
         Some(ctx) => ctx,
-        None => return CopyError::InvalidPtr as u8,
+        None => return CopyError::InvalidPtr,
     };
 
     // Get return and memory data from the callee
@@ -147,36 +163,48 @@ pub unsafe extern "C" fn jet_contract_call_return_data_copy(
         dest_offset, requested_ret_len, ret_offset, ret_len, mem_len
     );
 
-    // Bounds checks for the memory and return data
-    if src_offset + requested_ret_len > ret_len {
-        return CopyError::BoundsCheckFailed as u8;
+    // Validate return data is within sub_ctx memory bounds (Issue 3)
+    let ret_end = match ret_offset.checked_add(ret_len) {
+        Some(end) => end,
+        None => return CopyError::ArithmeticOverflow,
+    };
+    if ret_end > mem_len {
+        return CopyError::BoundsCheckFailed;
     }
-    let ret_offset_end = ret_offset + requested_ret_len;
-    if ret_offset_end > ret_len {
-        return CopyError::BoundsCheckFailed as u8;
+
+    // Bounds check: validate src_offset + requested_ret_len doesn't overflow and is within ret_len
+    let src_end = match src_offset.checked_add(requested_ret_len) {
+        Some(end) => end,
+        None => return CopyError::ArithmeticOverflow,
+    };
+    if src_end > ret_len {
+        return CopyError::BoundsCheckFailed;
     }
-    // TODO: Enable this check after adding memory len handling
-    // if ret_offset_end > mem_len {
-    //     return 3;
-    // }
+
+    // Validate destination range doesn't overflow
+    let required_memory_len = match dest_offset.checked_add(requested_ret_len) {
+        Some(len) => len,
+        None => return CopyError::ArithmeticOverflow,
+    };
 
     // Ensure memory is large enough for the write
-    let required_memory_len = dest_offset + requested_ret_len;
     if ctx.memory_len() < required_memory_len {
         if required_memory_len > ctx.memory_cap() {
             // TODO: Expand memory capacity
-            return 5; // Memory expansion needed but not implemented
+            return CopyError::MemoryExpansionNeeded;
         }
         // Expand memory length to accommodate the write
         ctx.memory_len = required_memory_len;
     }
 
-    // Copy the data
-    let src_range = src_offset as usize..(src_offset + requested_ret_len) as usize;
-    let dest_range = dest_offset as usize..(dest_offset + requested_ret_len) as usize;
+    // Copy the data - all bounds have been validated
+    let src_start = src_offset as usize;
+    let src_range = src_start..src_end as usize;
+    let dest_start = dest_offset as usize;
+    let dest_range = dest_start..required_memory_len as usize;
     let dest = &mut ctx.memory_mut()[dest_range];
     dest.copy_from_slice(&sub_ctx.return_data()[src_range]);
-    CopyError::Success as u8
+    CopyError::Success
 }
 
 //  Utils
