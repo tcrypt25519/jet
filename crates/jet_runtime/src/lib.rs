@@ -19,6 +19,6 @@ pub const MEMORY_INITIAL_SIZE_WORDS: u32 = 1024;
 pub const STORAGE_INITIAL_SIZE_WORDS: u32 = 1024;
 pub const SUB_CALL_RETURN_MAX_SIZE_WORDS: u32 = 1024;
 
-pub use error::{RuntimeError, Result};
+pub use error::{Result, RuntimeError};
 pub use jet_ir::*;
 pub use runtime_builder::RuntimeBuilder;

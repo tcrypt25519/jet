@@ -44,7 +44,8 @@ impl<'ctx> Manager<'ctx> {
 
     fn verify_contract(&self, addr: &str) -> bool {
         let func_name = exec::mangle_contract_fn(addr);
-        self.build_env.module()
+        self.build_env
+            .module()
             .get_function(&func_name)
             .map(|func| func.verify(true))
             .unwrap_or(false)

@@ -1,7 +1,11 @@
 use inkwell::execution_engine::ExecutionEngine;
 use log::error;
 
-use crate::{error::{RuntimeError, Result}, symbols::FN_CONTRACT_PREFIX, *};
+use crate::{
+    error::{Result, RuntimeError},
+    symbols::FN_CONTRACT_PREFIX,
+    *,
+};
 
 pub type Word = [u8; 32];
 pub type Hash = [u8; 32];
@@ -37,7 +41,7 @@ impl Context {
 
         if memory_ptr.is_null() {
             return Err(RuntimeError::MemoryAllocation(
-                "Failed to allocate memory for EVM context".to_string()
+                "Failed to allocate memory for EVM context".to_string(),
             ));
         }
 
@@ -50,7 +54,7 @@ impl Context {
             stack: [[0; 32]; STACK_SIZE_WORDS as usize],
             memory_ptr,
             memory_len: 0,
-            memory_cap: memory_size as u32,  // Use calculated memory_size
+            memory_cap: memory_size as u32, // Use calculated memory_size
         })
     }
 
@@ -167,11 +171,11 @@ impl Context {
     }
 
     /// Creates a new context and sets it as the sub context.
-    /// 
+    ///
     /// Returns a mutable reference to the newly created sub-context.
-    /// 
+    ///
     /// # Errors
-    /// 
+    ///
     /// Returns an error if memory allocation for the sub-context fails.
     pub(crate) fn init_sub_call(&mut self) -> Result<&mut Context> {
         self.sub_call = Some(Box::new(Context::new()?));

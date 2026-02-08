@@ -145,9 +145,9 @@ impl<'ctx, 'b> CodeBlocks<'ctx, 'b> {
             is_jumpdest: false,
             terminates: false,
         });
-        self.blocks
-            .last_mut()
-            .ok_or_else(|| Error::InvariantViolation("CodeBlocks::add: no block after push".to_string()))
+        self.blocks.last_mut().ok_or_else(|| {
+            Error::InvariantViolation("CodeBlocks::add: no block after push".to_string())
+        })
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -176,7 +176,10 @@ pub fn build(env: &'_ Env<'_>, name: &str, rom: &[u8]) -> Result<(), Error> {
     info!(
         "Created function {} in module {}",
         name,
-        env.module().get_name().to_str().unwrap_or("<invalid UTF-8>")
+        env.module()
+            .get_name()
+            .to_str()
+            .unwrap_or("<invalid UTF-8>")
     );
 
     // Create the preamble block
@@ -189,7 +192,8 @@ pub fn build(env: &'_ Env<'_>, name: &str, rom: &[u8]) -> Result<(), Error> {
     build_contract_body(&bctx, &code_blocks)?;
 
     // Connect the preamble block to the entry block
-    let entry_block = code_blocks.first()
+    let entry_block = code_blocks
+        .first()
         .ok_or_else(|| Error::InvariantViolation("No code blocks found".to_string()))?;
     bctx.builder.position_at_end(preamble_block);
     bctx.builder

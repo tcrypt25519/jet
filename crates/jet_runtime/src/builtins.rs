@@ -29,9 +29,9 @@ enum ContractCallError {
 ///
 /// This function is unsafe because it dereferences the given pointers. The caller must ensure that
 /// all the pointers are valid.
-/// 
+///
 /// # Returns
-/// 
+///
 /// - `0`: Success
 /// - `1`: Contract lookup failed
 /// - `2`: Contract invocation failed  
@@ -52,11 +52,11 @@ pub unsafe extern "C" fn jet_contract_call(
         Some(engine) => engine,
         None => return ContractCallError::InvalidJitEngine as i8,
     };
-    
+
     if addr.is_null() || ret_dest.is_null() || ret_len.is_null() {
         return ContractCallError::InvalidPointer as i8;
     }
-    
+
     let addr_slice = unsafe { std::slice::from_raw_parts(addr, ADDRESS_SIZE_BYTES) };
     let fn_ptr = jet_contract_fn_lookup(jit_engine, addr_slice);
     if fn_ptr == 0 {
@@ -68,7 +68,7 @@ pub unsafe extern "C" fn jet_contract_call(
         Some(ctx) => ctx,
         None => return ContractCallError::InvalidCtx as i8,
     };
-    
+
     let callee_ctx = match caller_ctx.init_sub_call() {
         Ok(ctx) => ctx,
         Err(e) => {

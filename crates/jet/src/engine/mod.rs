@@ -62,8 +62,7 @@ impl<'ctx> Engine<'ctx> {
         };
 
         trace!("Running function...");
-        let ctx = exec::Context::new()
-            .map_err(|e| Error::Build(builder::Error::Runtime(e)))?;
+        let ctx = exec::Context::new().map_err(|e| Error::Build(builder::Error::Runtime(e)))?;
         let result = unsafe { contract_exec_fn.call(&ctx as *const exec::Context) };
         trace!("Function returned");
 
