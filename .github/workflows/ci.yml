@@ -27,20 +27,19 @@ jobs:
         id: cache-llvm
         uses: actions/cache@v4
         with:
-          path: llvm-21-install.tar.gz
-          key: llvm-21-${{ runner.os }}-${{ hashFiles('scripts/install-llvm.sh', 'scripts/llvm.sh') }}
+          path: ${{ runner.temp }}/llvm-21-install.tar.gz
+          key: llvm-21-${{ runner.os }}-${{ runner.arch }}-${{ env.ImageOS }}-${{ hashFiles('scripts/install-llvm.sh', 'scripts/llvm.sh') }}
 
       - name: Restore LLVM from cache
         if: steps.cache-llvm.outputs.cache-hit == 'true'
         run: |
-          sudo tar -xzf llvm-21-install.tar.gz -C /
+          sudo tar -xzf ${{ runner.temp }}/llvm-21-install.tar.gz -C /
 
       - name: Install LLVM 21
         if: steps.cache-llvm.outputs.cache-hit != 'true'
         run: |
           bash scripts/install-llvm.sh
-          # Cache the installed LLVM for future runs
-          sudo tar -czf llvm-21-install.tar.gz -C / \
+          sudo tar -czf ${{ runner.temp }}/llvm-21-install.tar.gz -C / \
             usr/lib/llvm-21 \
             usr/bin/llvm-config-21
 
