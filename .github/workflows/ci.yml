@@ -28,7 +28,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/llvm-21-install.tar.gz
-          key: llvm-21-${{ runner.os }}-${{ runner.arch }}-${{ env.ImageOS }}-${{ hashFiles('scripts/install-llvm.sh', 'scripts/llvm.sh') }}
+          # Include Cargo.lock in key: when inkwell features change (static/dynamic linking),
+          # we need a fresh LLVM cache. This prevents using cached LLVM built for static
+          # when we've switched to prefer-dynamic (or vice versa).
+          # v2: force cache invalidation for dynamic library support
+          key: v2-llvm-21-${{ runner.os }}-${{ runner.arch }}-${{ env.ImageOS }}-${{ hashFiles('Cargo.lock', 'scripts/install-llvm.sh', 'scripts/llvm.sh') }}
 
       - name: Restore LLVM from cache
         if: steps.cache-llvm.outputs.cache-hit == 'true'
@@ -49,6 +53,10 @@ jobs:
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
         with:
+          # Include Cargo.lock hash in prefix-key to ensure cache invalidation
+          # when dependencies change (especially inkwell linking preferences).
+          # This prevents using stale artifacts built with different LLVM linking.
+          prefix-key: "v1-rust-${{ hashFiles('Cargo.lock') }}"
           cache-on-failure: true
 
       - name: Install Rust stable
