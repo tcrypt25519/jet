@@ -289,7 +289,7 @@ pub unsafe extern "C" fn jet_mem_expand(ctx: *mut Context, offset: u32, size: u3
     };
 
     // Round up to 32-byte boundary
-    let required_len = ((end_offset + 31) / 32) * 32;
+    let required_len = end_offset.div_ceil(32) * 32;
 
     // If already large enough, we're done
     if required_len <= ctx.memory_len {
