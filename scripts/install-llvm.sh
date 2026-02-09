@@ -25,6 +25,7 @@ case "$PLATFORM" in
         sudo apt-get install -y \
             llvm-${LLVM_VERSION} \
             llvm-${LLVM_VERSION}-dev \
+            libllvm${LLVM_VERSION} \
             clang-${LLVM_VERSION}
         LLVM_PREFIX="/usr/lib/llvm-${LLVM_VERSION}"
         ;;

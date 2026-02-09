@@ -31,8 +31,8 @@ jobs:
           # Include Cargo.lock in key: when inkwell features change (static/dynamic linking),
           # we need a fresh LLVM cache. This prevents using cached LLVM built for static
           # when we've switched to prefer-dynamic (or vice versa).
-          # v2: force cache invalidation for dynamic library support
-          key: v2-llvm-21-${{ runner.os }}-${{ runner.arch }}-${{ env.ImageOS }}-${{ hashFiles('Cargo.lock', 'scripts/install-llvm.sh', 'scripts/llvm.sh') }}
+          # v3: add libllvm21 package for shared library (libLLVM-21.so)
+          key: v3-llvm-21-${{ runner.os }}-${{ runner.arch }}-${{ env.ImageOS }}-${{ hashFiles('Cargo.lock', 'scripts/install-llvm.sh', 'scripts/llvm.sh') }}
 
       - name: Restore LLVM from cache
         if: steps.cache-llvm.outputs.cache-hit == 'true'
