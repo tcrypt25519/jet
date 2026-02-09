@@ -76,6 +76,7 @@ pub(crate) struct Symbols<'ctx> {
     mem_store: FunctionValue<'ctx>,
     mem_store_byte: FunctionValue<'ctx>,
     mem_load: FunctionValue<'ctx>,
+    mem_expand: FunctionValue<'ctx>,
 
     contract_call: FunctionValue<'ctx>,
     contract_call_return_data_copy: FunctionValue<'ctx>,
@@ -98,6 +99,7 @@ impl<'ctx> Symbols<'ctx> {
         let mem_store = module.get_function(jet_runtime::symbols::FN_MEM_STORE_WORD)?;
         let mem_store_byte = module.get_function(jet_runtime::symbols::FN_MEM_STORE_BYTE)?;
         let mem_load = module.get_function(jet_runtime::symbols::FN_MEM_LOAD)?;
+        let mem_expand = module.get_function(jet_runtime::symbols::FN_MEM_EXPAND)?;
 
         let contract_call = module.get_function(jet_runtime::symbols::FN_CONTRACT_CALL)?;
         let contract_call_return_data_copy =
@@ -119,6 +121,7 @@ impl<'ctx> Symbols<'ctx> {
             mem_store,
             mem_store_byte,
             mem_load,
+            mem_expand,
 
             contract_call,
             contract_call_return_data_copy,
@@ -162,6 +165,10 @@ impl<'ctx> Symbols<'ctx> {
 
     pub(crate) fn mem_load(&self) -> FunctionValue<'ctx> {
         self.mem_load
+    }
+
+    pub(crate) fn mem_expand(&self) -> FunctionValue<'ctx> {
+        self.mem_expand
     }
 
     pub(crate) fn contract_call(&self) -> FunctionValue<'ctx> {

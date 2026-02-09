@@ -291,4 +291,105 @@ rom_tests! {
             ..Default::default()
         },
     },
+
+    // Memory expansion tests
+    mstore_at_zero_expands_to_32: Test {
+        roms: vec![vec![
+            Instruction::PUSH1.opcode(), 0x42, // value
+            Instruction::PUSH1.opcode(), 0x00, // offset = 0
+            Instruction::MSTORE.opcode(),      // MSTORE writes 32 bytes
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 0,
+            memory_len: Some(32), // ceil((0 + 32) / 32) * 32 = 32
+            ..Default::default()
+        },
+    },
+
+    mstore_at_31_expands_to_64: Test {
+        roms: vec![vec![
+            Instruction::PUSH1.opcode(), 0x42, // value
+            Instruction::PUSH1.opcode(), 0x1F, // offset = 31
+            Instruction::MSTORE.opcode(),      // MSTORE writes 32 bytes
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 0,
+            memory_len: Some(64), // ceil((31 + 32) / 32) * 32 = 64
+            ..Default::default()
+        },
+    },
+
+    mstore_at_32_expands_to_64: Test {
+        roms: vec![vec![
+            Instruction::PUSH1.opcode(), 0x42, // value
+            Instruction::PUSH1.opcode(), 0x20, // offset = 32
+            Instruction::MSTORE.opcode(),      // MSTORE writes 32 bytes
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 0,
+            memory_len: Some(64), // ceil((32 + 32) / 32) * 32 = 64
+            ..Default::default()
+        },
+    },
+
+    mstore8_at_zero_expands_to_32: Test {
+        roms: vec![vec![
+            Instruction::PUSH1.opcode(), 0x42, // value
+            Instruction::PUSH1.opcode(), 0x00, // offset = 0
+            Instruction::MSTORE8.opcode(),     // MSTORE8 writes 1 byte
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 0,
+            memory_len: Some(32), // ceil((0 + 1) / 32) * 32 = 32
+            ..Default::default()
+        },
+    },
+
+    mstore8_at_31_expands_to_32: Test {
+        roms: vec![vec![
+            Instruction::PUSH1.opcode(), 0x42, // value
+            Instruction::PUSH1.opcode(), 0x1F, // offset = 31
+            Instruction::MSTORE8.opcode(),     // MSTORE8 writes 1 byte
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 0,
+            memory_len: Some(32), // ceil((31 + 1) / 32) * 32 = 32
+            ..Default::default()
+        },
+    },
+
+    mstore8_at_32_expands_to_64: Test {
+        roms: vec![vec![
+            Instruction::PUSH1.opcode(), 0x42, // value
+            Instruction::PUSH1.opcode(), 0x20, // offset = 32
+            Instruction::MSTORE8.opcode(),     // MSTORE8 writes 1 byte
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 0,
+            memory_len: Some(64), // ceil((32 + 1) / 32) * 32 = 64
+            ..Default::default()
+        },
+    },
+
+    memory_expansion_is_monotonic: Test {
+        roms: vec![vec![
+            // First MSTORE expands to 32
+            Instruction::PUSH1.opcode(), 0x11,
+            Instruction::PUSH1.opcode(), 0x00,
+            Instruction::MSTORE.opcode(),
+            // Second MSTORE at smaller offset doesn't shrink memory
+            Instruction::PUSH1.opcode(), 0x22,
+            Instruction::PUSH1.opcode(), 0x00,
+            Instruction::MSTORE.opcode(),
+            // Third MSTORE at higher offset expands to 64
+            Instruction::PUSH1.opcode(), 0x33,
+            Instruction::PUSH1.opcode(), 0x20,
+            Instruction::MSTORE.opcode(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 0,
+            memory_len: Some(64), // Expanded monotonically: 0 -> 32 -> 32 -> 64
+            ..Default::default()
+        },
+    },
 }

@@ -748,6 +748,16 @@ pub(crate) fn mload(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
 
 pub(crate) fn mstore(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     let (loc, val) = __stack_pop_2(bctx)?;
+
+    // Expand memory if needed (MSTORE writes 32 bytes)
+    let loc_i32 = load_i32(bctx, loc)?;
+    let size = bctx.env.types().i32.const_int(32, false);
+    bctx.builder.build_call(
+        bctx.env.symbols().mem_expand(),
+        &[bctx.registers.exec_ctx.into(), loc_i32.into(), size.into()],
+        "mstore_expand",
+    )?;
+
     bctx.builder.build_call(
         bctx.env.symbols().mem_store(),
         &[bctx.registers.exec_ctx.into(), loc.into(), val.into()],
@@ -758,6 +768,16 @@ pub(crate) fn mstore(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
 
 pub(crate) fn mstore8(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     let (loc, val) = __stack_pop_2(bctx)?;
+
+    // Expand memory if needed (MSTORE8 writes 1 byte)
+    let loc_i32 = load_i32(bctx, loc)?;
+    let size = bctx.env.types().i32.const_int(1, false);
+    bctx.builder.build_call(
+        bctx.env.symbols().mem_expand(),
+        &[bctx.registers.exec_ctx.into(), loc_i32.into(), size.into()],
+        "mstore8_expand",
+    )?;
+
     bctx.builder.build_call(
         bctx.env.symbols().mem_store_byte(),
         &[bctx.registers.exec_ctx.into(), loc.into(), val.into()],

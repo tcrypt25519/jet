@@ -98,6 +98,20 @@ impl<'ctx> RuntimeBuilder<'ctx> {
                 .fn_type(&[self.types.ptr.into(), self.types.ptr.into()], false),
             None,
         );
+
+        // Memory operations
+        self.module.add_function(
+            "jet.mem.expand",
+            self.types.i8.fn_type(
+                &[
+                    self.types.ptr.into(),
+                    self.types.i32.into(),
+                    self.types.i32.into(),
+                ],
+                false,
+            ),
+            None,
+        );
     }
 
     /// Build jet.stack.push.i256 function in IR.
