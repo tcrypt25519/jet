@@ -17,19 +17,30 @@ case "$PLATFORM" in
         LLVM_PREFIX="/data/data/com.termux/files/usr"
         ;;
 
-    debian)
-        if ! apt-cache policy | grep -q "apt.llvm.org"; then
-            sudo bash "$SCRIPT_DIR/llvm.sh" ${LLVM_VERSION}
-        fi
-        sudo apt-get update
-        sudo apt-get install -y \
-            llvm-${LLVM_VERSION} \
-            llvm-${LLVM_VERSION}-dev \
-            libllvm${LLVM_VERSION} \
-            clang-${LLVM_VERSION}
-        LLVM_PREFIX="/usr/lib/llvm-${LLVM_VERSION}"
-        ;;
-
+	debian)
+	    # 1. Ensure the repo is added if missing
+	    if ! apt-cache policy | grep -q "apt.llvm.org"; then
+	        sudo bash "$SCRIPT_DIR/llvm.sh" ${LLVM_VERSION}
+	    fi
+	    
+	    # 2. Update and install
+	    sudo apt-get update
+	    sudo apt-get install -y \
+	        llvm-${LLVM_VERSION} \
+	        llvm-${LLVM_VERSION}-dev \
+	        libclang-common-${LLVM_VERSION}-dev
+	    LLVM_CONFIG="llvm-config-${LLVM_VERSION}"
+	    if command -v $LLVM_CONFIG >/dev/null; then
+	        LLVM_PREFIX=$($LLVM_CONFIG --prefix)
+	       LLVM_INCLUDE=$($LLVM_CONFIG --includedir)
+	        
+	        # Validation for the Ubuntu/Debian split
+	        if [ ! -d "$LLVM_INCLUDE/llvm" ] && [ -d "/usr/include/llvm-${LLVM_VERSION}" ]; then
+	            echo "Detected Debian-style header split. Redirecting include path..."
+	            LLVM_INCLUDE="/usr/include/llvm-${LLVM_VERSION}"
+	        fi
+	    fi
+	    ;;
     *)
         echo "ERROR: Unsupported platform: $PLATFORM"
         exit 1
