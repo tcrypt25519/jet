@@ -44,6 +44,8 @@ jobs:
             usr/bin/llvm-config-21
 
       - name: Fix LLVM include path mismatch
+        # Always run to ensure symlinks exist, even after cache restoration
+        # The script is idempotent and will skip if symlinks already exist
         run: bash scripts/fix-llvm-paths.sh
 
       - name: Debug LLVM Paths
