@@ -9,9 +9,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  # Disable incremental compilation for CI builds
   CARGO_INCREMENTAL: 0
-  # More precise error messages
   RUSTFLAGS: "-D warnings"
 
 jobs:
@@ -28,11 +26,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/llvm-21-install.tar.gz
-          # Include Cargo.lock in key: when inkwell features change (static/dynamic linking),
-          # we need a fresh LLVM cache. This prevents using cached LLVM built for static
-          # when we've switched to prefer-dynamic (or vice versa).
-          # v4: force fresh cache after memory expansion changes
-          key: v4-llvm-21-${{ runner.os }}-${{ runner.arch }}-${{ env.ImageOS }}-${{ hashFiles('Cargo.lock', 'scripts/install-llvm.sh', 'scripts/llvm.sh') }}
+          key: v5-llvm-21-${{ runner.os }}-${{ runner.arch }}-${{ env.ImageOS }}-${{ hashFiles('Cargo.lock', 'scripts/install-llvm.sh', 'scripts/llvm.sh') }}
 
       - name: Restore LLVM from cache
         if: steps.cache-llvm.outputs.cache-hit == 'true'
@@ -45,7 +39,19 @@ jobs:
           bash scripts/install-llvm.sh
           sudo tar -czf ${{ runner.temp }}/llvm-21-install.tar.gz -C / \
             usr/lib/llvm-21 \
+            usr/include/llvm-21 \
             usr/bin/llvm-config-21
+
+      - name: Debug LLVM Paths
+        run: |
+          echo "Checking LLVM Prefix directory..."
+          ls -R /usr/lib/llvm-21 | grep "Target.h" || echo "Target.h not found in /usr/lib/llvm-21"
+          echo "---"
+          echo "Checking System Include directory..."
+          ls -R /usr/include/llvm-21 | grep "Target.h" || echo "Target.h not found in /usr/include/llvm-21"
+          echo "---"
+          echo "llvm-config-21 --includedir output:"
+          /usr/bin/llvm-config-21 --includedir || echo "llvm-config-21 not found"
 
       - name: Set LLVM environment variable
         run: echo "LLVM_SYS_211_PREFIX=$(bash scripts/detect-llvm.sh)" >> $GITHUB_ENV
@@ -53,9 +59,6 @@ jobs:
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
         with:
-          # Include Cargo.lock hash in prefix-key to ensure cache invalidation
-          # when dependencies change (especially inkwell linking preferences).
-          # This prevents using stale artifacts built with different LLVM linking.
           prefix-key: "v1-rust-${{ hashFiles('Cargo.lock') }}"
           cache-on-failure: true
 
@@ -71,7 +74,7 @@ jobs:
         if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
         uses: tcrypt25519/ci/.github/actions/commit-changes@main
         with:
-          commit-message: "style: apply rustfmt formatting 🤖"
+          commit-message: "style: apply rustfmt formatting "
 
       - name: Run clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
