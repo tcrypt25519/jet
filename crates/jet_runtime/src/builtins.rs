@@ -201,6 +201,38 @@ unsafe fn return_data_copy_impl(
 //  Utils
 //
 
+pub extern "C" fn jet_ops_exp(base: &mut [u8; 32], exp: &[u8; 32]) -> i8 {
+    // Stack words are stored little-endian (PUSH immediates are reversed on load).
+    use bnum::types::U256;
+    let read = |b: &[u8; 32]| {
+        U256::from_digits([
+            u64::from_le_bytes(b[0..8].try_into().unwrap()),
+            u64::from_le_bytes(b[8..16].try_into().unwrap()),
+            u64::from_le_bytes(b[16..24].try_into().unwrap()),
+            u64::from_le_bytes(b[24..32].try_into().unwrap()),
+        ])
+    };
+
+    let mut b = read(base);
+    let mut e = read(exp);
+    let mut result = U256::ONE;
+
+    while e != U256::ZERO {
+        if e & U256::ONE != U256::ZERO {
+            result = result.wrapping_mul(b);
+        }
+        b = b.wrapping_mul(b);
+        e >>= 1u32;
+    }
+
+    let d = result.digits();
+    base[0..8].copy_from_slice(&d[0].to_le_bytes());
+    base[8..16].copy_from_slice(&d[1].to_le_bytes());
+    base[16..24].copy_from_slice(&d[2].to_le_bytes());
+    base[24..32].copy_from_slice(&d[3].to_le_bytes());
+    0
+}
+
 pub extern "C" fn jet_ops_keccak256(buffer: &mut [u8; 32]) -> u8 {
     // Hash the bytes
     use sha3::{Digest, Keccak256};
@@ -213,4 +245,93 @@ pub extern "C" fn jet_ops_keccak256(buffer: &mut [u8; 32]) -> u8 {
         buffer[i] = hash[i];
     }
     0
+}
+
+/// Error codes for memory expansion
+#[repr(i8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MemoryExpansionError {
+    Success = 0,
+    InvalidPointer = -1,
+    ArithmeticOverflow = -2,
+    AllocationFailed = -3,
+}
+
+/// Expands memory to accommodate an access at offset with given size.
+/// Follows EVM semantics: rounds up to 32-byte boundaries and updates memory_len.
+///
+/// # Safety
+///
+/// This function is unsafe because it dereferences the given pointer and may reallocate memory.
+/// The caller must ensure that the context pointer is valid.
+///
+/// # Returns
+///
+/// - `0`: Success
+/// - `-1`: Invalid context pointer
+/// - `-2`: Arithmetic overflow in offset + size
+/// - `-3`: Memory allocation failed
+pub unsafe extern "C" fn jet_mem_expand(ctx: *mut Context, offset: u32, size: u32) -> i8 {
+    let ctx = match unsafe { ctx.as_mut() } {
+        Some(ctx) => ctx,
+        None => return MemoryExpansionError::InvalidPointer as i8,
+    };
+
+    // If size is 0, no expansion needed
+    if size == 0 {
+        return MemoryExpansionError::Success as i8;
+    }
+
+    // Check for arithmetic overflow
+    let end_offset = match offset.checked_add(size) {
+        Some(end) => end,
+        None => return MemoryExpansionError::ArithmeticOverflow as i8,
+    };
+
+    // Round up to 32-byte boundary
+    let required_len = end_offset.div_ceil(32) * 32;
+
+    // If already large enough, we're done
+    if required_len <= ctx.memory_len {
+        return MemoryExpansionError::Success as i8;
+    }
+
+    // If we need to expand beyond capacity, reallocate
+    if required_len > ctx.memory_cap {
+        // Allocate new memory with 32-byte alignment
+        let new_layout = match std::alloc::Layout::from_size_align(required_len as usize, 32) {
+            Ok(layout) => layout,
+            Err(_) => return MemoryExpansionError::AllocationFailed as i8,
+        };
+
+        let new_ptr = unsafe { std::alloc::alloc_zeroed(new_layout) };
+        if new_ptr.is_null() {
+            return MemoryExpansionError::AllocationFailed as i8;
+        }
+
+        // Copy old data to new allocation
+        if ctx.memory_len > 0 {
+            unsafe {
+                std::ptr::copy_nonoverlapping(ctx.memory_ptr, new_ptr, ctx.memory_len as usize);
+            }
+        }
+
+        // Free old allocation
+        if !ctx.memory_ptr.is_null() && ctx.memory_cap > 0 {
+            let old_layout = std::alloc::Layout::from_size_align(ctx.memory_cap as usize, 32)
+                .expect("old layout should be valid");
+            unsafe {
+                std::alloc::dealloc(ctx.memory_ptr, old_layout);
+            }
+        }
+
+        // Update context
+        ctx.memory_ptr = new_ptr;
+        ctx.memory_cap = required_len;
+    }
+
+    // Update memory length (expansion is always monotonic)
+    ctx.memory_len = required_len;
+
+    MemoryExpansionError::Success as i8
 }

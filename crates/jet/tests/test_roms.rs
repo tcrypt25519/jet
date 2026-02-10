@@ -168,6 +168,111 @@ rom_tests! {
         },
     },
 
+    exp_two_cubed: Test {
+        roms: vec![vec![
+            Instruction::PUSH1.opcode(), 0x03, // exponent
+            Instruction::PUSH1.opcode(), 0x02, // base
+            Instruction::EXP.opcode(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[8])],
+            ..Default::default()
+        },
+    },
+
+    // Endianness-sensitive: base=256 is stored LE as [0x00, 0x01, ...].
+    // A BE bug would misread it as 1, giving 1^2=1 instead of 65536.
+    exp_base_256_squared: Test {
+        roms: vec![vec![
+            Instruction::PUSH1.opcode(), 0x02,        // exponent
+            Instruction::PUSH2.opcode(), 0x01, 0x00,  // base = 256
+            Instruction::EXP.opcode(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x00, 0x00, 0x01])], // 65536 LE
+            ..Default::default()
+        },
+    },
+
+    exp_zero_exponent: Test {
+        roms: vec![vec![
+            Instruction::PUSH1.opcode(), 0x00, // exponent = 0
+            Instruction::PUSH1.opcode(), 0x05, // base
+            Instruction::EXP.opcode(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[1])],
+            ..Default::default()
+        },
+    },
+
+    signextend_sign_bit_clear: Test {
+        roms: vec![vec![
+            Instruction::PUSH1.opcode(), 0x7F, // x = 127
+            Instruction::PUSH1.opcode(), 0x00, // b = 0
+            Instruction::SIGNEXTEND.opcode(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x7F])],
+            ..Default::default()
+        },
+    },
+
+    signextend_sign_bit_set: Test {
+        roms: vec![vec![
+            Instruction::PUSH1.opcode(), 0x80, // x = 128
+            Instruction::PUSH1.opcode(), 0x00, // b = 0
+            Instruction::SIGNEXTEND.opcode(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![{
+                let mut w = [0xFF_u8; 32];
+                w[0] = 0x80;
+                w
+            }],
+            ..Default::default()
+        },
+    },
+
+    // Endianness-sensitive: 0x8000 stored LE as [0x00, 0x80, ...].
+    // A BE bug would put the bytes reversed, so byte 1 = 0x00 and no extension
+    // would occur, giving [0x80, 0x00, ...] instead of [0x00, 0x80, 0xFF, ...].
+    signextend_multi_byte: Test {
+        roms: vec![vec![
+            Instruction::PUSH2.opcode(), 0x80, 0x00, // x = 0x8000
+            Instruction::PUSH1.opcode(), 0x01,       // b = 1
+            Instruction::SIGNEXTEND.opcode(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![{
+                let mut w = [0xFF_u8; 32];
+                w[0] = 0x00;
+                w[1] = 0x80;
+                w
+            }],
+            ..Default::default()
+        },
+    },
+
+    signextend_large_b_noop: Test {
+        roms: vec![vec![
+            Instruction::PUSH1.opcode(), 0xFF, // x = 255
+            Instruction::PUSH1.opcode(), 0x20, // b = 32 (>= 32, identity)
+            Instruction::SIGNEXTEND.opcode(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0xFF])],
+            ..Default::default()
+        },
+    },
+
     program_counter: Test {
         roms: vec![vec![
             Instruction::PC.opcode(),
@@ -183,6 +288,107 @@ rom_tests! {
             stack_ptr: 4,
             jump_ptr: 6,
             stack: vec![stack_word(&[]), stack_word(&[0x01]), stack_word(&[0x02]), stack_word(&[0x07])],
+            ..Default::default()
+        },
+    },
+
+    // Memory expansion tests
+    mstore_at_zero_expands_to_32: Test {
+        roms: vec![vec![
+            Instruction::PUSH1.opcode(), 0x42, // value
+            Instruction::PUSH1.opcode(), 0x00, // offset = 0
+            Instruction::MSTORE.opcode(),      // MSTORE writes 32 bytes
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 0,
+            memory_len: Some(32), // ceil((0 + 32) / 32) * 32 = 32
+            ..Default::default()
+        },
+    },
+
+    mstore_at_31_expands_to_64: Test {
+        roms: vec![vec![
+            Instruction::PUSH1.opcode(), 0x42, // value
+            Instruction::PUSH1.opcode(), 0x1F, // offset = 31
+            Instruction::MSTORE.opcode(),      // MSTORE writes 32 bytes
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 0,
+            memory_len: Some(64), // ceil((31 + 32) / 32) * 32 = 64
+            ..Default::default()
+        },
+    },
+
+    mstore_at_32_expands_to_64: Test {
+        roms: vec![vec![
+            Instruction::PUSH1.opcode(), 0x42, // value
+            Instruction::PUSH1.opcode(), 0x20, // offset = 32
+            Instruction::MSTORE.opcode(),      // MSTORE writes 32 bytes
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 0,
+            memory_len: Some(64), // ceil((32 + 32) / 32) * 32 = 64
+            ..Default::default()
+        },
+    },
+
+    mstore8_at_zero_expands_to_32: Test {
+        roms: vec![vec![
+            Instruction::PUSH1.opcode(), 0x42, // value
+            Instruction::PUSH1.opcode(), 0x00, // offset = 0
+            Instruction::MSTORE8.opcode(),     // MSTORE8 writes 1 byte
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 0,
+            memory_len: Some(32), // ceil((0 + 1) / 32) * 32 = 32
+            ..Default::default()
+        },
+    },
+
+    mstore8_at_31_expands_to_32: Test {
+        roms: vec![vec![
+            Instruction::PUSH1.opcode(), 0x42, // value
+            Instruction::PUSH1.opcode(), 0x1F, // offset = 31
+            Instruction::MSTORE8.opcode(),     // MSTORE8 writes 1 byte
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 0,
+            memory_len: Some(32), // ceil((31 + 1) / 32) * 32 = 32
+            ..Default::default()
+        },
+    },
+
+    mstore8_at_32_expands_to_64: Test {
+        roms: vec![vec![
+            Instruction::PUSH1.opcode(), 0x42, // value
+            Instruction::PUSH1.opcode(), 0x20, // offset = 32
+            Instruction::MSTORE8.opcode(),     // MSTORE8 writes 1 byte
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 0,
+            memory_len: Some(64), // ceil((32 + 1) / 32) * 32 = 64
+            ..Default::default()
+        },
+    },
+
+    memory_expansion_is_monotonic: Test {
+        roms: vec![vec![
+            // First MSTORE expands to 32
+            Instruction::PUSH1.opcode(), 0x11,
+            Instruction::PUSH1.opcode(), 0x00,
+            Instruction::MSTORE.opcode(),
+            // Second MSTORE at smaller offset doesn't shrink memory
+            Instruction::PUSH1.opcode(), 0x22,
+            Instruction::PUSH1.opcode(), 0x00,
+            Instruction::MSTORE.opcode(),
+            // Third MSTORE at higher offset expands to 64
+            Instruction::PUSH1.opcode(), 0x33,
+            Instruction::PUSH1.opcode(), 0x20,
+            Instruction::MSTORE.opcode(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 0,
+            memory_len: Some(64), // Expanded monotonically: 0 -> 32 -> 32 -> 64
             ..Default::default()
         },
     },

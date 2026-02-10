@@ -440,19 +440,62 @@ pub(crate) fn mulmod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     Ok(())
 }
 
-pub(crate) fn exp(_: &BuildCtx) -> Result<(), Error> {
+pub(crate) fn exp(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
+    let (base, exponent) = __stack_pop_2(bctx)?;
+    bctx.builder.build_call(
+        bctx.env.symbols().exp(),
+        &[base.into(), exponent.into()],
+        "exp_result",
+    )?;
+    __call_stack_push_ptr(bctx, base)?;
     Ok(())
-    // TODO: Create a pow function in the runtime and use it here
-    // let (base, exponent) = stack_pop_2(bctx)?;
-    // let result = bctx.builder.build_int_pow(base, exponent, "exp_result")?;
-    // stack_push_word(bctx, result)?;
 }
 
-pub(crate) fn signextend(_: &BuildCtx) -> Result<(), Error> {
-    // let (a, b) = stack_pop_2(bctx)?;
-    // let result = bctx.builder.build_int_s_extend(a, b, "signextend_result")?;
-    // stack_push_word(bctx, result)?;
-    // TODO: Implement
+pub(crate) fn signextend(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
+    let (b_ptr, x_ptr) = __stack_pop_2(bctx)?;
+    let b = load_i256(bctx, b_ptr)?;
+    let x = load_i256(bctx, x_ptr)?;
+
+    let t = bctx.env.types();
+    let const_31 = t.i256.const_int(31, false);
+    let const_8 = t.i256.const_int(8, false);
+    let const_248 = t.i256.const_int(248, false);
+
+    // in_range = b <= 31; if b >= 32 the result is x unchanged
+    let in_range = bctx.builder.build_int_compare(
+        inkwell::IntPredicate::ULE,
+        b,
+        const_31,
+        "signextend_in_range",
+    )?;
+
+    // Clamp b to 31 to keep shift amount non-negative
+    let b_safe = bctx
+        .builder
+        .build_select(in_range, b, const_31, "signextend_b_safe")?
+        .into_int_value();
+
+    // shift = 248 - 8 * b_safe  (moves sign bit at position 8*b+7 to bit 255)
+    let b8 = bctx
+        .builder
+        .build_int_mul(b_safe, const_8, "signextend_b8")?;
+    let shift = bctx
+        .builder
+        .build_int_sub(const_248, b8, "signextend_shift")?;
+
+    // (x << shift) >>arithmetic shift  — sign-extends from the original sign bit
+    let shl = bctx.builder.build_left_shift(x, shift, "signextend_shl")?;
+    let extended = bctx
+        .builder
+        .build_right_shift(shl, shift, true, "signextend_sar")?;
+
+    // If b > 31 return x unchanged, otherwise return the sign-extended value
+    let result = bctx
+        .builder
+        .build_select(in_range, extended, x, "signextend_result")?
+        .into_int_value();
+
+    __stack_push_int(bctx, result)?;
     Ok(())
 }
 
@@ -705,6 +748,16 @@ pub(crate) fn mload(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
 
 pub(crate) fn mstore(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     let (loc, val) = __stack_pop_2(bctx)?;
+
+    // Expand memory if needed (MSTORE writes 32 bytes)
+    let loc_i32 = load_i32(bctx, loc)?;
+    let size = bctx.env.types().i32.const_int(32, false);
+    bctx.builder.build_call(
+        bctx.env.symbols().mem_expand(),
+        &[bctx.registers.exec_ctx.into(), loc_i32.into(), size.into()],
+        "mstore_expand",
+    )?;
+
     bctx.builder.build_call(
         bctx.env.symbols().mem_store(),
         &[bctx.registers.exec_ctx.into(), loc.into(), val.into()],
@@ -715,6 +768,16 @@ pub(crate) fn mstore(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
 
 pub(crate) fn mstore8(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     let (loc, val) = __stack_pop_2(bctx)?;
+
+    // Expand memory if needed (MSTORE8 writes 1 byte)
+    let loc_i32 = load_i32(bctx, loc)?;
+    let size = bctx.env.types().i32.const_int(1, false);
+    bctx.builder.build_call(
+        bctx.env.symbols().mem_expand(),
+        &[bctx.registers.exec_ctx.into(), loc_i32.into(), size.into()],
+        "mstore8_expand",
+    )?;
+
     bctx.builder.build_call(
         bctx.env.symbols().mem_store_byte(),
         &[bctx.registers.exec_ctx.into(), loc.into(), val.into()],
