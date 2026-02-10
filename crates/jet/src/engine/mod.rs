@@ -92,6 +92,11 @@ impl<'ctx> Engine<'ctx> {
             sym.keccak256(),
             builtins::jet_ops_keccak256 as *const () as usize,
         );
+        map_fn(sym.exp(), builtins::jet_ops_exp as *const () as usize);
+        map_fn(
+            sym.mem_expand(),
+            builtins::jet_mem_expand as *const () as usize,
+        );
     }
 
     fn get_contract_exec_fn(

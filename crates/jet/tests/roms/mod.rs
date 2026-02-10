@@ -63,6 +63,7 @@ pub(crate) struct TestContractRun {
     pub(crate) return_length: u32,
     pub(crate) stack: Vec<[u8; 32]>,
     pub(crate) memory: Option<Vec<u8>>,
+    pub(crate) memory_len: Option<u32>,
 }
 
 impl TestContractRun {
@@ -97,6 +98,10 @@ impl TestContractRun {
                 &ctx.memory()[..expected_memory.len()],
                 expected_memory.as_slice()
             );
+        }
+
+        if let Some(expected_memory_len) = self.memory_len {
+            assert_eq_named!("memory_len", ctx.memory_len(), expected_memory_len);
         }
     }
 }
