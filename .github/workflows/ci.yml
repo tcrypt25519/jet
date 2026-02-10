@@ -73,8 +73,6 @@ jobs:
       - name: Commit formatting fixes
         if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
         uses: tcrypt25519/ci/.github/actions/commit-changes@main
-        with:
-          commit-message: "style: apply rustfmt formatting "
 
       - name: Run clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
