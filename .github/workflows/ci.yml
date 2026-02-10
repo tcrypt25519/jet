@@ -37,10 +37,29 @@ jobs:
         if: steps.cache-llvm.outputs.cache-hit != 'true'
         run: |
           bash scripts/install-llvm.sh
+          # Fix Debian/Ubuntu header path mismatch before caching
+          if [ ! -d "/usr/lib/llvm-21/include" ] && [ -d "/usr/include/llvm-21" ]; then
+            sudo mkdir -p /usr/lib/llvm-21/include
+            sudo ln -sf /usr/include/llvm-21/llvm /usr/lib/llvm-21/include/llvm
+            sudo ln -sf /usr/include/llvm-21/llvm-c /usr/lib/llvm-21/include/llvm-c
+          fi
           sudo tar -czf ${{ runner.temp }}/llvm-21-install.tar.gz -C / \
             usr/lib/llvm-21 \
             usr/include/llvm-21 \
             usr/bin/llvm-config-21
+
+      - name: Fix LLVM include path mismatch
+        run: |
+          # Debian/Ubuntu packages place headers in /usr/include/llvm-21
+          # but llvm-config reports /usr/lib/llvm-21/include
+          # Create symlink to match llvm-config expectations
+          if [ ! -d "/usr/lib/llvm-21/include" ] && [ -d "/usr/include/llvm-21" ]; then
+            echo "Creating symlink to fix Debian/Ubuntu LLVM header path..."
+            sudo mkdir -p /usr/lib/llvm-21/include
+            sudo ln -sf /usr/include/llvm-21/llvm /usr/lib/llvm-21/include/llvm
+            sudo ln -sf /usr/include/llvm-21/llvm-c /usr/lib/llvm-21/include/llvm-c
+            echo "Symlinks created successfully"
+          fi
 
       - name: Debug LLVM Paths
         run: |
