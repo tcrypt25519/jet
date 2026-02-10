@@ -26,7 +26,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/llvm-21-install.tar.gz
-          key: v5-llvm-21-${{ runner.os }}-${{ runner.arch }}-${{ env.ImageOS }}-${{ hashFiles('Cargo.lock', 'scripts/install-llvm.sh', 'scripts/llvm.sh') }}
+          key: v7-llvm-21-${{ runner.os }}-${{ runner.arch }}-${{ env.ImageOS }}-${{ hashFiles('Cargo.lock', 'scripts/install-llvm.sh', 'scripts/llvm.sh') }}
 
       - name: Restore LLVM from cache
         if: steps.cache-llvm.outputs.cache-hit == 'true'
@@ -42,19 +42,13 @@ jobs:
             usr/include/llvm-21 \
             usr/bin/llvm-config-21
 
-      - name: Debug LLVM Paths
+      - name: Set LLVM environment variables
         run: |
-          echo "Checking LLVM Prefix directory..."
-          ls -R /usr/lib/llvm-21 | grep "Target.h" || echo "Target.h not found in /usr/lib/llvm-21"
-          echo "---"
-          echo "Checking System Include directory..."
-          ls -R /usr/include/llvm-21 | grep "Target.h" || echo "Target.h not found in /usr/include/llvm-21"
-          echo "---"
-          echo "llvm-config-21 --includedir output:"
-          /usr/bin/llvm-config-21 --includedir || echo "llvm-config-21 not found"
-
-      - name: Set LLVM environment variable
-        run: echo "LLVM_SYS_211_PREFIX=$(bash scripts/detect-llvm.sh)" >> $GITHUB_ENV
+          echo "LLVM_SYS_211_PREFIX=$(bash scripts/detect-llvm.sh)" >> $GITHUB_ENV
+          # Debian/Ubuntu installs LLVM headers at /usr/include/llvm-21
+          # Set C_INCLUDE_PATH and CPLUS_INCLUDE_PATH so cc-rs can find them
+          echo "C_INCLUDE_PATH=/usr/include/llvm-21" >> $GITHUB_ENV
+          echo "CPLUS_INCLUDE_PATH=/usr/include/llvm-21" >> $GITHUB_ENV
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
