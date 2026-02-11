@@ -24,12 +24,16 @@ macro_rules! define_ops {
 
 #[allow(non_snake_case)]
 macro_rules! PUSH1 {
-    ($b:expr) => { vec![Instruction::PUSH1.opcode(), $b] };
+    ($b:expr) => {
+        vec![Instruction::PUSH1.opcode(), $b]
+    };
 }
 
 #[allow(non_snake_case)]
 macro_rules! PUSH2 {
-    ($b1:expr, $b2:expr) => { vec![Instruction::PUSH2.opcode(), $b1, $b2] };
+    ($b1:expr, $b2:expr) => {
+        vec![Instruction::PUSH2.opcode(), $b1, $b2]
+    };
 }
 
 define_ops!(

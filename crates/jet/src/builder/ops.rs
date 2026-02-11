@@ -385,15 +385,14 @@ pub(crate) fn div(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
 
     // EVM spec: division by zero returns 0
     let zero = bctx.env.types().i256.const_zero();
-    let b_is_zero = bctx.builder.build_int_compare(
-        inkwell::IntPredicate::EQ,
-        b,
-        zero,
-        "b_is_zero",
-    )?;
+    let b_is_zero =
+        bctx.builder
+            .build_int_compare(inkwell::IntPredicate::EQ, b, zero, "b_is_zero")?;
 
     let div_result = bctx.builder.build_int_unsigned_div(a, b, "div_result")?;
-    let result = bctx.builder.build_select(b_is_zero, zero, div_result, "div_final")?;
+    let result = bctx
+        .builder
+        .build_select(b_is_zero, zero, div_result, "div_final")?;
     let result = result.into_int_value();
 
     __stack_push_int(bctx, result)?;
@@ -416,15 +415,14 @@ pub(crate) fn _mod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
 
     // EVM spec: modulo by zero returns 0
     let zero = bctx.env.types().i256.const_zero();
-    let b_is_zero = bctx.builder.build_int_compare(
-        inkwell::IntPredicate::EQ,
-        b,
-        zero,
-        "b_is_zero",
-    )?;
+    let b_is_zero =
+        bctx.builder
+            .build_int_compare(inkwell::IntPredicate::EQ, b, zero, "b_is_zero")?;
 
     let mod_result = bctx.builder.build_int_unsigned_rem(a, b, "mod_result")?;
-    let result = bctx.builder.build_select(b_is_zero, zero, mod_result, "mod_final")?;
+    let result = bctx
+        .builder
+        .build_select(b_is_zero, zero, mod_result, "mod_final")?;
     let result = result.into_int_value();
 
     __stack_push_int(bctx, result)?;
