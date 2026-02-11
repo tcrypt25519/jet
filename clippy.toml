@@ -1,0 +1,53 @@
+# Clippy configuration for Jet
+# This file customizes clippy's behavior for the project
+
+# === Complexity Thresholds ===
+
+# Maximum number of arguments for a function (default: 7)
+# LLVM builder functions often need many parameters
+too-many-arguments-threshold = 8
+
+# Maximum complexity for a function (default: 25)
+# Some EVM opcode implementations are inherently complex
+cognitive-complexity-threshold = 30
+
+# Maximum number of lines for a function (default: 100)
+too-many-lines-threshold = 120
+
+# === Type Complexity ===
+
+# Maximum type complexity (default: 250)
+# Generic LLVM types can get complex
+type-complexity-threshold = 300
+
+# === Performance ===
+
+# Allow indexing that could panic - we validate in debug builds
+# This is common in compiler/JIT code
+allow-indexing-slicing = false
+
+# === Safety ===
+
+# We use unsafe for FFI with LLVM and runtime builtins
+# Each unsafe block should have a SAFETY comment
+# Note: This is informational; clippy always warns on undocumented unsafe
+
+# === Documentation ===
+
+# Require documentation for public items
+# (enforced by clippy::missing_docs_in_private_items if enabled)
+# We don't enforce this globally but encourage it
+
+# === Naming ===
+
+# Allow module inception (mod foo { struct Foo })
+# Common in compiler projects
+allow-module-inception = true
+
+# === Project-Specific ===
+
+# Allow blocks in match arms - common in opcode matching
+allow-blocks-in-if-conditions = false
+
+# Enum variant names - allow EVM opcode names like ADD, MUL, etc.
+enum-variant-name-threshold = 3

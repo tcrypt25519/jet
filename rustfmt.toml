@@ -1,0 +1,96 @@
+# Rustfmt configuration for Jet
+# This file defines code formatting preferences
+#
+# NOTE: The Makefile uses `cargo +nightly fmt` for formatting,
+# which enables unstable features. Running `cargo fmt` with stable
+# will work but ignore unstable options.
+
+# === Edition ===
+edition = "2024"
+
+# === Line Width ===
+# Maximum width of each line (default: 100)
+max_width = 100
+
+# Use shorter lines where possible (stable)
+use_small_heuristics = "Max"
+
+# === Imports (Nightly Features) ===
+# Group imports: std, external crates, then crate-local
+# Requires nightly - enabled when using `cargo +nightly fmt`
+imports_granularity = "Crate"
+group_imports = "StdExternalCrate"
+
+# Reorder imports alphabetically (stable)
+reorder_imports = true
+
+# Reorder modules (stable)
+reorder_modules = true
+
+# === Formatting Style (Nightly Features) ===
+# Use block indent for array/struct/enum
+indent_style = "Block"
+
+# Brace style - prefer same line for blocks
+brace_style = "SameLineWhere"
+
+# Control flow brace style
+control_brace_style = "AlwaysSameLine"
+
+# === Functions ===
+# Put function parameters on separate lines if they don't fit (stable)
+fn_params_layout = "Tall"
+
+# Single line if-else (stable)
+single_line_if_else_max_width = 50
+
+# === Chains ===
+# Format method chains (stable)
+chain_width = 60
+
+# === Whitespace (Nightly Features) ===
+# Add trailing comma
+trailing_comma = "Vertical"
+
+# Add trailing semicolon to macro calls
+trailing_semicolon = true
+
+# Spaces around ranges
+space_before_colon = false
+space_after_colon = true
+
+# === Comments (Nightly Features) ===
+# Normalize comments to //
+normalize_comments = true
+
+# Wrap comments at max_width
+wrap_comments = true
+comment_width = 100
+
+# Format code in doc comments
+format_code_in_doc_comments = true
+
+# === Strings (Nightly Features) ===
+# Format string literals
+format_strings = true
+
+# === Macros (Nightly Features) ===
+# Format macro definitions
+format_macro_matchers = true
+format_macro_bodies = true
+
+# === Misc ===
+# Remove nested parentheses where possible (stable)
+remove_nested_parens = true
+
+# Use field init shorthand (stable)
+use_field_init_shorthand = true
+
+# Use try shorthand (?) (stable)
+use_try_shorthand = true
+
+# === Notes ===
+# Options marked as "Nightly Features" will be ignored by stable rustfmt
+# but will work correctly when running `cargo +nightly fmt` via Makefile.
+#
+# Stable-compatible options will work with both stable and nightly.
