@@ -27,7 +27,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/llvm-21-install.tar.gz
-          key: v7-llvm-21-${{ runner.os }}-${{ runner.arch }}-${{ env.ImageOS }}-${{ hashFiles('Cargo.lock', 'scripts/install-llvm.sh', 'scripts/llvm.sh') }}
+          key: v8-llvm-21-${{ runner.os }}-${{ runner.arch }}-${{ env.ImageOS }}-${{ hashFiles('Cargo.lock', 'scripts/install-llvm.sh', 'scripts/llvm.sh') }}
 
       - name: Restore LLVM from cache
         if: steps.cache-llvm.outputs.cache-hit == 'true'
@@ -41,6 +41,7 @@ jobs:
           sudo tar -czf ${{ runner.temp }}/llvm-21-install.tar.gz -C / \
             usr/lib/llvm-21 \
             usr/include/llvm-21 \
+            usr/include/llvm-c-21 \
             usr/bin/llvm-config-21
 
       - name: Set LLVM environment variables

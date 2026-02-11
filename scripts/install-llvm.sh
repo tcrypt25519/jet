@@ -31,7 +31,8 @@ case "$PLATFORM" in
     sudo apt-get install -y \
       llvm-${LLVM_VERSION} \
       llvm-${LLVM_VERSION}-dev \
-      libclang-common-${LLVM_VERSION}-dev
+      libclang-common-${LLVM_VERSION}-dev \
+      libpolly-${LLVM_VERSION}-dev 
     LLVM_CONFIG="llvm-config-${LLVM_VERSION}"
     if command -v $LLVM_CONFIG > /dev/null; then
       LLVM_PREFIX=$($LLVM_CONFIG --prefix)
