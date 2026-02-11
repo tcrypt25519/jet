@@ -10,9 +10,11 @@ macro_rules! bytecode {
     };
 }
 
+#[allow(non_snake_case)]
 macro_rules! define_ops {
     ($($op:ident),* $(,)?) => {
         $(
+            #[allow(non_snake_case)]
             macro_rules! $op {
                 () => { vec![Instruction::$op.opcode()] };
             }
@@ -20,19 +22,18 @@ macro_rules! define_ops {
     };
 }
 
-macro_rules! PUSH0 {
-    () => { vec![Instruction::PUSH0.opcode()] };
-}
-
+#[allow(non_snake_case)]
 macro_rules! PUSH1 {
     ($b:expr) => { vec![Instruction::PUSH1.opcode(), $b] };
 }
 
+#[allow(non_snake_case)]
 macro_rules! PUSH2 {
     ($b1:expr, $b2:expr) => { vec![Instruction::PUSH2.opcode(), $b1, $b2] };
 }
 
 define_ops!(
+    PUSH0,
     ADD,
     MUL,
     SUB,
@@ -398,6 +399,7 @@ rom_tests! {
         },
     },
 
+    // Tests basic multiplication: 3 * 5 = 15
     mul_basic: Test {
         roms: vec![bytecode![
             PUSH1!(0x05),
@@ -411,6 +413,7 @@ rom_tests! {
         },
     },
 
+    // Tests multiplication by zero: 255 * 0 = 0
     mul_zero: Test {
         roms: vec![bytecode![
             PUSH1!(0x00),
@@ -424,6 +427,30 @@ rom_tests! {
         },
     },
 
+    // Tests multiplication overflow: result modulo 2^256
+    // Large value * 2 causes overflow in 256-bit arithmetic
+    mul_overflow: Test {
+        roms: vec![vec![
+            Instruction::PUSH1.opcode(), 0x02,
+            Instruction::PUSH32.opcode(),
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            Instruction::MUL.opcode(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![{
+                let mut w = [0xFF_u8; 32];
+                w[0] = 0xFE;
+                w
+            }],
+            ..Default::default()
+        },
+    },
+
+    // Tests basic subtraction: 10 - 3 = 7
     sub_basic: Test {
         roms: vec![bytecode![
             PUSH1!(0x03),
@@ -437,6 +464,7 @@ rom_tests! {
         },
     },
 
+    // Tests subtraction underflow: 3 - 10 wraps to 2^256 - 7
     sub_underflow: Test {
         roms: vec![bytecode![
             PUSH1!(0x0A),
@@ -454,6 +482,7 @@ rom_tests! {
         },
     },
 
+    // Tests basic division: 15 / 3 = 5
     div_basic: Test {
         roms: vec![bytecode![
             PUSH1!(0x03),
@@ -467,6 +496,7 @@ rom_tests! {
         },
     },
 
+    // Tests division by zero: EVM spec requires 15 / 0 = 0
     div_by_zero: Test {
         roms: vec![bytecode![
             PUSH1!(0x00),
@@ -480,6 +510,7 @@ rom_tests! {
         },
     },
 
+    // Tests basic modulo: 14 % 5 = 4
     mod_basic: Test {
         roms: vec![bytecode![
             PUSH1!(0x05),
@@ -493,6 +524,7 @@ rom_tests! {
         },
     },
 
+    // Tests modulo by zero: EVM spec requires 14 % 0 = 0
     mod_by_zero: Test {
         roms: vec![bytecode![
             PUSH1!(0x00),
@@ -501,7 +533,7 @@ rom_tests! {
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
-            stack: vec![stack_word(&[0x0E])],
+            stack: vec![stack_word(&[0x00])],
             ..Default::default()
         },
     },
