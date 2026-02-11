@@ -20,12 +20,6 @@ too-many-lines-threshold = 120
 # Generic LLVM types can get complex
 type-complexity-threshold = 300
 
-# === Performance ===
-
-# Allow indexing that could panic - we validate in debug builds
-# This is common in compiler/JIT code
-allow-indexing-slicing = false
-
 # === Safety ===
 
 # We use unsafe for FFI with LLVM and runtime builtins
@@ -46,8 +40,5 @@ allow-module-inception = true
 
 # === Project-Specific ===
 
-# Allow blocks in match arms - common in opcode matching
+# Disallow blocks in if-conditions for clarity
 allow-blocks-in-if-conditions = false
-
-# Enum variant names - allow EVM opcode names like ADD, MUL, etc.
-enum-variant-name-threshold = 3
