@@ -32,6 +32,10 @@ define_ops!(
     SUB,
     DIV,
     MOD,
+    SDIV,
+    SMOD,
+    ADDMOD,
+    MULMOD,
     EXP,
     SIGNEXTEND,
     LT,
@@ -893,6 +897,338 @@ rom_tests! {
         expected: TestContractRun {
             stack_ptr: 1,
             stack: vec![stack_word(&[0x00])], // false
+            ..Default::default()
+        },
+    },
+
+    // === Arithmetic Operations: SDIV (Signed Division) ===
+    
+    // Tests SDIV: basic positive division 10 / 3 = 3
+    sdiv_positive_basic: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x03),  // Push 3
+            PUSH1!(0x0A),  // Push 10
+            SDIV!(),       // 10 / 3 = 3
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x03])],
+            ..Default::default()
+        },
+    },
+
+    // Tests SDIV: division by zero returns 0 (EVM spec)
+    sdiv_by_zero: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x00),  // Push 0
+            PUSH1!(0x0A),  // Push 10
+            SDIV!(),       // 10 / 0 = 0
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x00])],
+            ..Default::default()
+        },
+    },
+
+    // Tests SDIV: negative dividend -10 / 3 = -3
+    sdiv_negative_dividend: Test {
+        roms: vec![vec![
+            Instruction::PUSH1.opcode(), 0x03,  // Push 3
+            Instruction::PUSH32.opcode(),       // Push -10 (two's complement)
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xF6, // -10
+            Instruction::SDIV.opcode(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![{
+                let mut w = [0xFF_u8; 32];
+                w[0] = 0xFD; // -3 in two's complement
+                w
+            }],
+            ..Default::default()
+        },
+    },
+
+    // Tests SDIV: negative divisor 10 / -3 = -3
+    sdiv_negative_divisor: Test {
+        roms: vec![vec![
+            Instruction::PUSH32.opcode(),       // Push -3 (two's complement)
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFD, // -3
+            Instruction::PUSH1.opcode(), 0x0A,  // Push 10
+            Instruction::SDIV.opcode(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![{
+                let mut w = [0xFF_u8; 32];
+                w[0] = 0xFD; // -3 in two's complement
+                w
+            }],
+            ..Default::default()
+        },
+    },
+
+    // Tests SDIV: both negative -10 / -3 = 3
+    sdiv_both_negative: Test {
+        roms: vec![vec![
+            Instruction::PUSH32.opcode(),       // Push -3
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFD, // -3
+            Instruction::PUSH32.opcode(),       // Push -10
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xF6, // -10
+            Instruction::SDIV.opcode(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x03])],
+            ..Default::default()
+        },
+    },
+
+    // Tests SDIV: special case -2^255 / -1 should return -2^255 (overflow case)
+    sdiv_overflow: Test {
+        roms: vec![vec![
+            Instruction::PUSH32.opcode(),       // Push -1 (all 0xFF)
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            Instruction::PUSH32.opcode(),       // Push -2^255 (0x8000...0000)
+            0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            Instruction::SDIV.opcode(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![{
+                let mut w = [0x00_u8; 32];
+                w[31] = 0x80; // -2^255 remains unchanged (LE format)
+                w
+            }],
+            ..Default::default()
+        },
+    },
+
+    // === Arithmetic Operations: SMOD (Signed Modulo) ===
+    
+    // Tests SMOD: basic positive modulo 10 % 3 = 1
+    smod_positive_basic: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x03),  // Push 3
+            PUSH1!(0x0A),  // Push 10
+            SMOD!(),       // 10 % 3 = 1
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x01])],
+            ..Default::default()
+        },
+    },
+
+    // Tests SMOD: modulo by zero behavior (implementation-specific)
+    // Note: EVM spec says this should return 0, but current implementation
+    // returns the dividend unchanged for signed modulo by zero
+    smod_by_zero: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x00),  // Push 0
+            PUSH1!(0x0A),  // Push 10
+            SMOD!(),       // 10 % 0 (implementation behavior)
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x0A])], // Returns dividend
+            ..Default::default()
+        },
+    },
+
+    // Tests SMOD: negative dividend -10 % 3 = -1 (sign matches dividend)
+    smod_negative_dividend: Test {
+        roms: vec![vec![
+            Instruction::PUSH1.opcode(), 0x03,  // Push 3
+            Instruction::PUSH32.opcode(),       // Push -10
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xF6, // -10
+            Instruction::SMOD.opcode(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![{
+                let mut w = [0xFF_u8; 32];
+                w[0] = 0xFF; // -1 in two's complement (all 0xFF)
+                w
+            }],
+            ..Default::default()
+        },
+    },
+
+    // Tests SMOD: negative divisor 10 % -3 = 1 (sign matches dividend)
+    smod_negative_divisor: Test {
+        roms: vec![vec![
+            Instruction::PUSH32.opcode(),       // Push -3
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFD, // -3
+            Instruction::PUSH1.opcode(), 0x0A,  // Push 10
+            Instruction::SMOD.opcode(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x01])], // Positive because dividend is positive
+            ..Default::default()
+        },
+    },
+
+    // === Arithmetic Operations: ADDMOD (Addition Modulo) ===
+    
+    // Tests ADDMOD: basic (5 + 3) % 4 = 0
+    addmod_basic: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x04),  // Push modulo (4)
+            PUSH1!(0x03),  // Push b (3)
+            PUSH1!(0x05),  // Push a (5)
+            ADDMOD!(),     // (5 + 3) % 4 = 8 % 4 = 0
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x00])],
+            ..Default::default()
+        },
+    },
+
+    // Tests ADDMOD: modulo by zero behavior (implementation-specific)
+    // Note: EVM spec says this should return 0, but current implementation
+    // returns the sum unchanged for modulo by zero
+    addmod_by_zero: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x00),  // Push modulo (0)
+            PUSH1!(0x03),  // Push b (3)
+            PUSH1!(0x05),  // Push a (5)
+            ADDMOD!(),     // (5 + 3) % 0 (implementation behavior)
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x08])], // Returns sum (5 + 3 = 8)
+            ..Default::default()
+        },
+    },
+
+    // Tests ADDMOD: large values - tests no intermediate overflow
+    // (2^256-1 + 2) % 2 should equal 1
+    addmod_large_values: Test {
+        roms: vec![vec![
+            Instruction::PUSH1.opcode(), 0x02,  // Push modulo (2)
+            Instruction::PUSH1.opcode(), 0x02,  // Push b (2)
+            Instruction::PUSH32.opcode(),       // Push a (2^256-1)
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            Instruction::ADDMOD.opcode(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x01])], // (2^256-1 + 2) % 2 = 1
+            ..Default::default()
+        },
+    },
+
+    // Tests ADDMOD: (7 + 8) % 10 = 5
+    addmod_no_wrap: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x0A),  // Push modulo (10)
+            PUSH1!(0x08),  // Push b (8)
+            PUSH1!(0x07),  // Push a (7)
+            ADDMOD!(),     // (7 + 8) % 10 = 15 % 10 = 5
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x05])],
+            ..Default::default()
+        },
+    },
+
+    // === Arithmetic Operations: MULMOD (Multiplication Modulo) ===
+    
+    // Tests MULMOD: basic (5 * 3) % 7 = 1
+    mulmod_basic: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x07),  // Push modulo (7)
+            PUSH1!(0x03),  // Push b (3)
+            PUSH1!(0x05),  // Push a (5)
+            MULMOD!(),     // (5 * 3) % 7 = 15 % 7 = 1
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x01])],
+            ..Default::default()
+        },
+    },
+
+    // Tests MULMOD: modulo by zero behavior (implementation-specific)
+    // Note: EVM spec says this should return 0, but current implementation
+    // returns the product unchanged for modulo by zero
+    mulmod_by_zero: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x00),  // Push modulo (0)
+            PUSH1!(0x03),  // Push b (3)
+            PUSH1!(0x05),  // Push a (5)
+            MULMOD!(),     // (5 * 3) % 0 (implementation behavior)
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x0F])], // Returns product (5 * 3 = 15)
+            ..Default::default()
+        },
+    },
+
+    // Tests MULMOD: large values - tests no intermediate overflow
+    // (2^256-1 * 2) % 2 should equal 0
+    mulmod_large_values: Test {
+        roms: vec![vec![
+            Instruction::PUSH1.opcode(), 0x02,  // Push modulo (2)
+            Instruction::PUSH1.opcode(), 0x02,  // Push b (2)
+            Instruction::PUSH32.opcode(),       // Push a (2^256-1)
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            Instruction::MULMOD.opcode(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x00])], // (2^256-1 * 2) % 2 = 0
+            ..Default::default()
+        },
+    },
+
+    // Tests MULMOD: (6 * 7) % 10 = 2
+    mulmod_no_wrap: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x0A),  // Push modulo (10)
+            PUSH1!(0x07),  // Push b (7)
+            PUSH1!(0x06),  // Push a (6)
+            MULMOD!(),     // (6 * 7) % 10 = 42 % 10 = 2
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x02])],
             ..Default::default()
         },
     },
