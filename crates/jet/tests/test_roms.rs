@@ -4,14 +4,66 @@ use roms::*;
 
 mod roms;
 
+macro_rules! bytecode {
+    ($($item:expr),* $(,)?) => {
+        vec![$($item),*].into_iter().flatten().collect::<Vec<u8>>()
+    };
+}
+
+#[allow(non_snake_case)]
+macro_rules! define_ops {
+    ($($op:ident),* $(,)?) => {
+        $(
+            #[allow(non_snake_case)]
+            macro_rules! $op {
+                () => { vec![Instruction::$op.opcode()] };
+            }
+        )*
+    };
+}
+
+#[allow(non_snake_case)]
+macro_rules! PUSH1 {
+    ($b:expr) => {
+        vec![Instruction::PUSH1.opcode(), $b]
+    };
+}
+
+#[allow(non_snake_case)]
+macro_rules! PUSH2 {
+    ($b1:expr, $b2:expr) => {
+        vec![Instruction::PUSH2.opcode(), $b1, $b2]
+    };
+}
+
+define_ops!(
+    PUSH0,
+    ADD,
+    MUL,
+    SUB,
+    DIV,
+    MOD,
+    EXP,
+    SIGNEXTEND,
+    KECCAK256,
+    JUMP,
+    JUMPDEST,
+    PC,
+    MLOAD,
+    MSTORE,
+    MSTORE8,
+    RETURN,
+    CALL,
+    RETURNDATASIZE,
+    RETURNDATACOPY
+);
+
 rom_tests! {
     one_plus_two: Test {
-        roms: vec![vec![
-            Instruction::PUSH1.opcode(),
-            0x01,
-            Instruction::PUSH1.opcode(),
-            0x02,
-            Instruction::ADD.opcode(),
+        roms: vec![bytecode![
+            PUSH1!(0x01),
+            PUSH1!(0x02),
+            ADD!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
@@ -21,13 +73,11 @@ rom_tests! {
     },
 
     basic_jump: Test {
-        roms: vec![vec![
-            Instruction::PUSH1.opcode(),
-            0x03,
-            Instruction::JUMP.opcode(),
-            Instruction::JUMPDEST.opcode(),
-            Instruction::PUSH1.opcode(),
-            42,
+        roms: vec![bytecode![
+            PUSH1!(0x03),
+            JUMP!(),
+            JUMPDEST!(),
+            PUSH1!(42),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
@@ -38,24 +88,17 @@ rom_tests! {
     },
 
     basic_mem_ops: Test {
-        roms: vec![vec![
-            Instruction::PUSH1.opcode(),
-            0xFF,
-            Instruction::PUSH1.opcode(),
-            0x02,
-            Instruction::MSTORE.opcode(),
-            Instruction::PUSH1.opcode(),
-            0x00,
-            Instruction::MLOAD.opcode(),
-            Instruction::PUSH2.opcode(),
-            0xFF,
-            0xFF,
-            Instruction::PUSH1.opcode(),
-            0x00,
-            Instruction::MSTORE8.opcode(),
-            Instruction::PUSH1.opcode(),
-            0x00,
-            Instruction::MLOAD.opcode(),
+        roms: vec![bytecode![
+            PUSH1!(0xFF),
+            PUSH1!(0x02),
+            MSTORE!(),
+            PUSH1!(0x00),
+            MLOAD!(),
+            PUSH2!(0xFF, 0xFF),
+            PUSH1!(0x00),
+            MSTORE8!(),
+            PUSH1!(0x00),
+            MLOAD!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 2,
@@ -65,18 +108,14 @@ rom_tests! {
     },
 
     vstack_accesses_real_stack_after_jump: Test{
-        roms: vec![vec![
-            Instruction::PUSH1.opcode(),
-            0x01,
-            Instruction::PUSH1.opcode(),
-            0x02,
-            Instruction::PUSH1.opcode(),
-            0x07,
-            Instruction::JUMP.opcode(),
-            Instruction::JUMPDEST.opcode(),
-            Instruction::ADD.opcode(),
-            Instruction::PUSH1.opcode(),
-            42,
+        roms: vec![bytecode![
+            PUSH1!(0x01),
+            PUSH1!(0x02),
+            PUSH1!(0x07),
+            JUMP!(),
+            JUMPDEST!(),
+            ADD!(),
+            PUSH1!(42),
         ]],
         expected: TestContractRun {
             stack_ptr: 2,
@@ -87,12 +126,10 @@ rom_tests! {
     },
 
     return_sets_offset_and_length: Test{
-        roms: vec![vec![
-            Instruction::PUSH1.opcode(),
-            0x20,
-            Instruction::PUSH1.opcode(),
-            0x03,
-            Instruction::RETURN.opcode(),
+        roms: vec![bytecode![
+            PUSH1!(0x20),
+            PUSH1!(0x03),
+            RETURN!(),
         ]],
         expected: TestContractRun {
             result: ReturnCode::ExplicitReturn,
@@ -103,47 +140,30 @@ rom_tests! {
     },
 
     basic_call_with_return_data: Test {
-        roms: vec![vec![
-            Instruction::PUSH1.opcode(), // Output len
-            0x0A,
-            Instruction::PUSH1.opcode(), // Output offset
-            0x00,
-            Instruction::PUSH1.opcode(), // Input len
-            0x00,
-            Instruction::PUSH1.opcode(), // Input offset
-            0x00,
-            Instruction::PUSH1.opcode(), // Value
-            0x00,
-            Instruction::PUSH2.opcode(), // Address
-            0x00,
-            0x01,
-            Instruction::PUSH1.opcode(), // Gas
-            0x00,
-            Instruction::CALL.opcode(), // Mem: 0x00FF
-            Instruction::RETURNDATASIZE.opcode(),
-            Instruction::PUSH1.opcode(), // Len
-            0x02,
-            Instruction::PUSH1.opcode(), // Src offset
-            0x00,
-            Instruction::PUSH1.opcode(), // Dest offset
-            0x02,
-            Instruction::RETURNDATACOPY.opcode(), // Mem: 0x00FF00FF0000000000000000
-        ], vec![
-            Instruction::PUSH1.opcode(),
-            0xFF,
-            Instruction::PUSH1.opcode(),
-            0x01,
-            Instruction::MSTORE.opcode(), // Mem: 0x00FF
-            Instruction::PUSH1.opcode(),
-            0xFF,
-            Instruction::PUSH1.opcode(),
-            0x0A,
-            Instruction::MSTORE.opcode(), // Mem: 0x00FF0000000000000000FF
-            Instruction::PUSH1.opcode(),
-            0x0A,
-            Instruction::PUSH1.opcode(),
-            0x00,
-            Instruction::RETURN.opcode(), // Return 0x00FF0000000000000000
+        roms: vec![bytecode![
+            PUSH1!(0x0A),
+            PUSH1!(0x00),
+            PUSH1!(0x00),
+            PUSH1!(0x00),
+            PUSH1!(0x00),
+            PUSH2!(0x00, 0x01),
+            PUSH1!(0x00),
+            CALL!(),
+            RETURNDATASIZE!(),
+            PUSH1!(0x02),
+            PUSH1!(0x00),
+            PUSH1!(0x02),
+            RETURNDATACOPY!(),
+        ], bytecode![
+            PUSH1!(0xFF),
+            PUSH1!(0x01),
+            MSTORE!(),
+            PUSH1!(0xFF),
+            PUSH1!(0x0A),
+            MSTORE!(),
+            PUSH1!(0x0A),
+            PUSH1!(0x00),
+            RETURN!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 2,
@@ -157,9 +177,9 @@ rom_tests! {
     },
 
     keccak256_empty_hash: Test {
-        roms: vec![vec![
-            Instruction::PUSH0.opcode(),
-            Instruction::KECCAK256.opcode(),
+        roms: vec![bytecode![
+            PUSH0!(),
+            KECCAK256!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
@@ -169,10 +189,10 @@ rom_tests! {
     },
 
     exp_two_cubed: Test {
-        roms: vec![vec![
-            Instruction::PUSH1.opcode(), 0x03, // exponent
-            Instruction::PUSH1.opcode(), 0x02, // base
-            Instruction::EXP.opcode(),
+        roms: vec![bytecode![
+            PUSH1!(0x03),
+            PUSH1!(0x02),
+            EXP!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
@@ -181,13 +201,11 @@ rom_tests! {
         },
     },
 
-    // Endianness-sensitive: base=256 is stored LE as [0x00, 0x01, ...].
-    // A BE bug would misread it as 1, giving 1^2=1 instead of 65536.
     exp_base_256_squared: Test {
-        roms: vec![vec![
-            Instruction::PUSH1.opcode(), 0x02,        // exponent
-            Instruction::PUSH2.opcode(), 0x01, 0x00,  // base = 256
-            Instruction::EXP.opcode(),
+        roms: vec![bytecode![
+            PUSH1!(0x02),
+            PUSH2!(0x01, 0x00),
+            EXP!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
@@ -197,10 +215,10 @@ rom_tests! {
     },
 
     exp_zero_exponent: Test {
-        roms: vec![vec![
-            Instruction::PUSH1.opcode(), 0x00, // exponent = 0
-            Instruction::PUSH1.opcode(), 0x05, // base
-            Instruction::EXP.opcode(),
+        roms: vec![bytecode![
+            PUSH1!(0x00),
+            PUSH1!(0x05),
+            EXP!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
@@ -210,10 +228,10 @@ rom_tests! {
     },
 
     signextend_sign_bit_clear: Test {
-        roms: vec![vec![
-            Instruction::PUSH1.opcode(), 0x7F, // x = 127
-            Instruction::PUSH1.opcode(), 0x00, // b = 0
-            Instruction::SIGNEXTEND.opcode(),
+        roms: vec![bytecode![
+            PUSH1!(0x7F),
+            PUSH1!(0x00),
+            SIGNEXTEND!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
@@ -223,10 +241,10 @@ rom_tests! {
     },
 
     signextend_sign_bit_set: Test {
-        roms: vec![vec![
-            Instruction::PUSH1.opcode(), 0x80, // x = 128
-            Instruction::PUSH1.opcode(), 0x00, // b = 0
-            Instruction::SIGNEXTEND.opcode(),
+        roms: vec![bytecode![
+            PUSH1!(0x80),
+            PUSH1!(0x00),
+            SIGNEXTEND!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
@@ -239,14 +257,11 @@ rom_tests! {
         },
     },
 
-    // Endianness-sensitive: 0x8000 stored LE as [0x00, 0x80, ...].
-    // A BE bug would put the bytes reversed, so byte 1 = 0x00 and no extension
-    // would occur, giving [0x80, 0x00, ...] instead of [0x00, 0x80, 0xFF, ...].
     signextend_multi_byte: Test {
-        roms: vec![vec![
-            Instruction::PUSH2.opcode(), 0x80, 0x00, // x = 0x8000
-            Instruction::PUSH1.opcode(), 0x01,       // b = 1
-            Instruction::SIGNEXTEND.opcode(),
+        roms: vec![bytecode![
+            PUSH2!(0x80, 0x00),
+            PUSH1!(0x01),
+            SIGNEXTEND!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
@@ -261,10 +276,10 @@ rom_tests! {
     },
 
     signextend_large_b_noop: Test {
-        roms: vec![vec![
-            Instruction::PUSH1.opcode(), 0xFF, // x = 255
-            Instruction::PUSH1.opcode(), 0x20, // b = 32 (>= 32, identity)
-            Instruction::SIGNEXTEND.opcode(),
+        roms: vec![bytecode![
+            PUSH1!(0xFF),
+            PUSH1!(0x20),
+            SIGNEXTEND!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
@@ -274,15 +289,14 @@ rom_tests! {
     },
 
     program_counter: Test {
-        roms: vec![vec![
-            Instruction::PC.opcode(),
-            Instruction::PC.opcode(),
-            Instruction::PC.opcode(),
-            Instruction::PUSH1.opcode(),
-            0x06,
-            Instruction::JUMP.opcode(),
-            Instruction::JUMPDEST.opcode(),
-            Instruction::PC.opcode(),
+        roms: vec![bytecode![
+            PC!(),
+            PC!(),
+            PC!(),
+            PUSH1!(0x06),
+            JUMP!(),
+            JUMPDEST!(),
+            PC!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 4,
@@ -292,38 +306,37 @@ rom_tests! {
         },
     },
 
-    // Memory expansion tests
     mstore_at_zero_expands_to_32: Test {
-        roms: vec![vec![
-            Instruction::PUSH1.opcode(), 0x42, // value
-            Instruction::PUSH1.opcode(), 0x00, // offset = 0
-            Instruction::MSTORE.opcode(),      // MSTORE writes 32 bytes
+        roms: vec![bytecode![
+            PUSH1!(0x42),
+            PUSH1!(0x00),
+            MSTORE!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 0,
-            memory_len: Some(32), // ceil((0 + 32) / 32) * 32 = 32
+            memory_len: Some(32),
             ..Default::default()
         },
     },
 
     mstore_at_31_expands_to_64: Test {
-        roms: vec![vec![
-            Instruction::PUSH1.opcode(), 0x42, // value
-            Instruction::PUSH1.opcode(), 0x1F, // offset = 31
-            Instruction::MSTORE.opcode(),      // MSTORE writes 32 bytes
+        roms: vec![bytecode![
+            PUSH1!(0x42),
+            PUSH1!(0x1F),
+            MSTORE!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 0,
-            memory_len: Some(64), // ceil((31 + 32) / 32) * 32 = 64
+            memory_len: Some(64),
             ..Default::default()
         },
     },
 
     mstore_at_32_expands_to_64: Test {
-        roms: vec![vec![
-            Instruction::PUSH1.opcode(), 0x42, // value
-            Instruction::PUSH1.opcode(), 0x20, // offset = 32
-            Instruction::MSTORE.opcode(),      // MSTORE writes 32 bytes
+        roms: vec![bytecode![
+            PUSH1!(0x42),
+            PUSH1!(0x20),
+            MSTORE!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 0,
@@ -333,62 +346,198 @@ rom_tests! {
     },
 
     mstore8_at_zero_expands_to_32: Test {
-        roms: vec![vec![
-            Instruction::PUSH1.opcode(), 0x42, // value
-            Instruction::PUSH1.opcode(), 0x00, // offset = 0
-            Instruction::MSTORE8.opcode(),     // MSTORE8 writes 1 byte
+        roms: vec![bytecode![
+            PUSH1!(0x42),
+            PUSH1!(0x00),
+            MSTORE8!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 0,
-            memory_len: Some(32), // ceil((0 + 1) / 32) * 32 = 32
+            memory_len: Some(32),
             ..Default::default()
         },
     },
 
     mstore8_at_31_expands_to_32: Test {
-        roms: vec![vec![
-            Instruction::PUSH1.opcode(), 0x42, // value
-            Instruction::PUSH1.opcode(), 0x1F, // offset = 31
-            Instruction::MSTORE8.opcode(),     // MSTORE8 writes 1 byte
+        roms: vec![bytecode![
+            PUSH1!(0x42),
+            PUSH1!(0x1F),
+            MSTORE8!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 0,
-            memory_len: Some(32), // ceil((31 + 1) / 32) * 32 = 32
+            memory_len: Some(32),
             ..Default::default()
         },
     },
 
     mstore8_at_32_expands_to_64: Test {
-        roms: vec![vec![
-            Instruction::PUSH1.opcode(), 0x42, // value
-            Instruction::PUSH1.opcode(), 0x20, // offset = 32
-            Instruction::MSTORE8.opcode(),     // MSTORE8 writes 1 byte
+        roms: vec![bytecode![
+            PUSH1!(0x42),
+            PUSH1!(0x20),
+            MSTORE8!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 0,
-            memory_len: Some(64), // ceil((32 + 1) / 32) * 32 = 64
+            memory_len: Some(64),
             ..Default::default()
         },
     },
 
     memory_expansion_is_monotonic: Test {
-        roms: vec![vec![
-            // First MSTORE expands to 32
-            Instruction::PUSH1.opcode(), 0x11,
-            Instruction::PUSH1.opcode(), 0x00,
-            Instruction::MSTORE.opcode(),
-            // Second MSTORE at smaller offset doesn't shrink memory
-            Instruction::PUSH1.opcode(), 0x22,
-            Instruction::PUSH1.opcode(), 0x00,
-            Instruction::MSTORE.opcode(),
-            // Third MSTORE at higher offset expands to 64
-            Instruction::PUSH1.opcode(), 0x33,
-            Instruction::PUSH1.opcode(), 0x20,
-            Instruction::MSTORE.opcode(),
+        roms: vec![bytecode![
+            PUSH1!(0x11),
+            PUSH1!(0x00),
+            MSTORE!(),
+            PUSH1!(0x22),
+            PUSH1!(0x00),
+            MSTORE!(),
+            PUSH1!(0x33),
+            PUSH1!(0x20),
+            MSTORE!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 0,
             memory_len: Some(64), // Expanded monotonically: 0 -> 32 -> 32 -> 64
+            ..Default::default()
+        },
+    },
+
+    // Tests basic multiplication: 3 * 5 = 15
+    mul_basic: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x05),
+            PUSH1!(0x03),
+            MUL!(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x0F])],
+            ..Default::default()
+        },
+    },
+
+    // Tests multiplication by zero: 255 * 0 = 0
+    mul_zero: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x00),
+            PUSH1!(0xFF),
+            MUL!(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x00])],
+            ..Default::default()
+        },
+    },
+
+    // Tests multiplication overflow: result modulo 2^256
+    // Large value * 2 causes overflow in 256-bit arithmetic
+    mul_overflow: Test {
+        roms: vec![vec![
+            Instruction::PUSH1.opcode(), 0x02,
+            Instruction::PUSH32.opcode(),
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            Instruction::MUL.opcode(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![{
+                let mut w = [0xFF_u8; 32];
+                w[0] = 0xFE;
+                w
+            }],
+            ..Default::default()
+        },
+    },
+
+    // Tests basic subtraction: 10 - 3 = 7
+    sub_basic: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x03),
+            PUSH1!(0x0A),
+            SUB!(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x07])],
+            ..Default::default()
+        },
+    },
+
+    // Tests subtraction underflow: 3 - 10 wraps to 2^256 - 7
+    sub_underflow: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x0A),
+            PUSH1!(0x03),
+            SUB!(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![{
+                let mut w = [0xFF_u8; 32];
+                w[0] = 0xF9;
+                w
+            }],
+            ..Default::default()
+        },
+    },
+
+    // Tests basic division: 15 / 3 = 5
+    div_basic: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x03),
+            PUSH1!(0x0F),
+            DIV!(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x05])],
+            ..Default::default()
+        },
+    },
+
+    // Tests division by zero: EVM spec requires 15 / 0 = 0
+    div_by_zero: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x00),
+            PUSH1!(0x0F),
+            DIV!(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x00])],
+            ..Default::default()
+        },
+    },
+
+    // Tests basic modulo: 14 % 5 = 4
+    mod_basic: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x05),
+            PUSH1!(0x0E),
+            MOD!(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x04])],
+            ..Default::default()
+        },
+    },
+
+    // Tests modulo by zero: EVM spec requires 14 % 0 = 0
+    mod_by_zero: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x00),
+            PUSH1!(0x0E),
+            MOD!(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x00])],
             ..Default::default()
         },
     },
