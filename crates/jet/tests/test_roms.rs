@@ -34,6 +34,12 @@ define_ops!(
     MOD,
     EXP,
     SIGNEXTEND,
+    LT,
+    GT,
+    SLT,
+    SGT,
+    EQ,
+    ISZERO,
     KECCAK256,
     JUMP,
     JUMPDEST,
@@ -527,6 +533,366 @@ rom_tests! {
         expected: TestContractRun {
             stack_ptr: 1,
             stack: vec![stack_word(&[0x00])],
+            ..Default::default()
+        },
+    },
+
+    // === Comparison Operations: LT (Less Than - Unsigned) ===
+    
+    // Tests LT: 5 < 10 should return 1 (true)
+    lt_true: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x0A),  // Push 10
+            PUSH1!(0x05),  // Push 5
+            LT!(),         // 5 < 10
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x01])], // true
+            ..Default::default()
+        },
+    },
+
+    // Tests LT: 10 < 5 should return 0 (false)
+    lt_false: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x05),  // Push 5
+            PUSH1!(0x0A),  // Push 10
+            LT!(),         // 10 < 5
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x00])], // false
+            ..Default::default()
+        },
+    },
+
+    // Tests LT: equal values should return 0 (false)
+    lt_equal: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x07),  // Push 7
+            PUSH1!(0x07),  // Push 7
+            LT!(),         // 7 < 7
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x00])], // false
+            ..Default::default()
+        },
+    },
+
+    // Tests LT: 0 < 1 should return 1 (true) - boundary case
+    lt_zero_boundary: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x01),  // Push 1
+            PUSH1!(0x00),  // Push 0
+            LT!(),         // 0 < 1
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x01])], // true
+            ..Default::default()
+        },
+    },
+
+    // === Comparison Operations: GT (Greater Than - Unsigned) ===
+    
+    // Tests GT: 10 > 5 should return 1 (true)
+    gt_true: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x05),  // Push 5
+            PUSH1!(0x0A),  // Push 10
+            GT!(),         // 10 > 5
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x01])], // true
+            ..Default::default()
+        },
+    },
+
+    // Tests GT: 5 > 10 should return 0 (false)
+    gt_false: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x0A),  // Push 10
+            PUSH1!(0x05),  // Push 5
+            GT!(),         // 5 > 10
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x00])], // false
+            ..Default::default()
+        },
+    },
+
+    // Tests GT: equal values should return 0 (false)
+    gt_equal: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x07),  // Push 7
+            PUSH1!(0x07),  // Push 7
+            GT!(),         // 7 > 7
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x00])], // false
+            ..Default::default()
+        },
+    },
+
+    // Tests GT: 1 > 0 should return 1 (true) - boundary case
+    gt_zero_boundary: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x00),  // Push 0
+            PUSH1!(0x01),  // Push 1
+            GT!(),         // 1 > 0
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x01])], // true
+            ..Default::default()
+        },
+    },
+
+    // === Comparison Operations: SLT (Signed Less Than) ===
+    
+    // Tests SLT: -1 < 0 should return 1 (true) in signed comparison
+    // In two's complement, -1 is 0xFF...FF
+    slt_negative_less_than_zero: Test {
+        roms: vec![vec![
+            Instruction::PUSH1.opcode(), 0x00,  // Push 0
+            Instruction::PUSH32.opcode(),       // Push -1 (all 0xFF)
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            Instruction::SLT.opcode(),          // -1 < 0
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x01])], // true
+            ..Default::default()
+        },
+    },
+
+    // Tests SLT: 0 < -1 should return 0 (false) in signed comparison
+    slt_zero_not_less_than_negative: Test {
+        roms: vec![vec![
+            Instruction::PUSH32.opcode(),       // Push -1 (all 0xFF)
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            Instruction::PUSH1.opcode(), 0x00,  // Push 0
+            Instruction::SLT.opcode(),          // 0 < -1
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x00])], // false
+            ..Default::default()
+        },
+    },
+
+    // Tests SLT: positive values work correctly
+    slt_positive_comparison: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x0A),  // Push 10
+            PUSH1!(0x05),  // Push 5
+            SLT!(),        // 5 < 10
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x01])], // true
+            ..Default::default()
+        },
+    },
+
+    // Tests SLT: equal values return false
+    slt_equal: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x07),  // Push 7
+            PUSH1!(0x07),  // Push 7
+            SLT!(),        // 7 < 7
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x00])], // false
+            ..Default::default()
+        },
+    },
+
+    // === Comparison Operations: SGT (Signed Greater Than) ===
+    
+    // Tests SGT: 0 > -1 should return 1 (true) in signed comparison
+    sgt_zero_greater_than_negative: Test {
+        roms: vec![vec![
+            Instruction::PUSH32.opcode(),       // Push -1 (all 0xFF)
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            Instruction::PUSH1.opcode(), 0x00,  // Push 0
+            Instruction::SGT.opcode(),          // 0 > -1
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x01])], // true
+            ..Default::default()
+        },
+    },
+
+    // Tests SGT: -1 > 0 should return 0 (false) in signed comparison
+    sgt_negative_not_greater_than_zero: Test {
+        roms: vec![vec![
+            Instruction::PUSH1.opcode(), 0x00,  // Push 0
+            Instruction::PUSH32.opcode(),       // Push -1 (all 0xFF)
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            Instruction::SGT.opcode(),          // -1 > 0
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x00])], // false
+            ..Default::default()
+        },
+    },
+
+    // Tests SGT: positive values work correctly
+    sgt_positive_comparison: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x05),  // Push 5
+            PUSH1!(0x0A),  // Push 10
+            SGT!(),        // 10 > 5
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x01])], // true
+            ..Default::default()
+        },
+    },
+
+    // Tests SGT: equal values return false
+    sgt_equal: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x07),  // Push 7
+            PUSH1!(0x07),  // Push 7
+            SGT!(),        // 7 > 7
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x00])], // false
+            ..Default::default()
+        },
+    },
+
+    // === Comparison Operations: EQ (Equality) ===
+    
+    // Tests EQ: equal values should return 1 (true)
+    eq_true: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x2A),  // Push 42
+            PUSH1!(0x2A),  // Push 42
+            EQ!(),         // 42 == 42
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x01])], // true
+            ..Default::default()
+        },
+    },
+
+    // Tests EQ: different values should return 0 (false)
+    eq_false: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x05),  // Push 5
+            PUSH1!(0x0A),  // Push 10
+            EQ!(),         // 10 == 5
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x00])], // false
+            ..Default::default()
+        },
+    },
+
+    // Tests EQ: zero equality
+    eq_zero: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x00),  // Push 0
+            PUSH1!(0x00),  // Push 0
+            EQ!(),         // 0 == 0
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x01])], // true
+            ..Default::default()
+        },
+    },
+
+    // Tests EQ: max value equality (using PUSH32 for large values)
+    eq_max_value: Test {
+        roms: vec![vec![
+            Instruction::PUSH32.opcode(),
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            Instruction::PUSH32.opcode(),
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            Instruction::EQ.opcode(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x01])], // true
+            ..Default::default()
+        },
+    },
+
+    // === Comparison Operations: ISZERO ===
+    
+    // Tests ISZERO: zero value should return 1 (true)
+    iszero_true: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x00),  // Push 0
+            ISZERO!(),     // is 0 zero?
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x01])], // true
+            ..Default::default()
+        },
+    },
+
+    // Tests ISZERO: non-zero value should return 0 (false)
+    iszero_false: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x2A),  // Push 42
+            ISZERO!(),     // is 42 zero?
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x00])], // false
+            ..Default::default()
+        },
+    },
+
+    // Tests ISZERO: max value should return 0 (false)
+    iszero_max_value: Test {
+        roms: vec![vec![
+            Instruction::PUSH32.opcode(),
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            Instruction::ISZERO.opcode(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x00])], // false
             ..Default::default()
         },
     },
