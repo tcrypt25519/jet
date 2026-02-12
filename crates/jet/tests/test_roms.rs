@@ -1078,9 +1078,9 @@ rom_tests! {
         expected: TestContractRun {
             stack_ptr: 1,
             stack: vec![{
-                let mut w = [0xFF_u8; 32];
-                w[0] = 0xFF; // -1 in two's complement (all 0xFF)
-                w
+                let mut w = [0xFF_u8; 32]; // Array already all 0xFF
+                w[0] = 0xFF; // Explicitly set first byte (though already 0xFF)
+                w              // Result is -1 in two's complement
             }],
             ..Default::default()
         },
@@ -1558,7 +1558,7 @@ rom_tests! {
     shr_by_eight: Test {
         roms: vec![bytecode![
             PUSH1!(0x08),        // Push 8 (becomes shift amount in buggy impl)
-            PUSH2!(0x01, 0x00),  // Push 256 big-endian (becomes value in buggy impl)
+            PUSH2!(0x01, 0x00),  // Push 0x0100 (256 in decimal, big-endian format)
             SHR!(),              // With swapped args: 256 >> 8 = 1
         ]],
         expected: TestContractRun {
