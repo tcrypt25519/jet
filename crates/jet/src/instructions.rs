@@ -1,9 +1,8 @@
 macro_rules! instructions {
-    // Match identifier and value pairs
     ($($name:ident = $value:expr),* $(,)?) => {
-        #[derive(Clone, Debug, PartialEq, PartialOrd, Eq, Ord)]
+        #[derive(Copy, Clone, Debug, PartialEq, PartialOrd, Eq, Ord)]
+        #[repr(u8)]
         pub enum Instruction {
-            // Use the given identifiers and values directly in the enum definition
             $($name = $value),*,
         }
 
@@ -12,7 +11,6 @@ macro_rules! instructions {
 
             fn try_from(value: u8) -> Result<Self, Self::Error> {
                 match value {
-                    // Map each value to the corresponding enum variant
                     $($value => Ok(Instruction::$name),)*
                     _ => Err("Invalid opcode"),
                 }
@@ -21,15 +19,31 @@ macro_rules! instructions {
 
         impl std::fmt::Display for Instruction {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                write!(f, "{}", match self {
+                f.write_str(match self {
                     $(Instruction::$name => stringify!($name),)*
                 })
             }
         }
 
         impl Instruction {
-            pub fn opcode(&self) -> u8 {
-                self.clone() as u8
+            #[inline]
+            pub const fn opcode(self) -> u8 {
+                self as u8
+            }
+
+            #[inline]
+            pub const fn is_push(self) -> bool {
+                let op = self.opcode();
+                op >= 0x5f && op <= 0x7f // PUSH0..PUSH32
+            }
+
+            #[inline]
+            pub const fn push_len(self) -> usize {
+                if self.is_push() {
+                    (self.opcode() - 0x5f) as usize
+                } else {
+                    0
+                }
             }
         }
     };
@@ -192,74 +206,54 @@ instructions! {
     SELFDESTRUCT = 0xFF,
 }
 
-impl Instruction {
-    pub fn is_push(&self) -> bool {
-        (Self::PUSH0..=Self::PUSH32).contains(self)
-    }
-}
-
-pub struct Iterator<'a> {
+pub struct Iter<'a> {
     pc: usize,
     rom: &'a [u8],
 }
 
-impl<'a> Iterator<'a> {
-    pub fn new(rom: &'a [u8]) -> Self {
+impl<'a> Iter<'a> {
+    pub const fn new(rom: &'a [u8]) -> Self {
         Self { pc: 0, rom }
     }
 }
 
-pub enum IteratorItem {
+pub enum IterItem<'a> {
     Instr(usize, Instruction),
-    PushData(usize, [u8; 32]),
+    PushData(usize, Instruction, &'a [u8]),
     Invalid(usize),
 }
 
-impl<'a> std::iter::Iterator for Iterator<'a> {
-    type Item = IteratorItem;
+impl<'a> std::iter::Iterator for Iter<'a> {
+    type Item = IterItem<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // Stop iterating if we're at the end of the ROM
         if self.pc >= self.rom.len() {
             return None;
         }
 
-        // If the next byte isn't a valid instruction, return an error
         let pc = self.pc;
         let instr = match Instruction::try_from(self.rom[pc]) {
             Ok(instr) => instr,
-            Err(_) => return Some(IteratorItem::Invalid(pc)),
+            Err(_) => {
+                self.pc += 1;
+                return Some(IterItem::Invalid(pc));
+            }
         };
 
-        // If the instruction is not a PUSH then increment the PC and return the instruction
         if !instr.is_push() {
             self.pc += 1;
-            return Some(IteratorItem::Instr(pc, instr));
+            return Some(IterItem::Instr(pc, instr));
         };
 
-        // We have a PUSH instruction, so emit the next N bytes
-        let push_len = instr as usize - Instruction::PUSH0 as usize;
+        let push_len = instr.push_len();
         let push_start = pc + 1;
-        let push_end = push_start + push_len;
+        let push_end = std::cmp::min(push_start + push_len, self.rom.len());
 
-        // Copy the push data into a 32-byte array, converting from big endian to little endian
-        let push_data = {
-            let mut data = [0; 32];
-            match push_len {
-                0 => (),
-                _ => {
-                    let reversed = &self.rom[push_start..push_end]
-                        .iter()
-                        .rev()
-                        .cloned()
-                        .collect::<Vec<u8>>();
-                    data[..push_len].copy_from_slice(reversed.as_slice())
-                }
-            };
-            data
-        };
-
-        self.pc += push_len + 1;
-        Some(IteratorItem::PushData(pc, push_data))
+        self.pc = push_end;
+        Some(IterItem::PushData(
+            pc,
+            instr,
+            &self.rom[push_start..push_end],
+        ))
     }
 }
