@@ -11,7 +11,7 @@ use jet_runtime::exec::ReturnCode;
 use crate::{
     builder::{Error, InvalidOpcode, env::Env, ops},
     instructions,
-    instructions::{Instruction, IteratorItem},
+    instructions::{Instruction, IterItem},
 };
 
 const VSTACK_INIT_SIZE: usize = 32;
@@ -215,12 +215,12 @@ fn find_code_blocks<'ctx, 'b>(
     let mut current_block: &mut CodeBlock = blocks.add(0, create_bb())?;
     let mut current_block_starting_pc = 0usize;
 
-    for item in instructions::Iterator::new(bytecode) {
+    for item in instructions::Iter::new(bytecode) {
         match item {
-            IteratorItem::PushData(pc, data) => {
+            IterItem::PushData(pc, _, data) => {
                 trace!("find_code_blocks: Found push data {:?} at PC {}", data, pc);
             }
-            IteratorItem::Instr(pc, instr) => {
+            IterItem::Instr(pc, instr) => {
                 trace!(
                     "find_code_blocks: Found instruction {:?} at PC {}",
                     instr, pc
@@ -261,7 +261,7 @@ fn find_code_blocks<'ctx, 'b>(
                     }
                 }
             }
-            IteratorItem::Invalid(pc) => {
+            IterItem::Invalid(pc) => {
                 trace!("find_code_blocks: Found invalid instruction at PC {}", pc);
                 return Err(InvalidOpcode {
                     pc,
@@ -372,13 +372,18 @@ fn build_code_block(
     // and start a relative PC at 0.
     bctx.builder.position_at_end(code_block.basic_block);
 
-    for item in instructions::Iterator::new(code_block.rom) {
+    for item in instructions::Iter::new(code_block.rom) {
         match item {
-            IteratorItem::PushData(_, data) => {
+            IterItem::PushData(_, _, data) => {
                 trace!("loop: Data: {:?}", data);
-                ops::push(bctx, data)
+
+                let mut new_data = [0u8; 32];
+                new_data[..data.len()].copy_from_slice(data);
+                new_data[..data.len()].reverse();
+
+                ops::push(bctx, new_data)
             }
-            IteratorItem::Instr(pc, instr) => {
+            IterItem::Instr(pc, instr) => {
                 trace!("loop: Instruction: {:?}", instr);
                 match instr {
                     Instruction::STOP => ops::stop(bctx),
@@ -649,7 +654,7 @@ fn build_code_block(
                     Instruction::PUSH32 => Err(Error::UnexpectedInstruction(Instruction::PUSH32)),
                 }
             }
-            IteratorItem::Invalid(pc) => {
+            IterItem::Invalid(pc) => {
                 trace!("loop: Invalid");
                 let absolute_pc = code_block.offset + pc;
                 return Err(InvalidOpcode {

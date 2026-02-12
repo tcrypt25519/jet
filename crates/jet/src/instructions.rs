@@ -206,25 +206,25 @@ instructions! {
     SELFDESTRUCT = 0xFF,
 }
 
-pub struct InstructionIter<'a> {
+pub struct Iter<'a> {
     pc: usize,
     rom: &'a [u8],
 }
 
-impl<'a> InstructionIter<'a> {
+impl<'a> Iter<'a> {
     pub const fn new(rom: &'a [u8]) -> Self {
         Self { pc: 0, rom }
     }
 }
 
-pub enum InstructionIterItem<'a> {
+pub enum IterItem<'a> {
     Instr(usize, Instruction),
     PushData(usize, Instruction, &'a [u8]),
     Invalid(usize),
 }
 
-impl<'a> std::iter::Iterator for InstructionIter<'a> {
-    type Item = InstructionIterItem<'a>;
+impl<'a> std::iter::Iterator for Iter<'a> {
+    type Item = IterItem<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.pc >= self.rom.len() {
@@ -236,13 +236,13 @@ impl<'a> std::iter::Iterator for InstructionIter<'a> {
             Ok(instr) => instr,
             Err(_) => {
                 self.pc += 1;
-                return Some(InstructionIterItem::Invalid(pc));
+                return Some(IterItem::Invalid(pc));
             }
         };
 
         if !instr.is_push() {
             self.pc += 1;
-            return Some(InstructionIterItem::Instr(pc, instr));
+            return Some(IterItem::Instr(pc, instr));
         };
 
         let push_len = instr.push_len();
@@ -250,6 +250,10 @@ impl<'a> std::iter::Iterator for InstructionIter<'a> {
         let push_end = std::cmp::min(push_start + push_len, self.rom.len());
 
         self.pc = push_end;
-        Some(InstructionIterItem::PushData(pc, instr, &self.rom[push_start..push_end]))
+        Some(IterItem::PushData(
+            pc,
+            instr,
+            &self.rom[push_start..push_end],
+        ))
     }
 }
