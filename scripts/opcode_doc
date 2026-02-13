@@ -1,4 +1,4 @@
-#!/usr/bin/env sh
+#!/bin/bash
 
 # 1. Clean the input: Strip '0x' or '0X' prefix if the agent includes it
 # This uses POSIX parameter expansion (fast, no external process)
