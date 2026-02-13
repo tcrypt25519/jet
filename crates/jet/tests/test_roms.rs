@@ -1047,7 +1047,9 @@ rom_tests! {
     // Tests SMOD: modulo by zero behavior (implementation-specific)
     // FIXME(bug): EVM spec (docs/ext/evm/07.mdx) requires SMOD with divisor=0 to return 0.
     // Current implementation incorrectly returns the dividend unchanged.
-    // This test will fail once the bug is fixed; update expected to stack_word(&[0x00]).
+    // This test is commented out because it tests buggy behavior instead of EVM spec compliance.
+    // Uncomment and update expected to stack_word(&[0x00]) once the bug is fixed.
+    /*
     smod_by_zero: Test {
         roms: vec![bytecode![
             PUSH1!(0x00),
@@ -1060,6 +1062,7 @@ rom_tests! {
             ..Default::default()
         },
     },
+    */
 
     // Tests SMOD: negative dividend -10 % 3 = -1 (sign matches dividend)
     smod_negative_dividend: Test {
@@ -1119,7 +1122,9 @@ rom_tests! {
     // Tests ADDMOD: modulo by zero behavior (implementation-specific)
     // FIXME(bug): EVM spec (docs/ext/evm/08.mdx) requires ADDMOD with denominator=0 to return 0.
     // Current implementation incorrectly returns the sum unchanged.
-    // This test will fail once the bug is fixed; update expected to stack_word(&[0x00]).
+    // This test is commented out because it tests buggy behavior instead of EVM spec compliance.
+    // Uncomment and update expected to stack_word(&[0x00]) once the bug is fixed.
+    /*
     addmod_by_zero: Test {
         roms: vec![bytecode![
             PUSH1!(0x00),
@@ -1133,6 +1138,7 @@ rom_tests! {
             ..Default::default()
         },
     },
+    */
 
     // Tests ADDMOD: large values - tests no intermediate overflow
     // (2^256-1 + 2) % 2 should equal 1
@@ -1190,7 +1196,9 @@ rom_tests! {
     // Tests MULMOD: modulo by zero behavior (implementation-specific)
     // FIXME(bug): EVM spec (docs/ext/evm/09.mdx) requires MULMOD with denominator=0 to return 0.
     // Current implementation incorrectly returns the product unchanged.
-    // This test will fail once the bug is fixed; update expected to stack_word(&[0x00]).
+    // This test is commented out because it tests buggy behavior instead of EVM spec compliance.
+    // Uncomment and update expected to stack_word(&[0x00]) once the bug is fixed.
+    /*
     mulmod_by_zero: Test {
         roms: vec![bytecode![
             PUSH1!(0x00),
@@ -1204,6 +1212,7 @@ rom_tests! {
             ..Default::default()
         },
     },
+    */
 
     // Tests MULMOD: large values - tests no intermediate overflow
     // (2^256-1 * 2) % 2 should equal 0
