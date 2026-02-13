@@ -42,7 +42,11 @@ jobs:
             usr/lib/llvm-21 \
             usr/include/llvm-21 \
             usr/include/llvm-c-21 \
-            usr/bin/llvm-config-21
+            usr/bin/llvm-config-21 \
+            usr/lib/x86_64-linux-gnu/libLLVM.so.21.1
+
+      - name: Log LLVM shared libraries
+        run: ls /usr/lib/x86_64-linux-gnu/libLLVM* || true
 
       - name: Set LLVM environment variables
         run: |
