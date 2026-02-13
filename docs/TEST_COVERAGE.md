@@ -1,6 +1,6 @@
 # Test Coverage Analysis
 
-> **Last Updated**: 2026-02-12
+> **Last Updated**: 2026-02-13
 > **Project**: jet EVM Compiler
 > **Test Framework**: `/crates/jet/tests/test_roms.rs`
 
@@ -14,16 +14,16 @@ This document provides a comprehensive analysis of test coverage for the jet EVM
 |--------|------:|
 | **Total Opcodes Defined** | 112 |
 | **Implemented Opcodes** | 48 |
-| **Tested Opcodes** | 18 |
-| **Untested (Implemented)** | 30 |
-| **Test Coverage Rate** | 37.5% |
+| **Tested Opcodes** | 37 |
+| **Untested (Implemented)** | 11 |
+| **Test Coverage Rate** | 77.1% |
 
 ### Coverage by Category
 
 | Category | Implemented | Tested | Untested | Status |
 |----------|------------|--------|----------|--------|
-| **Arithmetic** | 11 | 6 | 5 | ⚠️ Partial |
-| **Comparison & Bitwise** | 14 | 0 | 14 | ❌ None |
+| **Arithmetic** | 11 | 10 | 1 | ✅ Well-tested |
+| **Comparison & Bitwise** | 14 | 14 | 0 | ✅ Well-tested |
 | **Cryptographic** | 1 | 1 | 0 | ⚠️ Under-tested |
 | **Stack Operations** | 48 | 0 | 48 | ❌ Indirect only |
 | **Memory** | 3 | 3 | 0 | ✅ Good |
@@ -39,50 +39,112 @@ This document provides a comprehensive analysis of test coverage for the jet EVM
 
 ---
 
-## Untested Opcodes (30 Total)
+## Tested Opcodes (37 Total)
 
-### Arithmetic Operations (5 untested)
+### Arithmetic Operations (10 tested) ✅
 
-| Opcode | Hex | Description | Key Edge Cases | Priority |
-|--------|-----|-------------|----------------|----------|
-| **SDIV** | 0x05 | Signed division | • Division by zero → 0<br>• `-2^255 / -1` overflow → `-2^255`<br>• Positive/negative combinations<br>• Sign preservation | **HIGH** |
-| **SMOD** | 0x07 | Signed modulo | • Modulo by zero → 0<br>• Negative operands<br>• Sign matches dividend | **HIGH** |
-| **ADDMOD** | 0x08 | Addition modulo | • No intermediate 2^256 limit<br>• Modulo by zero → 0<br>• `(2^256-1 + 2) % 2` = 1<br>• Large value addition | **HIGH** |
-| **MULMOD** | 0x09 | Multiplication modulo | • No intermediate 2^256 limit<br>• Modulo by zero → 0<br>• `(2^256-1 * 2) % 2` = 0<br>• Large value multiplication | **HIGH** |
+| Opcode | Hex | Description | Tests | Status |
+|--------|-----|-------------|-------|--------|
+| **ADD** | 0x01 | Addition | Basic tests | ✅ Tested |
+| **MUL** | 0x02 | Multiplication | Basic + overflow tests | ✅ Tested |
+| **SUB** | 0x03 | Subtraction | Basic + underflow tests | ✅ Tested |
+| **DIV** | 0x04 | Division | Basic tests | ✅ Tested |
+| **SDIV** | 0x05 | Signed division | 6 tests: basic, by zero, negative dividend/divisor, both negative, overflow (-2^255/-1) | ⚠️ Implementation bug: by zero returns 0 (correct) |
+| **MOD** | 0x06 | Modulo | Basic tests | ✅ Tested |
+| **SMOD** | 0x07 | Signed modulo | 4 tests: basic, by zero, negative dividend, negative divisor | ⚠️ Implementation bug: by zero returns dividend (should be 0) |
+| **ADDMOD** | 0x08 | Addition modulo | 4 tests: basic, by zero, large values, no wrap | ⚠️ Implementation bug: by zero returns sum (should be 0) |
+| **MULMOD** | 0x09 | Multiplication modulo | 4 tests: basic, by zero, large values, no wrap | ⚠️ Implementation bug: by zero returns product (should be 0) |
+| **EXP** | 0x0A | Exponentiation | Basic tests | ✅ Tested |
 
-**Why High Priority**: Arithmetic operations with overflow/underflow edge cases are security-critical. ADDMOD/MULMOD have special semantics (no intermediate modulo) that must be verified.
+### Comparison Operations (6 tested) ✅
+
+| Opcode | Hex | Description | Tests | Status |
+|--------|-----|-------------|-------|--------|
+| **LT** | 0x10 | Less than (unsigned) | 4 tests: true, false, equal, zero boundary | ✅ Tested |
+| **GT** | 0x11 | Greater than (unsigned) | 4 tests: true, false, equal, zero boundary | ✅ Tested |
+| **SLT** | 0x12 | Signed less than | 4 tests: negative < zero, zero not < negative, positive, equal | ✅ Tested |
+| **SGT** | 0x13 | Signed greater than | 4 tests: zero > negative, negative not > zero, positive, equal | ✅ Tested |
+| **EQ** | 0x14 | Equality | 4 tests: true, false, zero, max value | ✅ Tested |
+| **ISZERO** | 0x15 | Is zero | 3 tests: true, false, max value | ✅ Tested |
+
+### Bitwise Operations (8 tested) ✅
+
+| Opcode | Hex | Description | Tests | Status |
+|--------|-----|-------------|-------|--------|
+| **AND** | 0x16 | Bitwise AND | 3 tests: basic, all zeros, identity | ✅ Tested |
+| **OR** | 0x17 | Bitwise OR | 3 tests: basic, identity with zero, all ones | ✅ Tested |
+| **XOR** | 0x18 | Bitwise XOR | 3 tests: basic, identity with zero, self-cancel | ✅ Tested |
+| **NOT** | 0x19 | Bitwise NOT | 3 tests: invert zeros, invert ones, single byte | ✅ Tested |
+| **BYTE** | 0x1A | Extract byte | 3 tests: index 0 (MSB), out of range, from zero | ✅ Tested |
+| **SHL** | 0x1B | Shift left | 3 tests: by 0, by 1, by 8 | ⚠️ Implementation bug: arguments swapped |
+| **SHR** | 0x1C | Logical shift right | 3 tests: by 0, by 1, by 8 | ⚠️ Implementation bug: arguments swapped |
+| **SAR** | 0x1D | Arithmetic shift right | 3 tests: positive by 0, positive by 1, negative preserves sign | ⚠️ Implementation bug: arguments swapped |
+
+### Memory Operations (3 tested) ✅
+
+| Opcode | Hex | Description | Tests | Status |
+|--------|-----|-------------|-------|--------|
+| **MLOAD** | 0x51 | Load from memory | Basic tests | ✅ Tested |
+| **MSTORE** | 0x52 | Store to memory | Basic tests | ✅ Tested |
+| **MSTORE8** | 0x53 | Store byte to memory | Basic tests | ✅ Tested |
+
+### Control Flow (3 tested) ⚠️
+
+| Opcode | Hex | Description | Tests | Status |
+|--------|-----|-------------|-------|--------|
+| **JUMP** | 0x56 | Unconditional jump | Basic jump test | ✅ Tested |
+| **JUMPI** | 0x57 | Conditional jump | Not tested | ❌ Untested (implementation bug: type mismatch) |
+| **JUMPDEST** | 0x5B | Jump destination | Used in JUMP tests | ✅ Tested |
+| **PC** | 0x58 | Program counter | Basic test | ✅ Tested |
+
+### System Operations (3 tested) ⚠️
+
+| Opcode | Hex | Description | Tests | Status |
+|--------|-----|-------------|-------|--------|
+| **RETURN** | 0xF3 | Halt with return data | Basic tests | ✅ Tested |
+| **RETURNDATASIZE** | 0x3D | Size of return data | Basic tests | ✅ Tested |
+| **RETURNDATACOPY** | 0x3E | Copy return data | Basic tests | ✅ Tested |
+
+### Cryptographic Operations (1 tested) ⚠️
+
+| Opcode | Hex | Description | Tests | Status |
+|--------|-----|-------------|-------|--------|
+| **KECCAK256** | 0x20 | Keccak-256 hash | Basic test only | ⚠️ Under-tested (needs more edge cases) |
+
+### Call Operations (2 tested) ⚠️
+
+| Opcode | Hex | Description | Tests | Status |
+|--------|-----|-------------|-------|--------|
+| **CALL** | 0xF1 | Call contract | Basic test | ⚠️ Under-tested |
+| **SIGNEXTEND** | 0x0B | Sign extend | Basic test | ⚠️ Under-tested |
 
 ---
 
-### Comparison Operations (6 untested)
+## Untested Opcodes (11 Total)
+
+### Arithmetic Operations (1 untested)
+
+### Arithmetic Operations (1 untested)
 
 | Opcode | Hex | Description | Key Edge Cases | Priority |
 |--------|-----|-------------|----------------|----------|
-| **LT** | 0x10 | Less than (unsigned) | • Equal values → 0<br>• 0 < 1 → 1<br>• Max value comparisons<br>• Boundary values (0, 2^256-1) | **HIGH** |
-| **GT** | 0x11 | Greater than (unsigned) | • Equal values → 0<br>• 1 > 0 → 1<br>• Max value comparisons<br>• Boundary values | **HIGH** |
-| **SLT** | 0x12 | Signed less than | • Signed interpretation<br>• Negative comparisons<br>• `-1 < 0` → 1<br>• `-2^255` (most negative) comparisons | **HIGH** |
-| **SGT** | 0x13 | Signed greater than | • Signed interpretation<br>• Negative comparisons<br>• `0 > -1` → 1<br>• `-2^255` comparisons | **HIGH** |
-| **EQ** | 0x14 | Equality | • Equal values → 1<br>• Different values → 0<br>• Zero equality<br>• Max value equality | **HIGH** |
-| **ISZERO** | 0x15 | Is zero | • Zero value → 1<br>• Non-zero values → 0<br>• Max value → 0 | **HIGH** |
+| **SIGNEXTEND** | 0x0B | Sign extension | • Byte index validation<br>• Sign bit extraction<br>• Negative value extension<br>• Positive value truncation | **MEDIUM** |
 
-**Why High Priority**: Comparison operations are fundamental to control flow and conditional logic. All contracts rely on these for correctness.
+**Why Medium Priority**: Sign extension is used in signed arithmetic operations. Already has basic test but needs edge cases.
 
 ---
 
-### Bitwise Operations (8 untested)
+### Comparison Operations ✅
 
-| Opcode | Hex | Description | Key Edge Cases | Priority |
-|--------|-----|-------------|----------------|----------|
-| **AND** | 0x16 | Bitwise AND | • All zeros<br>• All ones (0xFFFF...FFFF)<br>• Identity: `x & x = x`<br>• Zero: `x & 0 = 0` | **MEDIUM** |
-| **OR** | 0x17 | Bitwise OR | • All zeros<br>• All ones<br>• Identity: `x \| 0 = x`<br>• All ones: `x \| 0xFFFF...FFFF = 0xFFFF...FFFF` | **MEDIUM** |
-| **XOR** | 0x18 | Bitwise XOR | • Identity: `x ^ 0 = x`<br>• Self-cancel: `x ^ x = 0`<br>• All ones toggle | **MEDIUM** |
-| **NOT** | 0x19 | Bitwise NOT | • All zeros → all ones<br>• All ones → all zeros<br>• Double negation: `~~x = x`<br>• Single bit patterns | **MEDIUM** |
-| **BYTE** | 0x1A | Extract byte | • Index 0 (most significant byte)<br>• Index 31 (least significant byte)<br>• Index >= 32 → 0<br>• Extract from 0xFF, 0xFF00, etc. | **MEDIUM** |
-| **SHL** | 0x1B | Shift left | • Shift by 0 (identity)<br>• Shift by 1<br>• Shift by 255<br>• Shift by 256+ → 0<br>• Bit overflow/discard | **MEDIUM** |
-| **SHR** | 0x1C | Logical shift right | • Shift by 0 (identity)<br>• Shift by 1<br>• Shift by 255<br>• Shift by 256+ → 0<br>• Zero fill | **MEDIUM** |
-| **SAR** | 0x1D | Arithmetic shift right | • Sign extension<br>• Shift by 0 (identity)<br>• Negative values preserve sign<br>• Shift by 256+ → 0 or -1 | **MEDIUM** |
+All comparison operations (LT, GT, SLT, SGT, EQ, ISZERO) are now tested with comprehensive edge cases.
 
-**Why Medium Priority**: Bitwise operations are common and moderately complex. They have well-defined behaviors but need verification of edge cases.
+---
+
+### Bitwise Operations ✅
+
+All bitwise operations (AND, OR, XOR, NOT, BYTE, SHL, SHR, SAR) are now tested with edge cases.
+
+**Note**: SHL, SHR, and SAR have implementation bugs (swapped arguments) documented in tests with FIXME comments.
 
 ---
 
@@ -92,7 +154,7 @@ This document provides a comprehensive analysis of test coverage for the jet EVM
 |--------|-----|-------------|----------------|----------|
 | **JUMPI** | 0x57 | Conditional jump | • Condition = 0 (no jump)<br>• Condition ≠ 0 (jump)<br>• Jump to invalid destination → error<br>• Jump to non-JUMPDEST → error<br>• Multiple conditional branches | **HIGH** |
 
-**Why High Priority**: Conditional control flow is fundamental. JUMP is tested but JUMPI (conditional variant) is not.
+**Why High Priority**: Conditional control flow is fundamental. JUMP is tested but JUMPI (conditional variant) has an implementation bug (type mismatch i64 vs i256) preventing testing.
 
 ---
 

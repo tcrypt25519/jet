@@ -554,8 +554,8 @@ rom_tests! {
     // Tests LT: 5 < 10 should return 1 (true)
     lt_true: Test {
         roms: vec![bytecode![
-            PUSH1!(0x0A),  // Push 10
-            PUSH1!(0x05),  // Push 5
+            PUSH1!(0x0A),
+            PUSH1!(0x05),
             LT!(),         // 5 < 10
         ]],
         expected: TestContractRun {
@@ -568,8 +568,8 @@ rom_tests! {
     // Tests LT: 10 < 5 should return 0 (false)
     lt_false: Test {
         roms: vec![bytecode![
-            PUSH1!(0x05),  // Push 5
-            PUSH1!(0x0A),  // Push 10
+            PUSH1!(0x05),
+            PUSH1!(0x0A),
             LT!(),         // 10 < 5
         ]],
         expected: TestContractRun {
@@ -582,8 +582,8 @@ rom_tests! {
     // Tests LT: equal values should return 0 (false)
     lt_equal: Test {
         roms: vec![bytecode![
-            PUSH1!(0x07),  // Push 7
-            PUSH1!(0x07),  // Push 7
+            PUSH1!(0x07),
+            PUSH1!(0x07),
             LT!(),         // 7 < 7
         ]],
         expected: TestContractRun {
@@ -596,8 +596,8 @@ rom_tests! {
     // Tests LT: 0 < 1 should return 1 (true) - boundary case
     lt_zero_boundary: Test {
         roms: vec![bytecode![
-            PUSH1!(0x01),  // Push 1
-            PUSH1!(0x00),  // Push 0
+            PUSH1!(0x01),
+            PUSH1!(0x00),
             LT!(),         // 0 < 1
         ]],
         expected: TestContractRun {
@@ -612,8 +612,8 @@ rom_tests! {
     // Tests GT: 10 > 5 should return 1 (true)
     gt_true: Test {
         roms: vec![bytecode![
-            PUSH1!(0x05),  // Push 5
-            PUSH1!(0x0A),  // Push 10
+            PUSH1!(0x05),
+            PUSH1!(0x0A),
             GT!(),         // 10 > 5
         ]],
         expected: TestContractRun {
@@ -626,8 +626,8 @@ rom_tests! {
     // Tests GT: 5 > 10 should return 0 (false)
     gt_false: Test {
         roms: vec![bytecode![
-            PUSH1!(0x0A),  // Push 10
-            PUSH1!(0x05),  // Push 5
+            PUSH1!(0x0A),
+            PUSH1!(0x05),
             GT!(),         // 5 > 10
         ]],
         expected: TestContractRun {
@@ -640,8 +640,8 @@ rom_tests! {
     // Tests GT: equal values should return 0 (false)
     gt_equal: Test {
         roms: vec![bytecode![
-            PUSH1!(0x07),  // Push 7
-            PUSH1!(0x07),  // Push 7
+            PUSH1!(0x07),
+            PUSH1!(0x07),
             GT!(),         // 7 > 7
         ]],
         expected: TestContractRun {
@@ -654,8 +654,8 @@ rom_tests! {
     // Tests GT: 1 > 0 should return 1 (true) - boundary case
     gt_zero_boundary: Test {
         roms: vec![bytecode![
-            PUSH1!(0x00),  // Push 0
-            PUSH1!(0x01),  // Push 1
+            PUSH1!(0x00),
+            PUSH1!(0x01),
             GT!(),         // 1 > 0
         ]],
         expected: TestContractRun {
@@ -905,8 +905,8 @@ rom_tests! {
     // Tests SDIV: basic positive division 10 / 3 = 3
     sdiv_positive_basic: Test {
         roms: vec![bytecode![
-            PUSH1!(0x03),  // Push 3
-            PUSH1!(0x0A),  // Push 10
+            PUSH1!(0x03),
+            PUSH1!(0x0A),
             SDIV!(),       // 10 / 3 = 3
         ]],
         expected: TestContractRun {
@@ -919,8 +919,8 @@ rom_tests! {
     // Tests SDIV: division by zero returns 0 (EVM spec)
     sdiv_by_zero: Test {
         roms: vec![bytecode![
-            PUSH1!(0x00),  // Push 0
-            PUSH1!(0x0A),  // Push 10
+            PUSH1!(0x00),
+            PUSH1!(0x0A),
             SDIV!(),       // 10 / 0 = 0
         ]],
         expected: TestContractRun {
@@ -933,7 +933,7 @@ rom_tests! {
     // Tests SDIV: negative dividend -10 / 3 = -3
     sdiv_negative_dividend: Test {
         roms: vec![bytecode![
-            PUSH1!(0x03),  // Push 3
+            PUSH1!(0x03),
             PUSH32!(
                 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
                 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
@@ -962,7 +962,7 @@ rom_tests! {
                 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
                 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFD
             ),
-            PUSH1!(0x0A),  // Push 10
+            PUSH1!(0x0A),
             SDIV!(),
         ]],
         expected: TestContractRun {
@@ -1033,8 +1033,8 @@ rom_tests! {
     // Tests SMOD: basic positive modulo 10 % 3 = 1
     smod_positive_basic: Test {
         roms: vec![bytecode![
-            PUSH1!(0x03),  // Push 3
-            PUSH1!(0x0A),  // Push 10
+            PUSH1!(0x03),
+            PUSH1!(0x0A),
             SMOD!(),       // 10 % 3 = 1
         ]],
         expected: TestContractRun {
@@ -1064,7 +1064,7 @@ rom_tests! {
     // Tests SMOD: negative dividend -10 % 3 = -1 (sign matches dividend)
     smod_negative_dividend: Test {
         roms: vec![bytecode![
-            PUSH1!(0x03),  // Push 3
+            PUSH1!(0x03),
             PUSH32!(
                 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
                 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
@@ -1089,7 +1089,7 @@ rom_tests! {
                 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
                 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFD
             ),
-            PUSH1!(0x0A),  // Push 10
+            PUSH1!(0x0A),
             SMOD!(),
         ]],
         expected: TestContractRun {
@@ -1104,9 +1104,9 @@ rom_tests! {
     // Tests ADDMOD: basic (5 + 3) % 4 = 0
     addmod_basic: Test {
         roms: vec![bytecode![
-            PUSH1!(0x04),  // Push modulo (4)
-            PUSH1!(0x03),  // Push b (3)
-            PUSH1!(0x05),  // Push a (5)
+            PUSH1!(0x04),
+            PUSH1!(0x03),
+            PUSH1!(0x05),
             ADDMOD!(),     // (5 + 3) % 4 = 8 % 4 = 0
         ]],
         expected: TestContractRun {
@@ -1138,8 +1138,8 @@ rom_tests! {
     // (2^256-1 + 2) % 2 should equal 1
     addmod_large_values: Test {
         roms: vec![bytecode![
-            PUSH1!(0x02),  // Push modulo (2)
-            PUSH1!(0x02),  // Push b (2)
+            PUSH1!(0x02),
+            PUSH1!(0x02),
             PUSH32!(
                 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
                 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
@@ -1158,9 +1158,9 @@ rom_tests! {
     // Tests ADDMOD: (7 + 8) % 10 = 5
     addmod_no_wrap: Test {
         roms: vec![bytecode![
-            PUSH1!(0x0A),  // Push modulo (10)
-            PUSH1!(0x08),  // Push b (8)
-            PUSH1!(0x07),  // Push a (7)
+            PUSH1!(0x0A),
+            PUSH1!(0x08),
+            PUSH1!(0x07),
             ADDMOD!(),     // (7 + 8) % 10 = 15 % 10 = 5
         ]],
         expected: TestContractRun {
@@ -1175,9 +1175,9 @@ rom_tests! {
     // Tests MULMOD: basic (5 * 3) % 7 = 1
     mulmod_basic: Test {
         roms: vec![bytecode![
-            PUSH1!(0x07),  // Push modulo (7)
-            PUSH1!(0x03),  // Push b (3)
-            PUSH1!(0x05),  // Push a (5)
+            PUSH1!(0x07),
+            PUSH1!(0x03),
+            PUSH1!(0x05),
             MULMOD!(),     // (5 * 3) % 7 = 15 % 7 = 1
         ]],
         expected: TestContractRun {
@@ -1209,8 +1209,8 @@ rom_tests! {
     // (2^256-1 * 2) % 2 should equal 0
     mulmod_large_values: Test {
         roms: vec![bytecode![
-            PUSH1!(0x02),  // Push modulo (2)
-            PUSH1!(0x02),  // Push b (2)
+            PUSH1!(0x02),
+            PUSH1!(0x02),
             PUSH32!(
                 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
                 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
@@ -1229,9 +1229,9 @@ rom_tests! {
     // Tests MULMOD: (6 * 7) % 10 = 2
     mulmod_no_wrap: Test {
         roms: vec![bytecode![
-            PUSH1!(0x0A),  // Push modulo (10)
-            PUSH1!(0x07),  // Push b (7)
-            PUSH1!(0x06),  // Push a (6)
+            PUSH1!(0x0A),
+            PUSH1!(0x07),
+            PUSH1!(0x06),
             MULMOD!(),     // (6 * 7) % 10 = 42 % 10 = 2
         ]],
         expected: TestContractRun {
@@ -1252,8 +1252,8 @@ rom_tests! {
     // Tests AND: basic operation 0xFF & 0x0F = 0x0F
     and_basic: Test {
         roms: vec![bytecode![
-            PUSH1!(0x0F),  // Push 0x0F
-            PUSH1!(0xFF),  // Push 0xFF
+            PUSH1!(0x0F),
+            PUSH1!(0xFF),
             AND!(),        // 0xFF & 0x0F = 0x0F
         ]],
         expected: TestContractRun {
@@ -1266,8 +1266,8 @@ rom_tests! {
     // Tests AND: all zeros
     and_all_zeros: Test {
         roms: vec![bytecode![
-            PUSH1!(0x00),  // Push 0
-            PUSH1!(0xFF),  // Push 0xFF
+            PUSH1!(0x00),
+            PUSH1!(0xFF),
             AND!(),        // 0xFF & 0x00 = 0x00
         ]],
         expected: TestContractRun {
@@ -1280,8 +1280,8 @@ rom_tests! {
     // Tests AND: identity operation (x & x = x)
     and_identity: Test {
         roms: vec![bytecode![
-            PUSH1!(0xAB),  // Push 0xAB
-            PUSH1!(0xAB),  // Push 0xAB
+            PUSH1!(0xAB),
+            PUSH1!(0xAB),
             AND!(),        // 0xAB & 0xAB = 0xAB
         ]],
         expected: TestContractRun {
@@ -1296,8 +1296,8 @@ rom_tests! {
     // Tests OR: basic operation 0xF0 | 0x0F = 0xFF
     or_basic: Test {
         roms: vec![bytecode![
-            PUSH1!(0x0F),  // Push 0x0F
-            PUSH1!(0xF0),  // Push 0xF0
+            PUSH1!(0x0F),
+            PUSH1!(0xF0),
             OR!(),         // 0xF0 | 0x0F = 0xFF
         ]],
         expected: TestContractRun {
@@ -1310,8 +1310,8 @@ rom_tests! {
     // Tests OR: identity with zero (x | 0 = x)
     or_identity_zero: Test {
         roms: vec![bytecode![
-            PUSH1!(0x00),  // Push 0
-            PUSH1!(0xAB),  // Push 0xAB
+            PUSH1!(0x00),
+            PUSH1!(0xAB),
             OR!(),         // 0xAB | 0x00 = 0xAB
         ]],
         expected: TestContractRun {
@@ -1324,8 +1324,8 @@ rom_tests! {
     // Tests OR: all ones
     or_all_ones: Test {
         roms: vec![bytecode![
-            PUSH1!(0xFF),  // Push 0xFF
-            PUSH1!(0xAB),  // Push 0xAB
+            PUSH1!(0xFF),
+            PUSH1!(0xAB),
             OR!(),         // 0xAB | 0xFF = 0xFF
         ]],
         expected: TestContractRun {
@@ -1340,8 +1340,8 @@ rom_tests! {
     // Tests XOR: basic operation 0xFF ^ 0x0F = 0xF0
     xor_basic: Test {
         roms: vec![bytecode![
-            PUSH1!(0x0F),  // Push 0x0F
-            PUSH1!(0xFF),  // Push 0xFF
+            PUSH1!(0x0F),
+            PUSH1!(0xFF),
             XOR!(),        // 0xFF ^ 0x0F = 0xF0
         ]],
         expected: TestContractRun {
@@ -1354,8 +1354,8 @@ rom_tests! {
     // Tests XOR: identity with zero (x ^ 0 = x)
     xor_identity_zero: Test {
         roms: vec![bytecode![
-            PUSH1!(0x00),  // Push 0
-            PUSH1!(0xAB),  // Push 0xAB
+            PUSH1!(0x00),
+            PUSH1!(0xAB),
             XOR!(),        // 0xAB ^ 0x00 = 0xAB
         ]],
         expected: TestContractRun {
@@ -1368,8 +1368,8 @@ rom_tests! {
     // Tests XOR: self-cancel (x ^ x = 0)
     xor_self_cancel: Test {
         roms: vec![bytecode![
-            PUSH1!(0xAB),  // Push 0xAB
-            PUSH1!(0xAB),  // Push 0xAB
+            PUSH1!(0xAB),
+            PUSH1!(0xAB),
             XOR!(),        // 0xAB ^ 0xAB = 0x00
         ]],
         expected: TestContractRun {
@@ -1384,7 +1384,7 @@ rom_tests! {
     // Tests NOT: invert all zeros to all ones
     not_zeros: Test {
         roms: vec![bytecode![
-            PUSH1!(0x00),  // Push 0
+            PUSH1!(0x00),
             NOT!(),        // ~0x00 = 0xFF...FF
         ]],
         expected: TestContractRun {
@@ -1413,7 +1413,7 @@ rom_tests! {
 
     not_single_byte: Test {
         roms: vec![bytecode![
-            PUSH1!(0xAB),  // Push 0xAB
+            PUSH1!(0xAB),
             NOT!(),        // ~0xAB = 0xFF...FF54
         ]],
         expected: TestContractRun {
@@ -1432,8 +1432,8 @@ rom_tests! {
     // Tests BYTE: extract most significant byte (index 0)
     byte_index_0: Test {
         roms: vec![bytecode![
-            PUSH1!(0xAB),  // Push value with 0xAB in LSB
-            PUSH1!(0x1F),  // Push index 31 (LSB in 32-byte word)
+            PUSH1!(0xAB),
+            PUSH1!(0x1F),
             BYTE!(),       // Extract byte at index 31
         ]],
         expected: TestContractRun {
@@ -1446,8 +1446,8 @@ rom_tests! {
     // Tests BYTE: extract byte out of range (>= 32)
     byte_out_of_range: Test {
         roms: vec![bytecode![
-            PUSH1!(0xAB),  // Push value
-            PUSH1!(0x20),  // Push index 32 (out of range)
+            PUSH1!(0xAB),
+            PUSH1!(0x20),
             BYTE!(),       // Extract byte at index 32 = 0
         ]],
         expected: TestContractRun {
@@ -1460,8 +1460,8 @@ rom_tests! {
     // Tests BYTE: extract from zero
     byte_from_zero: Test {
         roms: vec![bytecode![
-            PUSH1!(0x00),  // Push 0
-            PUSH1!(0x00),  // Push index 0
+            PUSH1!(0x00),
+            PUSH1!(0x00),
             BYTE!(),       // Extract byte at index 0 = 0
         ]],
         expected: TestContractRun {
