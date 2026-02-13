@@ -14,9 +14,9 @@ This document provides a comprehensive analysis of test coverage for the jet EVM
 |--------|------:|
 | **Total Opcodes Defined** | 148 |
 | **Implemented Opcodes** | ~80 (with meaningful implementation) |
-| **Tested Opcodes** | 37 |
-| **Untested (Implemented)** | ~43 |
-| **Test Coverage Rate** | ~46% (37/80) |
+| **Tested Opcodes** | 36 |
+| **Untested (Implemented)** | ~44 |
+| **Test Coverage Rate** | ~45% (36/80) |
 
 ### Coverage by Category
 
@@ -24,7 +24,7 @@ This document provides a comprehensive analysis of test coverage for the jet EVM
 |----------|------------|--------|----------|--------|
 | **Arithmetic** | 11 | 10 | 1 | ✅ Well-tested |
 | **Comparison & Bitwise** | 14 | 14 | 0 | ✅ Well-tested |
-| **Cryptographic** | 1 | 1 | 0 | ⚠️ Under-tested |
+| **Cryptographic** | 1 | 0 | 1 | ❌ Broken implementation |
 | **Stack Operations** | 48 | 0 | 48 | ❌ Indirect only |
 | **Memory** | 3 | 3 | 0 | ✅ Good |
 | **Control Flow** | 4 | 3 | 1 | ⚠️ Partial |
@@ -105,11 +105,11 @@ This document provides a comprehensive analysis of test coverage for the jet EVM
 | **RETURNDATASIZE** | 0x3D | Size of return data | Basic tests | ✅ Tested |
 | **RETURNDATACOPY** | 0x3E | Copy return data | Basic tests | ✅ Tested |
 
-### Cryptographic Operations (1 tested) ⚠️
+### Cryptographic Operations (0 tested) ❌
 
 | Opcode | Hex | Description | Tests | Status |
 |--------|-----|-------------|-------|--------|
-| **KECCAK256** | 0x20 | Keccak-256 hash | Basic test only | ⚠️ Under-tested (needs more edge cases) |
+| **KECCAK256** | 0x20 | Keccak-256 hash | Test commented out | ❌ **BROKEN IMPLEMENTATION** - pops 1 value instead of 2 (offset, size); doesn't read from memory; hashes wrong data |
 
 ### Call Operations (2 tested) ⚠️
 
