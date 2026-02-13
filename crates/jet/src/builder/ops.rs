@@ -433,7 +433,19 @@ pub(crate) fn smod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     let (a, b) = __stack_pop_2(bctx)?;
     let a = load_i256(bctx, a)?;
     let b = load_i256(bctx, b)?;
-    let result = bctx.builder.build_int_signed_rem(a, b, "smod_result")?;
+
+    // EVM spec: modulo by zero returns 0
+    let zero = bctx.env.types().i256.const_zero();
+    let b_is_zero =
+        bctx.builder
+            .build_int_compare(inkwell::IntPredicate::EQ, b, zero, "b_is_zero")?;
+
+    let smod_result = bctx.builder.build_int_signed_rem(a, b, "smod_result")?;
+    let result = bctx
+        .builder
+        .build_select(b_is_zero, zero, smod_result, "smod_final")?;
+    let result = result.into_int_value();
+
     __stack_push_int(bctx, result)?;
     Ok(())
 }
@@ -443,10 +455,22 @@ pub(crate) fn addmod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     let a = load_i256(bctx, a)?;
     let b = load_i256(bctx, b)?;
     let c = load_i256(bctx, c)?;
-    let result = bctx.builder.build_int_add(a, b, "addmod_add_result")?;
+
+    // EVM spec: modulo by zero returns 0
+    let zero = bctx.env.types().i256.const_zero();
+    let c_is_zero =
+        bctx.builder
+            .build_int_compare(inkwell::IntPredicate::EQ, c, zero, "c_is_zero")?;
+
+    let add_result = bctx.builder.build_int_add(a, b, "addmod_add_result")?;
+    let mod_result = bctx
+        .builder
+        .build_int_unsigned_rem(add_result, c, "addmod_mod_result")?;
     let result = bctx
         .builder
-        .build_int_unsigned_rem(result, c, "addmod_mod_result")?;
+        .build_select(c_is_zero, zero, mod_result, "addmod_final")?;
+    let result = result.into_int_value();
+
     __stack_push_int(bctx, result)?;
     Ok(())
 }
@@ -456,10 +480,22 @@ pub(crate) fn mulmod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     let a = load_i256(bctx, a)?;
     let b = load_i256(bctx, b)?;
     let c = load_i256(bctx, c)?;
-    let result = bctx.builder.build_int_mul(a, b, "mulmod_mul_result")?;
+
+    // EVM spec: modulo by zero returns 0
+    let zero = bctx.env.types().i256.const_zero();
+    let c_is_zero =
+        bctx.builder
+            .build_int_compare(inkwell::IntPredicate::EQ, c, zero, "c_is_zero")?;
+
+    let mul_result = bctx.builder.build_int_mul(a, b, "mulmod_mul_result")?;
+    let mod_result = bctx
+        .builder
+        .build_int_unsigned_rem(mul_result, c, "mulmod_mod_result")?;
     let result = bctx
         .builder
-        .build_int_unsigned_rem(result, c, "mulmod_mod_result")?;
+        .build_select(c_is_zero, zero, mod_result, "mulmod_final")?;
+    let result = result.into_int_value();
+
     __stack_push_int(bctx, result)?;
     Ok(())
 }
