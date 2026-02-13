@@ -2,7 +2,8 @@
 members = [
     "crates/jet",
     "crates/jet_runtime",
-    "crates/jet_ir"
+    "crates/jet_ir",
+    "crates/jet_push_macros"
 ]
 
 resolver = "3"

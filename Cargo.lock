@@ -337,6 +337,7 @@ dependencies = [
  "hex",
  "inkwell",
  "jet_ir",
+ "jet_push_macros",
  "jet_runtime",
  "libc",
  "log",
@@ -352,6 +353,15 @@ name = "jet_ir"
 version = "0.1.0"
 dependencies = [
  "inkwell",
+]
+
+[[package]]
+name = "jet_push_macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
