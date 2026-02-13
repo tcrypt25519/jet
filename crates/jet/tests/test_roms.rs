@@ -1,7 +1,7 @@
 use jet::instructions::Instruction;
+use jet_push_macros::generate_push_macros;
 use jet_runtime::exec::ReturnCode;
 use roms::*;
-use jet_push_macros::generate_push_macros;
 
 mod roms;
 

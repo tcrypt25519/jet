@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, Expr, ExprRange, RangeLimits};
+use syn::{Expr, ExprRange, RangeLimits, parse_macro_input};
 
 /// Generates PUSH macros for a range of values.
 ///
@@ -64,6 +64,7 @@ pub fn generate_push_macros(input: TokenStream) -> TokenStream {
             // PUSH0 takes no arguments
             macro_defs.push(quote! {
                 #[allow(non_snake_case)]
+                #[allow(unused_macros)]
                 macro_rules! #macro_name {
                     () => { vec![Instruction::#instruction_name.opcode()] };
                 }
@@ -72,29 +73,28 @@ pub fn generate_push_macros(input: TokenStream) -> TokenStream {
             // Generate the macro with exactly n parameters
             // We need to generate the pattern ($b0:expr, $b1:expr, ..., $b(n-1):expr)
             // and the expansion vec![opcode, $b0, $b1, ..., $b(n-1)]
-            
-            let param_names: Vec<_> = (0..n)
-                .map(|i| format!("b{}", i))
-                .collect();
-            
+
+            let param_names: Vec<_> = (0..n).map(|i| format!("b{}", i)).collect();
+
             // Create the parameter pattern string
             let param_pattern = param_names
                 .iter()
                 .map(|name| format!("${}:expr", name))
                 .collect::<Vec<_>>()
                 .join(", ");
-            
+
             // Create the byte list string
             let byte_list = param_names
                 .iter()
                 .map(|name| format!("${}", name))
                 .collect::<Vec<_>>()
                 .join(", ");
-            
+
             // Build the macro as a string and parse it
             let macro_str = format!(
                 r#"
                 #[allow(non_snake_case)]
+                #[allow(unused_macros)]
                 macro_rules! {} {{
                     ({}) => {{
                         vec![Instruction::{}.opcode(), {}]
@@ -103,7 +103,7 @@ pub fn generate_push_macros(input: TokenStream) -> TokenStream {
                 "#,
                 macro_name, param_pattern, instruction_name, byte_list
             );
-            
+
             let macro_tokens: proc_macro2::TokenStream = macro_str.parse().unwrap();
             macro_defs.push(macro_tokens);
         }
@@ -113,6 +113,6 @@ pub fn generate_push_macros(input: TokenStream) -> TokenStream {
     let expanded = quote! {
         #( #macro_defs )*
     };
-    
+
     TokenStream::from(expanded)
 }
