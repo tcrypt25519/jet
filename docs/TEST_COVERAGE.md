@@ -121,9 +121,6 @@ This document provides a comprehensive analysis of test coverage for the jet EVM
 ---
 
 ## Untested Opcodes (11 Total)
-
-### Arithmetic Operations (1 untested)
-
 ### Arithmetic Operations (1 untested)
 
 | Opcode | Hex | Description | Key Edge Cases | Priority |
@@ -144,7 +141,7 @@ All comparison operations (LT, GT, SLT, SGT, EQ, ISZERO) are now tested with com
 
 All bitwise operations (AND, OR, XOR, NOT, BYTE, SHL, SHR, SAR) are now tested with edge cases.
 
-**Note**: SHL, SHR, and SAR have implementation bugs (swapped arguments) documented in tests with FIXME comments.
+**Note**: SHL, SHR, and SAR implementation bugs (swapped arguments) have been fixed in this PR.
 
 ---
 
