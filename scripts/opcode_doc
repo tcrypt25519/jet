@@ -1,0 +1,21 @@
+#!/bin/bash
+
+# 1. Clean the input: Strip '0x' or '0X' prefix if the agent includes it
+# This uses POSIX parameter expansion (fast, no external process)
+input="${1#0x}"
+input="${input#0X}"
+
+# 2. Coerce to UPPERCASE
+# We use 'tr' which is standard available on Android/Termux
+target=$(echo "$input" | tr '[:lower:]' '[:upper:]')
+
+# 3. Define the path
+filepath="docs/ext/evm/${target}.mdx"
+
+# 4. Output the file or error
+if [ -f "$filepath" ]; then
+    cat "$filepath"
+else
+    echo "Error: Opcode documentation not found at $filepath"
+    exit 1
+fi
