@@ -27,3 +27,6 @@ jet_runtime = { path = "../jet_runtime" }
 jet_ir = { path = "../jet_ir" }
 hex = "0.4.3"
 
+[dev-dependencies]
+jet_push_macros = { path = "../jet_push_macros" }
+

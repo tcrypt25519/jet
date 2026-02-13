@@ -1,4 +1,5 @@
 use jet::instructions::Instruction;
+use jet_push_macros::generate_push_macros;
 use jet_runtime::exec::ReturnCode;
 use roms::*;
 
@@ -22,22 +23,10 @@ macro_rules! define_ops {
     };
 }
 
-#[allow(non_snake_case)]
-macro_rules! PUSH1 {
-    ($b:expr) => {
-        vec![Instruction::PUSH1.opcode(), $b]
-    };
-}
-
-#[allow(non_snake_case)]
-macro_rules! PUSH2 {
-    ($b1:expr, $b2:expr) => {
-        vec![Instruction::PUSH2.opcode(), $b1, $b2]
-    };
-}
+// Generate PUSH0..PUSH32 macros
+generate_push_macros!(0..=32);
 
 define_ops!(
-    PUSH0,
     ADD,
     MUL,
     SUB,
