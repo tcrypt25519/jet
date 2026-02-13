@@ -234,7 +234,7 @@ rom_tests! {
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
-            stack: vec![stack_word(&[0x00, 0x00, 0x01])], // 65536 LE
+            stack: vec![stack_word(&[0x00, 0x00, 0x01])],
             ..Default::default()
         },
     },
@@ -365,7 +365,7 @@ rom_tests! {
         ]],
         expected: TestContractRun {
             stack_ptr: 0,
-            memory_len: Some(64), // ceil((32 + 32) / 32) * 32 = 64
+            memory_len: Some(64),
             ..Default::default()
         },
     },
@@ -423,12 +423,12 @@ rom_tests! {
         ]],
         expected: TestContractRun {
             stack_ptr: 0,
-            memory_len: Some(64), // Expanded monotonically: 0 -> 32 -> 32 -> 64
+            memory_len: Some(64),
             ..Default::default()
         },
     },
 
-    // Tests basic multiplication: 3 * 5 = 15
+    // MUL: basic multiplication
     mul_basic: Test {
         roms: vec![bytecode![
             PUSH1!(0x05),
@@ -442,7 +442,7 @@ rom_tests! {
         },
     },
 
-    // Tests multiplication by zero: 255 * 0 = 0
+    // MUL: multiplication by zero
     mul_zero: Test {
         roms: vec![bytecode![
             PUSH1!(0x00),
@@ -456,7 +456,7 @@ rom_tests! {
         },
     },
 
-    // Tests multiplication overflow: result modulo 2^256
+    // MUL: overflow wraps
     mul_overflow: Test {
         roms: vec![bytecode![
             PUSH1!(0x02),
@@ -479,7 +479,7 @@ rom_tests! {
         },
     },
 
-    // Tests basic subtraction: 10 - 3 = 7
+    // SUB: basic subtraction
     sub_basic: Test {
         roms: vec![bytecode![
             PUSH1!(0x03),
@@ -493,7 +493,7 @@ rom_tests! {
         },
     },
 
-    // Tests subtraction underflow: 3 - 10 wraps to 2^256 - 7
+    // SUB: underflow wraps
     sub_underflow: Test {
         roms: vec![bytecode![
             PUSH1!(0x0A),
@@ -511,7 +511,7 @@ rom_tests! {
         },
     },
 
-    // Tests basic division: 15 / 3 = 5
+    // DIV: basic division
     div_basic: Test {
         roms: vec![bytecode![
             PUSH1!(0x03),
@@ -525,7 +525,7 @@ rom_tests! {
         },
     },
 
-    // Tests division by zero: EVM spec requires 15 / 0 = 0
+    // DIV: division by zero
     div_by_zero: Test {
         roms: vec![bytecode![
             PUSH1!(0x00),
@@ -539,7 +539,7 @@ rom_tests! {
         },
     },
 
-    // Tests basic modulo: 14 % 5 = 4
+    // MOD: basic modulo
     mod_basic: Test {
         roms: vec![bytecode![
             PUSH1!(0x05),
@@ -553,7 +553,7 @@ rom_tests! {
         },
     },
 
-    // Tests modulo by zero: EVM spec requires 14 % 0 = 0
+    // MOD: modulo by zero
     mod_by_zero: Test {
         roms: vec![bytecode![
             PUSH1!(0x00),
@@ -569,116 +569,116 @@ rom_tests! {
 
     // === Comparison Operations: LT (Less Than - Unsigned) ===
 
-    // Tests LT: 5 < 10 should return 1 (true)
+    // LT: a < b
     lt_true: Test {
         roms: vec![bytecode![
             PUSH1!(0x0A),
             PUSH1!(0x05),
-            LT!(),         // 5 < 10
+            LT!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
-            stack: vec![stack_word(&[0x01])], // true
+            stack: vec![stack_word(&[0x01])],
             ..Default::default()
         },
     },
 
-    // Tests LT: 10 < 5 should return 0 (false)
+    // LT: a >= b
     lt_false: Test {
         roms: vec![bytecode![
             PUSH1!(0x05),
             PUSH1!(0x0A),
-            LT!(),         // 10 < 5
+            LT!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
-            stack: vec![stack_word(&[0x00])], // false
+            stack: vec![stack_word(&[0x00])],
             ..Default::default()
         },
     },
 
-    // Tests LT: equal values should return 0 (false)
+    // LT: equal values
     lt_equal: Test {
         roms: vec![bytecode![
             PUSH1!(0x07),
             PUSH1!(0x07),
-            LT!(),         // 7 < 7
+            LT!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
-            stack: vec![stack_word(&[0x00])], // false
+            stack: vec![stack_word(&[0x00])],
             ..Default::default()
         },
     },
 
-    // Tests LT: 0 < 1 should return 1 (true) - boundary case
+    // LT: zero boundary
     lt_zero_boundary: Test {
         roms: vec![bytecode![
             PUSH1!(0x01),
             PUSH1!(0x00),
-            LT!(),         // 0 < 1
+            LT!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
-            stack: vec![stack_word(&[0x01])], // true
+            stack: vec![stack_word(&[0x01])],
             ..Default::default()
         },
     },
 
     // === Comparison Operations: GT (Greater Than - Unsigned) ===
 
-    // Tests GT: 10 > 5 should return 1 (true)
+    // GT: a > b
     gt_true: Test {
         roms: vec![bytecode![
             PUSH1!(0x05),
             PUSH1!(0x0A),
-            GT!(),         // 10 > 5
+            GT!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
-            stack: vec![stack_word(&[0x01])], // true
+            stack: vec![stack_word(&[0x01])],
             ..Default::default()
         },
     },
 
-    // Tests GT: 5 > 10 should return 0 (false)
+    // GT: a <= b
     gt_false: Test {
         roms: vec![bytecode![
             PUSH1!(0x0A),
             PUSH1!(0x05),
-            GT!(),         // 5 > 10
+            GT!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
-            stack: vec![stack_word(&[0x00])], // false
+            stack: vec![stack_word(&[0x00])],
             ..Default::default()
         },
     },
 
-    // Tests GT: equal values should return 0 (false)
+    // GT: equal values
     gt_equal: Test {
         roms: vec![bytecode![
             PUSH1!(0x07),
             PUSH1!(0x07),
-            GT!(),         // 7 > 7
+            GT!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
-            stack: vec![stack_word(&[0x00])], // false
+            stack: vec![stack_word(&[0x00])],
             ..Default::default()
         },
     },
 
-    // Tests GT: 1 > 0 should return 1 (true) - boundary case
+    // GT: zero boundary
     gt_zero_boundary: Test {
         roms: vec![bytecode![
             PUSH1!(0x00),
             PUSH1!(0x01),
-            GT!(),         // 1 > 0
+            GT!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
-            stack: vec![stack_word(&[0x01])], // true
+            stack: vec![stack_word(&[0x01])],
             ..Default::default()
         },
     },
@@ -920,12 +920,12 @@ rom_tests! {
 
     // === Arithmetic Operations: SDIV (Signed Division) ===
 
-    // Tests SDIV: basic positive division 10 / 3 = 3
+    // SDIV: positive division
     sdiv_positive_basic: Test {
         roms: vec![bytecode![
             PUSH1!(0x03),
             PUSH1!(0x0A),
-            SDIV!(),       // 10 / 3 = 3
+            SDIV!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
@@ -934,12 +934,12 @@ rom_tests! {
         },
     },
 
-    // Tests SDIV: division by zero returns 0 (EVM spec)
+    // SDIV: division by zero
     sdiv_by_zero: Test {
         roms: vec![bytecode![
             PUSH1!(0x00),
             PUSH1!(0x0A),
-            SDIV!(),       // 10 / 0 = 0
+            SDIV!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
@@ -948,7 +948,7 @@ rom_tests! {
         },
     },
 
-    // Tests SDIV: negative dividend -10 / 3 = -3
+    // SDIV: negative dividend
     sdiv_negative_dividend: Test {
         roms: vec![bytecode![
             PUSH1!(0x03),
@@ -964,14 +964,14 @@ rom_tests! {
             stack_ptr: 1,
             stack: vec![{
                 let mut w = [0xFF_u8; 32];
-                w[0] = 0xFD; // -3 in two's complement
+                w[0] = 0xFD;
                 w
             }],
             ..Default::default()
         },
     },
 
-    // Tests SDIV: negative divisor 10 / -3 = -3
+    // SDIV: negative divisor
     sdiv_negative_divisor: Test {
         roms: vec![bytecode![
             PUSH32!(
@@ -987,14 +987,14 @@ rom_tests! {
             stack_ptr: 1,
             stack: vec![{
                 let mut w = [0xFF_u8; 32];
-                w[0] = 0xFD; // -3 in two's complement
+                w[0] = 0xFD;
                 w
             }],
             ..Default::default()
         },
     },
 
-    // Tests SDIV: both negative -10 / -3 = 3
+    // SDIV: both negative
     sdiv_both_negative: Test {
         roms: vec![bytecode![
             PUSH32!(
@@ -1018,7 +1018,7 @@ rom_tests! {
         },
     },
 
-    // Tests SDIV: special case -2^255 / -1 should return -2^255 (overflow case)
+    // SDIV: overflow case
     sdiv_overflow: Test {
         roms: vec![bytecode![
             PUSH32!(
@@ -1039,7 +1039,7 @@ rom_tests! {
             stack_ptr: 1,
             stack: vec![{
                 let mut w = [0x00_u8; 32];
-                w[31] = 0x80; // -2^255 remains unchanged (LE format)
+                w[31] = 0x80;
                 w
             }],
             ..Default::default()
@@ -1048,12 +1048,12 @@ rom_tests! {
 
     // === Arithmetic Operations: SMOD (Signed Modulo) ===
 
-    // Tests SMOD: basic positive modulo 10 % 3 = 1
+    // SMOD: positive modulo
     smod_positive_basic: Test {
         roms: vec![bytecode![
             PUSH1!(0x03),
             PUSH1!(0x0A),
-            SMOD!(),       // 10 % 3 = 1
+            SMOD!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
@@ -1062,7 +1062,7 @@ rom_tests! {
         },
     },
 
-    // Tests SMOD: modulo by zero behavior (implementation-specific)
+    // SMOD: modulo by zero behavior (implementation-specific)
     // FIXME(bug): EVM spec (docs/ext/evm/07.mdx) requires SMOD with divisor=0 to return 0.
     // Current implementation incorrectly returns the dividend unchanged.
     // This test is commented out because it tests buggy behavior instead of EVM spec compliance.
@@ -1082,7 +1082,7 @@ rom_tests! {
     },
     */
 
-    // Tests SMOD: negative dividend -10 % 3 = -1 (sign matches dividend)
+    // SMOD: negative dividend
     smod_negative_dividend: Test {
         roms: vec![bytecode![
             PUSH1!(0x03),
@@ -1101,7 +1101,7 @@ rom_tests! {
         },
     },
 
-    // Tests SMOD: negative divisor 10 % -3 = 1 (sign matches dividend)
+    // SMOD: negative divisor
     smod_negative_divisor: Test {
         roms: vec![bytecode![
             PUSH32!(
@@ -1115,20 +1115,20 @@ rom_tests! {
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
-            stack: vec![stack_word(&[0x01])], // Positive because dividend is positive
+            stack: vec![stack_word(&[0x01])],
             ..Default::default()
         },
     },
 
     // === Arithmetic Operations: ADDMOD (Addition Modulo) ===
 
-    // Tests ADDMOD: basic (5 + 3) % 4 = 0
+    // ADDMOD: basic operation
     addmod_basic: Test {
         roms: vec![bytecode![
             PUSH1!(0x04),
             PUSH1!(0x03),
             PUSH1!(0x05),
-            ADDMOD!(),     // (5 + 3) % 4 = 8 % 4 = 0
+            ADDMOD!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
@@ -1137,7 +1137,7 @@ rom_tests! {
         },
     },
 
-    // Tests ADDMOD: modulo by zero behavior (implementation-specific)
+    // ADDMOD: modulo by zero behavior (implementation-specific)
     // FIXME(bug): EVM spec (docs/ext/evm/08.mdx) requires ADDMOD with denominator=0 to return 0.
     // Current implementation incorrectly returns the sum unchanged.
     // This test is commented out because it tests buggy behavior instead of EVM spec compliance.
@@ -1158,8 +1158,7 @@ rom_tests! {
     },
     */
 
-    // Tests ADDMOD: large values - tests no intermediate overflow
-    // (2^256-1 + 2) % 2 should equal 1
+    // ADDMOD: large values
     addmod_large_values: Test {
         roms: vec![bytecode![
             PUSH1!(0x02),
@@ -1174,18 +1173,18 @@ rom_tests! {
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
-            stack: vec![stack_word(&[0x01])], // (2^256-1 + 2) % 2 = 1
+            stack: vec![stack_word(&[0x01])],
             ..Default::default()
         },
     },
 
-    // Tests ADDMOD: (7 + 8) % 10 = 5
+    // ADDMOD: no wrap
     addmod_no_wrap: Test {
         roms: vec![bytecode![
             PUSH1!(0x0A),
             PUSH1!(0x08),
             PUSH1!(0x07),
-            ADDMOD!(),     // (7 + 8) % 10 = 15 % 10 = 5
+            ADDMOD!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
@@ -1196,13 +1195,13 @@ rom_tests! {
 
     // === Arithmetic Operations: MULMOD (Multiplication Modulo) ===
 
-    // Tests MULMOD: basic (5 * 3) % 7 = 1
+    // MULMOD: basic operation
     mulmod_basic: Test {
         roms: vec![bytecode![
             PUSH1!(0x07),
             PUSH1!(0x03),
             PUSH1!(0x05),
-            MULMOD!(),     // (5 * 3) % 7 = 15 % 7 = 1
+            MULMOD!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
@@ -1211,7 +1210,7 @@ rom_tests! {
         },
     },
 
-    // Tests MULMOD: modulo by zero behavior (implementation-specific)
+    // MULMOD: modulo by zero behavior (implementation-specific)
     // FIXME(bug): EVM spec (docs/ext/evm/09.mdx) requires MULMOD with denominator=0 to return 0.
     // Current implementation incorrectly returns the product unchanged.
     // This test is commented out because it tests buggy behavior instead of EVM spec compliance.
@@ -1232,8 +1231,7 @@ rom_tests! {
     },
     */
 
-    // Tests MULMOD: large values - tests no intermediate overflow
-    // (2^256-1 * 2) % 2 should equal 0
+    // MULMOD: large values
     mulmod_large_values: Test {
         roms: vec![bytecode![
             PUSH1!(0x02),
@@ -1248,18 +1246,18 @@ rom_tests! {
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
-            stack: vec![stack_word(&[0x00])], // (2^256-1 * 2) % 2 = 0
+            stack: vec![stack_word(&[0x00])],
             ..Default::default()
         },
     },
 
-    // Tests MULMOD: (6 * 7) % 10 = 2
+    // MULMOD: no wrap
     mulmod_no_wrap: Test {
         roms: vec![bytecode![
             PUSH1!(0x0A),
             PUSH1!(0x07),
             PUSH1!(0x06),
-            MULMOD!(),     // (6 * 7) % 10 = 42 % 10 = 2
+            MULMOD!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
@@ -1276,12 +1274,12 @@ rom_tests! {
 
     // === Bitwise Operations: AND ===
 
-    // Tests AND: basic operation 0xFF & 0x0F = 0x0F
+    // AND: basic operation
     and_basic: Test {
         roms: vec![bytecode![
             PUSH1!(0x0F),
             PUSH1!(0xFF),
-            AND!(),        // 0xFF & 0x0F = 0x0F
+            AND!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
@@ -1290,12 +1288,12 @@ rom_tests! {
         },
     },
 
-    // Tests AND: all zeros
+    // AND: all zeros
     and_all_zeros: Test {
         roms: vec![bytecode![
             PUSH1!(0x00),
             PUSH1!(0xFF),
-            AND!(),        // 0xFF & 0x00 = 0x00
+            AND!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
@@ -1304,12 +1302,12 @@ rom_tests! {
         },
     },
 
-    // Tests AND: identity operation (x & x = x)
+    // AND: identity operation
     and_identity: Test {
         roms: vec![bytecode![
             PUSH1!(0xAB),
             PUSH1!(0xAB),
-            AND!(),        // 0xAB & 0xAB = 0xAB
+            AND!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
@@ -1320,12 +1318,12 @@ rom_tests! {
 
     // === Bitwise Operations: OR ===
 
-    // Tests OR: basic operation 0xF0 | 0x0F = 0xFF
+    // OR: basic operation
     or_basic: Test {
         roms: vec![bytecode![
             PUSH1!(0x0F),
             PUSH1!(0xF0),
-            OR!(),         // 0xF0 | 0x0F = 0xFF
+            OR!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
@@ -1334,12 +1332,12 @@ rom_tests! {
         },
     },
 
-    // Tests OR: identity with zero (x | 0 = x)
+    // OR: identity with zero
     or_identity_zero: Test {
         roms: vec![bytecode![
             PUSH1!(0x00),
             PUSH1!(0xAB),
-            OR!(),         // 0xAB | 0x00 = 0xAB
+            OR!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
@@ -1348,12 +1346,12 @@ rom_tests! {
         },
     },
 
-    // Tests OR: all ones
+    // OR: all ones
     or_all_ones: Test {
         roms: vec![bytecode![
             PUSH1!(0xFF),
             PUSH1!(0xAB),
-            OR!(),         // 0xAB | 0xFF = 0xFF
+            OR!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
@@ -1364,12 +1362,12 @@ rom_tests! {
 
     // === Bitwise Operations: XOR ===
 
-    // Tests XOR: basic operation 0xFF ^ 0x0F = 0xF0
+    // XOR: basic operation
     xor_basic: Test {
         roms: vec![bytecode![
             PUSH1!(0x0F),
             PUSH1!(0xFF),
-            XOR!(),        // 0xFF ^ 0x0F = 0xF0
+            XOR!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
@@ -1378,12 +1376,12 @@ rom_tests! {
         },
     },
 
-    // Tests XOR: identity with zero (x ^ 0 = x)
+    // XOR: identity with zero
     xor_identity_zero: Test {
         roms: vec![bytecode![
             PUSH1!(0x00),
             PUSH1!(0xAB),
-            XOR!(),        // 0xAB ^ 0x00 = 0xAB
+            XOR!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
@@ -1392,12 +1390,12 @@ rom_tests! {
         },
     },
 
-    // Tests XOR: self-cancel (x ^ x = 0)
+    // XOR: self-cancel
     xor_self_cancel: Test {
         roms: vec![bytecode![
             PUSH1!(0xAB),
             PUSH1!(0xAB),
-            XOR!(),        // 0xAB ^ 0xAB = 0x00
+            XOR!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
@@ -1408,11 +1406,11 @@ rom_tests! {
 
     // === Bitwise Operations: NOT ===
 
-    // Tests NOT: invert all zeros to all ones
+    // NOT: invert all zeros
     not_zeros: Test {
         roms: vec![bytecode![
             PUSH1!(0x00),
-            NOT!(),        // ~0x00 = 0xFF...FF
+            NOT!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
@@ -1441,13 +1439,13 @@ rom_tests! {
     not_single_byte: Test {
         roms: vec![bytecode![
             PUSH1!(0xAB),
-            NOT!(),        // ~0xAB = 0xFF...FF54
+            NOT!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
             stack: vec![{
                 let mut w = [0xFF_u8; 32];
-                w[0] = 0x54; // ~0xAB = 0x54 in the lowest byte
+                w[0] = 0x54;
                 w
             }],
             ..Default::default()
@@ -1456,12 +1454,12 @@ rom_tests! {
 
     // === Bitwise Operations: BYTE ===
 
-    // Tests BYTE: extract most significant byte (index 0)
+    // BYTE: extract byte
     byte_index_0: Test {
         roms: vec![bytecode![
             PUSH1!(0xAB),
             PUSH1!(0x1F),
-            BYTE!(),       // Extract byte at index 31
+            BYTE!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
@@ -1470,12 +1468,12 @@ rom_tests! {
         },
     },
 
-    // Tests BYTE: extract byte out of range (>= 32)
+    // BYTE: out of range
     byte_out_of_range: Test {
         roms: vec![bytecode![
             PUSH1!(0xAB),
             PUSH1!(0x20),
-            BYTE!(),       // Extract byte at index 32 = 0
+            BYTE!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
@@ -1484,12 +1482,12 @@ rom_tests! {
         },
     },
 
-    // Tests BYTE: extract from zero
+    // BYTE: extract from zero
     byte_from_zero: Test {
         roms: vec![bytecode![
             PUSH1!(0x00),
             PUSH1!(0x00),
-            BYTE!(),       // Extract byte at index 0 = 0
+            BYTE!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
