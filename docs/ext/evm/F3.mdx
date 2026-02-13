@@ -1,0 +1,41 @@
+---
+fork: Frontier
+group: System operations
+---
+
+## Notes
+
+Exits the current [context](./about.mdx) successfully.
+
+## Stack input
+
+0. `offset`: byte offset in the [memory](./about.mdx) in bytes, to copy what will be the [return data](./about.mdx) of this [context](./about.mdx).
+1. `size`: byte size to copy (size of the [return data](./about.mdx)).
+
+## Example
+
+| `1` | Memory |
+|--:|------:|
+| `1` | `0xFF01` |
+
+| * | Input |
+|--:|-----:|
+| `1` | `0` |
+| `1` | `2` |
+
+| `1` | Calling context return data |
+|--:|---------------------------:|
+| `1` | `0xFF01` |
+
+## Gas
+
+    static_gas = {gasPrices|return}
+    dynamic_gas = memory_expansion_cost
+
+The memory expansion cost explanation can be found [here](./about.mdx).
+
+## Error cases
+
+The state changes done by the current context are [reverted](#FD) in those cases:
+- Not enough gas.
+- Not enough values on the stack.

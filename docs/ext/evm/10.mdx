@@ -1,0 +1,26 @@
+---
+fork: Frontier
+group: Comparison & Bitwise Logic Operations
+---
+
+## Stack input
+
+0. `a`: left side integer.
+1. `b`: right side integer.
+
+## Stack output
+
+0. `a < b`: 1 if the left side is smaller, 0 otherwise.
+
+## Examples
+
+| * | Input | Output | * | * | Input | Output |
+|--:|------:|-------:|--:|--:|------:|-------:|
+| `1` | `9` | `1` | * | `1` | `10` | `0` |
+| `2` | `10` | | * | `2` | `10` | |
+
+## Error cases
+
+The state changes done by the current context are [reverted](#FD) in those cases:
+- Not enough gas.
+- Not enough values on the stack.

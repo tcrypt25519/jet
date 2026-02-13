@@ -1,0 +1,32 @@
+---
+fork: Frontier
+group: Environmental Information
+---
+
+## Stack input
+
+0. `i`: byte offset in the [calldata](./about.mdx).
+
+## Stack output
+
+0. `data[i]`: 32-byte value starting from the given offset of the [calldata](./about.mdx). All bytes after the end of the [calldata](./about.mdx) are set to 0.
+
+## Examples
+
+| Calldata |
+|---------|
+| `0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF` |
+
+| * | Input | Output |
+|--:|------:|-------:|
+| `1` | `0` | `0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF` |
+
+| * | Input | Output |
+|--:|------:|-------:|
+| `1` | `31` | `0xFF00000000000000000000000000000000000000000000000000000000000000` |
+
+## Error cases
+
+The state changes done by the current context are [reverted](#FD) in those cases:
+- Not enough gas.
+- Not enough values on the stack.
