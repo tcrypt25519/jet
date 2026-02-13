@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "rust-learner",
+  "owner": "actionbook",
+  "repo": "rust-skills",
+  "path": "skills/rust-learner",
+  "branch": "main",
+  "sha": "9e34e3315f871e23cf3d063f1dea09d57da34e4b",
+  "source": "manual"
+}

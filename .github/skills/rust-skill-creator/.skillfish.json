@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "rust-skill-creator",
+  "owner": "lywa1998",
+  "repo": "self-host-claude-marketplace",
+  "path": "plugins/rust-skills/skills/rust-skill-creator",
+  "branch": "main",
+  "sha": "ff7b3fb653dc74e0ba8409fd76b229684b7733ac",
+  "source": "manual"
+}
