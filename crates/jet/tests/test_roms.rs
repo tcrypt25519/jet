@@ -1019,8 +1019,9 @@ rom_tests! {
     },
 
     // SDIV: overflow case
-    // FIXME(bug): EVM spec (docs/ext/evm/05.mdx) requires SDIV overflow (MIN_INT / -1) to return MIN_INT (0x80...00).
-    // Current implementation returns 0x00...80 (128) instead of 0x80...00 (MIN_INT).
+    // FIXME(bug): EVM spec (docs/ext/evm/05.mdx) requires SDIV overflow (MIN_INT / -1) to return MIN_INT.
+    // MIN_INT is 0x80 followed by 31 zero bytes (0x8000...0000), representing -2^255 in two's complement.
+    // Current implementation incorrectly returns 0x00...0080 (decimal 128) instead of 0x80...00 (MIN_INT).
     // The SDIV implementation needs overflow handling for the MIN_INT / -1 edge case.
     // This test is commented out because the implementation doesn't handle overflow correctly.
     // Uncomment once the SDIV implementation is fixed to handle this overflow case per EVM spec.
