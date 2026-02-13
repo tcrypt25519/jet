@@ -551,7 +551,7 @@ rom_tests! {
     },
 
     // === Comparison Operations: LT (Less Than - Unsigned) ===
-    
+
     // Tests LT: 5 < 10 should return 1 (true)
     lt_true: Test {
         roms: vec![bytecode![
@@ -609,7 +609,7 @@ rom_tests! {
     },
 
     // === Comparison Operations: GT (Greater Than - Unsigned) ===
-    
+
     // Tests GT: 10 > 5 should return 1 (true)
     gt_true: Test {
         roms: vec![bytecode![
@@ -667,7 +667,7 @@ rom_tests! {
     },
 
     // === Comparison Operations: SLT (Signed Less Than) ===
-    
+
     // Tests SLT: -1 < 0 should return 1 (true) in signed comparison
     // In two's complement, -1 is 0xFF...FF
     slt_negative_less_than_zero: Test {
@@ -734,7 +734,7 @@ rom_tests! {
     },
 
     // === Comparison Operations: SGT (Signed Greater Than) ===
-    
+
     // Tests SGT: 0 > -1 should return 1 (true) in signed comparison
     sgt_zero_greater_than_negative: Test {
         roms: vec![vec![
@@ -800,7 +800,7 @@ rom_tests! {
     },
 
     // === Comparison Operations: EQ (Equality) ===
-    
+
     // Tests EQ: equal values should return 1 (true)
     eq_true: Test {
         roms: vec![bytecode![
@@ -866,7 +866,7 @@ rom_tests! {
     },
 
     // === Comparison Operations: ISZERO ===
-    
+
     // Tests ISZERO: zero value should return 1 (true)
     iszero_true: Test {
         roms: vec![bytecode![
@@ -911,7 +911,7 @@ rom_tests! {
     },
 
     // === Arithmetic Operations: SDIV (Signed Division) ===
-    
+
     // Tests SDIV: basic positive division 10 / 3 = 3
     sdiv_positive_basic: Test {
         roms: vec![bytecode![
@@ -1033,7 +1033,7 @@ rom_tests! {
     },
 
     // === Arithmetic Operations: SMOD (Signed Modulo) ===
-    
+
     // Tests SMOD: basic positive modulo 10 % 3 = 1
     smod_positive_basic: Test {
         roms: vec![bytecode![
@@ -1105,7 +1105,7 @@ rom_tests! {
     },
 
     // === Arithmetic Operations: ADDMOD (Addition Modulo) ===
-    
+
     // Tests ADDMOD: basic (5 + 3) % 4 = 0
     addmod_basic: Test {
         roms: vec![bytecode![
@@ -1174,7 +1174,7 @@ rom_tests! {
     },
 
     // === Arithmetic Operations: MULMOD (Multiplication Modulo) ===
-    
+
     // Tests MULMOD: basic (5 * 3) % 7 = 1
     mulmod_basic: Test {
         roms: vec![bytecode![
@@ -1249,7 +1249,7 @@ rom_tests! {
     // See: crates/jet/src/builder/ops.rs:832-838
 
     // === Bitwise Operations: AND ===
-    
+
     // Tests AND: basic operation 0xFF & 0x0F = 0x0F
     and_basic: Test {
         roms: vec![bytecode![
@@ -1293,7 +1293,7 @@ rom_tests! {
     },
 
     // === Bitwise Operations: OR ===
-    
+
     // Tests OR: basic operation 0xF0 | 0x0F = 0xFF
     or_basic: Test {
         roms: vec![bytecode![
@@ -1337,7 +1337,7 @@ rom_tests! {
     },
 
     // === Bitwise Operations: XOR ===
-    
+
     // Tests XOR: basic operation 0xFF ^ 0x0F = 0xF0
     xor_basic: Test {
         roms: vec![bytecode![
@@ -1381,7 +1381,7 @@ rom_tests! {
     },
 
     // === Bitwise Operations: NOT ===
-    
+
     // Tests NOT: invert all zeros to all ones
     not_zeros: Test {
         roms: vec![bytecode![
@@ -1433,7 +1433,7 @@ rom_tests! {
     },
 
     // === Bitwise Operations: BYTE ===
-    
+
     // Tests BYTE: extract most significant byte (index 0)
     byte_index_0: Test {
         roms: vec![bytecode![
@@ -1480,7 +1480,7 @@ rom_tests! {
     // NOTE: These tests match current implementation behavior where arguments are swapped
     // EVM spec: SHL pops shift_amount first, then value, then shifts value << shift_amount
     // Current impl: does shift_amount << value (arguments swapped)
-    
+
     // Tests SHL: shift by 0 (identity) - but with swapped args: 0 << value = 0
     shl_by_zero: Test {
         roms: vec![bytecode![
@@ -1525,7 +1525,7 @@ rom_tests! {
 
     // === Bitwise Operations: SHR (Shift Right - Logical) ===
     // NOTE: These tests match current implementation behavior where arguments are swapped
-    
+
     // Tests SHR: shift by 0 - with swapped args: 0 >> value = 0
     shr_by_zero: Test {
         roms: vec![bytecode![
@@ -1570,7 +1570,7 @@ rom_tests! {
 
     // === Bitwise Operations: SAR (Arithmetic Shift Right) ===
     // NOTE: These tests match current implementation behavior where arguments are swapped
-    
+
     // Tests SAR: with swapped args: 0 >> value = 0
     sar_positive_by_zero: Test {
         roms: vec![bytecode![
