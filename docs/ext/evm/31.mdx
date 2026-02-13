@@ -1,0 +1,28 @@
+---
+fork: Frontier
+group: Environmental Information
+---
+
+## Stack input
+
+0. `address`: 20-byte address of the account to check.
+
+## Stack output
+
+0. `balance`: balance of the given account in [wei](https://www.investopedia.com/terms/w/wei.asp). Returns 0 if the account doesn't exist.
+
+## Example
+
+| * | Input | Output |
+|--:|------:|-------:|
+| `1` | `0x9bbfed6889322e016e0a02ee459d306fc19545d8` | `125985` |
+
+## Gas
+
+The static cost is {gasPrices|balance}. If the accessed address is warm, the dynamic cost is {gasPrices|warmstorageread}. Otherwise the dynamic cost is {gasPrices|coldaccountaccess}. See section [access sets](./about.mdx).
+
+## Error cases
+
+The state changes done by the current context are [reverted](#FD) in those cases:
+- Not enough gas.
+- Not enough values on the stack.

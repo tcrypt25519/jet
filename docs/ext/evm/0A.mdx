@@ -1,0 +1,33 @@
+---
+fork: Frontier
+group: Stop and Arithmetic Operations
+---
+
+## Stack input
+
+0. `a`: integer base.
+1. `exponent`: integer exponent.
+
+## Stack output
+
+0. `a ** exponent`: integer result of the exponential operation modulo 2<sup>256</sup>.
+
+## Examples
+
+| * | Input | Output | * | * | Input | Output |
+|--:|------:|-------:|--:|--:|------:|-------:|
+| `1` | `10` | `100` | * | `1` | `2` | `4` |
+| `2` | `2` | | * | `2` | `2` | |
+
+## Gas
+
+    static_gas = {gasPrices|exp}
+    dynamic_gas = {gasPrices|expByte} * exponent_byte_size
+
+The dynamic gas is simply a function of how many bytes we need to represent the exponent in [binary](https://en.wikipedia.org/wiki/Binary_number).
+
+## Error cases
+
+The state changes done by the current context are [reverted](#FD) in those cases:
+- Not enough gas.
+- Not enough values on the stack.
