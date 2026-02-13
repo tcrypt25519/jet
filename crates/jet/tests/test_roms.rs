@@ -1045,17 +1045,18 @@ rom_tests! {
     },
 
     // Tests SMOD: modulo by zero behavior (implementation-specific)
-    // Note: EVM spec says this should return 0, but current implementation
-    // returns the dividend unchanged for signed modulo by zero
+    // FIXME(bug): EVM spec (docs/ext/evm/07.mdx) requires SMOD with divisor=0 to return 0.
+    // Current implementation incorrectly returns the dividend unchanged.
+    // This test will fail once the bug is fixed; update expected to stack_word(&[0x00]).
     smod_by_zero: Test {
         roms: vec![bytecode![
-            PUSH1!(0x00),  // Push 0
-            PUSH1!(0x0A),  // Push 10
-            SMOD!(),       // 10 % 0 (implementation behavior)
+            PUSH1!(0x00),
+            PUSH1!(0x0A),
+            SMOD!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
-            stack: vec![stack_word(&[0x0A])], // Returns dividend
+            stack: vec![stack_word(&[0x0A])],
             ..Default::default()
         },
     },
@@ -1074,11 +1075,7 @@ rom_tests! {
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
-            stack: vec![{
-                let mut w = [0xFF_u8; 32]; // Array already all 0xFF
-                w[0] = 0xFF; // Explicitly set first byte (though already 0xFF)
-                w              // Result is -1 in two's complement
-            }],
+            stack: vec![[0xFF_u8; 32]],
             ..Default::default()
         },
     },
@@ -1120,18 +1117,19 @@ rom_tests! {
     },
 
     // Tests ADDMOD: modulo by zero behavior (implementation-specific)
-    // Note: EVM spec says this should return 0, but current implementation
-    // returns the sum unchanged for modulo by zero
+    // FIXME(bug): EVM spec (docs/ext/evm/08.mdx) requires ADDMOD with denominator=0 to return 0.
+    // Current implementation incorrectly returns the sum unchanged.
+    // This test will fail once the bug is fixed; update expected to stack_word(&[0x00]).
     addmod_by_zero: Test {
         roms: vec![bytecode![
-            PUSH1!(0x00),  // Push modulo (0)
-            PUSH1!(0x03),  // Push b (3)
-            PUSH1!(0x05),  // Push a (5)
-            ADDMOD!(),     // (5 + 3) % 0 (implementation behavior)
+            PUSH1!(0x00),
+            PUSH1!(0x03),
+            PUSH1!(0x05),
+            ADDMOD!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
-            stack: vec![stack_word(&[0x08])], // Returns sum (5 + 3 = 8)
+            stack: vec![stack_word(&[0x08])],
             ..Default::default()
         },
     },
@@ -1190,18 +1188,19 @@ rom_tests! {
     },
 
     // Tests MULMOD: modulo by zero behavior (implementation-specific)
-    // Note: EVM spec says this should return 0, but current implementation
-    // returns the product unchanged for modulo by zero
+    // FIXME(bug): EVM spec (docs/ext/evm/09.mdx) requires MULMOD with denominator=0 to return 0.
+    // Current implementation incorrectly returns the product unchanged.
+    // This test will fail once the bug is fixed; update expected to stack_word(&[0x00]).
     mulmod_by_zero: Test {
         roms: vec![bytecode![
-            PUSH1!(0x00),  // Push modulo (0)
-            PUSH1!(0x03),  // Push b (3)
-            PUSH1!(0x05),  // Push a (5)
-            MULMOD!(),     // (5 * 3) % 0 (implementation behavior)
+            PUSH1!(0x00),
+            PUSH1!(0x03),
+            PUSH1!(0x05),
+            MULMOD!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
-            stack: vec![stack_word(&[0x0F])], // Returns product (5 * 3 = 15)
+            stack: vec![stack_word(&[0x0F])],
             ..Default::default()
         },
     },
@@ -1395,7 +1394,7 @@ rom_tests! {
         },
     },
 
-    not_ones: Test {
+    not_all_ones_returns_zero: Test {
         roms: vec![bytecode![
             PUSH32!(
                 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
@@ -1412,7 +1411,6 @@ rom_tests! {
         },
     },
 
-    // Tests NOT: single byte pattern
     not_single_byte: Test {
         roms: vec![bytecode![
             PUSH1!(0xAB),  // Push 0xAB
@@ -1474,61 +1472,15 @@ rom_tests! {
     },
 
     // === Bitwise Operations: SHL (Shift Left) ===
-    // NOTE: These tests match current implementation behavior where arguments are swapped
-    // EVM spec: SHL pops shift_amount first, then value, then shifts value << shift_amount
-    // Current impl: does shift_amount << value (arguments swapped)
+    // FIXME(bug): EVM spec (docs/ext/evm/1B.mdx) says SHL pops shift first, then value,
+    // and computes value << shift. Current implementation swaps arguments (shift << value).
+    // These tests will fail once the bug is fixed; they currently test buggy behavior.
 
-    // Tests SHL: shift by 0 (identity) - but with swapped args: 0 << value = 0
     shl_by_zero: Test {
         roms: vec![bytecode![
-            PUSH1!(0xAB),  // Push value
-            PUSH1!(0x00),  // Push shift amount (0)
-            SHL!(),        // 0 << 0xAB = 0 (due to arg swap bug)
-        ]],
-        expected: TestContractRun {
-            stack_ptr: 1,
-            stack: vec![stack_word(&[0x00])],  // Implementation returns 0
-            ..Default::default()
-        },
-    },
-
-    // Tests SHL: shift by 1 - with swapped args: 1 << 1 = 2
-    shl_by_one: Test {
-        roms: vec![bytecode![
-            PUSH1!(0x01),  // Push 1 (becomes shift amount in buggy impl)
-            PUSH1!(0x01),  // Push 1 (becomes value in buggy impl)
-            SHL!(),        // 1 << 1 = 2
-        ]],
-        expected: TestContractRun {
-            stack_ptr: 1,
-            stack: vec![stack_word(&[0x02])],
-            ..Default::default()
-        },
-    },
-
-    // Tests SHL: with swapped args: 8 << 1 = 16
-    shl_by_eight: Test {
-        roms: vec![bytecode![
-            PUSH1!(0x01),  // Push 1 (becomes shift amount in buggy impl)
-            PUSH1!(0x08),  // Push 8 (becomes value in buggy impl)
-            SHL!(),        // 8 << 1 = 16 (due to arg swap)
-        ]],
-        expected: TestContractRun {
-            stack_ptr: 1,
-            stack: vec![stack_word(&[0x10])],  // 16
-            ..Default::default()
-        },
-    },
-
-    // === Bitwise Operations: SHR (Shift Right - Logical) ===
-    // NOTE: These tests match current implementation behavior where arguments are swapped
-
-    // Tests SHR: shift by 0 - with swapped args: 0 >> value = 0
-    shr_by_zero: Test {
-        roms: vec![bytecode![
-            PUSH1!(0xAB),  // Push value
-            PUSH1!(0x00),  // Push shift amount (0)
-            SHR!(),        // 0 >> 0xAB = 0 (due to arg swap bug)
+            PUSH1!(0xAB),
+            PUSH1!(0x00),
+            SHL!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
@@ -1537,12 +1489,11 @@ rom_tests! {
         },
     },
 
-    // Tests SHR: with swapped args: 4 >> 1 = 2
-    shr_by_one: Test {
+    shl_by_one: Test {
         roms: vec![bytecode![
-            PUSH1!(0x01),  // Push 1 (becomes shift amount in buggy impl)
-            PUSH1!(0x04),  // Push 4 (becomes value in buggy impl)
-            SHR!(),        // 4 >> 1 = 2
+            PUSH1!(0x01),
+            PUSH1!(0x01),
+            SHL!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
@@ -1551,12 +1502,55 @@ rom_tests! {
         },
     },
 
-    // Tests SHR: with swapped args: 256 >> 8 = 1
+    shl_by_eight: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x01),
+            PUSH1!(0x08),
+            SHL!(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x10])],
+            ..Default::default()
+        },
+    },
+
+    // === Bitwise Operations: SHR (Shift Right - Logical) ===
+    // FIXME(bug): EVM spec (docs/ext/evm/1C.mdx) says SHR pops shift first, then value,
+    // and computes value >> shift. Current implementation swaps arguments (shift >> value).
+    // These tests will fail once the bug is fixed; they currently test buggy behavior.
+
+    shr_by_zero: Test {
+        roms: vec![bytecode![
+            PUSH1!(0xAB),
+            PUSH1!(0x00),
+            SHR!(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x00])],
+            ..Default::default()
+        },
+    },
+
+    shr_by_one: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x01),
+            PUSH1!(0x04),
+            SHR!(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x02])],
+            ..Default::default()
+        },
+    },
+
     shr_by_eight: Test {
         roms: vec![bytecode![
-            PUSH1!(0x08),        // Push 8 (becomes shift amount in buggy impl)
-            PUSH2!(0x01, 0x00),  // Push 0x0100 (256 in decimal, big-endian format)
-            SHR!(),              // With swapped args: 256 >> 8 = 1
+            PUSH1!(0x08),
+            PUSH2!(0x01, 0x00),
+            SHR!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
@@ -1566,14 +1560,15 @@ rom_tests! {
     },
 
     // === Bitwise Operations: SAR (Arithmetic Shift Right) ===
-    // NOTE: These tests match current implementation behavior where arguments are swapped
+    // FIXME(bug): EVM spec (docs/ext/evm/1D.mdx) says SAR pops shift first, then value,
+    // and computes value >> shift (arithmetic). Current implementation swaps arguments.
+    // These tests will fail once the bug is fixed; they currently test buggy behavior.
 
-    // Tests SAR: with swapped args: 0 >> value = 0
     sar_positive_by_zero: Test {
         roms: vec![bytecode![
-            PUSH1!(0xAB),  // Push positive value
-            PUSH1!(0x00),  // Push shift amount (0)
-            SAR!(),        // 0 >> 0xAB = 0 (due to arg swap bug)
+            PUSH1!(0xAB),
+            PUSH1!(0x00),
+            SAR!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
@@ -1582,12 +1577,11 @@ rom_tests! {
         },
     },
 
-    // Tests SAR: with swapped args: 4 >> 1 = 2
     sar_positive_by_one: Test {
         roms: vec![bytecode![
-            PUSH1!(0x01),  // Push 1 (becomes shift amount in buggy impl)
-            PUSH1!(0x04),  // Push 4 (becomes value in buggy impl)
-            SAR!(),        // 4 >> 1 = 2 (arithmetic)
+            PUSH1!(0x01),
+            PUSH1!(0x04),
+            SAR!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
@@ -1596,7 +1590,6 @@ rom_tests! {
         },
     },
 
-    // Tests SAR: negative value, with swapped args: -1 >> 1 still gives -1 (sign preserved)
     sar_negative_preserves_sign: Test {
         roms: vec![bytecode![
             PUSH1!(0x01),
