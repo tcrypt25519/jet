@@ -1472,9 +1472,6 @@ rom_tests! {
     },
 
     // === Bitwise Operations: SHL (Shift Left) ===
-    // FIXME(bug): EVM spec (docs/ext/evm/1B.mdx) says SHL pops shift first, then value,
-    // and computes value << shift. Current implementation swaps arguments (shift << value).
-    // These tests will fail once the bug is fixed; they currently test buggy behavior.
 
     shl_by_zero: Test {
         roms: vec![bytecode![
@@ -1484,7 +1481,7 @@ rom_tests! {
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
-            stack: vec![stack_word(&[0x00])],
+            stack: vec![stack_word(&[0xAB])],
             ..Default::default()
         },
     },
@@ -1510,15 +1507,12 @@ rom_tests! {
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
-            stack: vec![stack_word(&[0x10])],
+            stack: vec![stack_word(&[0x00, 0x01])],
             ..Default::default()
         },
     },
 
     // === Bitwise Operations: SHR (Shift Right - Logical) ===
-    // FIXME(bug): EVM spec (docs/ext/evm/1C.mdx) says SHR pops shift first, then value,
-    // and computes value >> shift. Current implementation swaps arguments (shift >> value).
-    // These tests will fail once the bug is fixed; they currently test buggy behavior.
 
     shr_by_zero: Test {
         roms: vec![bytecode![
@@ -1528,15 +1522,15 @@ rom_tests! {
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
-            stack: vec![stack_word(&[0x00])],
+            stack: vec![stack_word(&[0xAB])],
             ..Default::default()
         },
     },
 
     shr_by_one: Test {
         roms: vec![bytecode![
-            PUSH1!(0x01),
             PUSH1!(0x04),
+            PUSH1!(0x01),
             SHR!(),
         ]],
         expected: TestContractRun {
@@ -1548,8 +1542,8 @@ rom_tests! {
 
     shr_by_eight: Test {
         roms: vec![bytecode![
-            PUSH1!(0x08),
             PUSH2!(0x01, 0x00),
+            PUSH1!(0x08),
             SHR!(),
         ]],
         expected: TestContractRun {
@@ -1560,9 +1554,6 @@ rom_tests! {
     },
 
     // === Bitwise Operations: SAR (Arithmetic Shift Right) ===
-    // FIXME(bug): EVM spec (docs/ext/evm/1D.mdx) says SAR pops shift first, then value,
-    // and computes value >> shift (arithmetic). Current implementation swaps arguments.
-    // These tests will fail once the bug is fixed; they currently test buggy behavior.
 
     sar_positive_by_zero: Test {
         roms: vec![bytecode![
@@ -1572,15 +1563,15 @@ rom_tests! {
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
-            stack: vec![stack_word(&[0x00])],
+            stack: vec![stack_word(&[0xAB])],
             ..Default::default()
         },
     },
 
     sar_positive_by_one: Test {
         roms: vec![bytecode![
-            PUSH1!(0x01),
             PUSH1!(0x04),
+            PUSH1!(0x01),
             SAR!(),
         ]],
         expected: TestContractRun {
@@ -1592,13 +1583,13 @@ rom_tests! {
 
     sar_negative_preserves_sign: Test {
         roms: vec![bytecode![
-            PUSH1!(0x01),
             PUSH32!(
                 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
                 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
                 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
                 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
             ),
+            PUSH1!(0x01),
             SAR!(),
         ]],
         expected: TestContractRun {

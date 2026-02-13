@@ -648,28 +648,28 @@ pub(crate) fn byte(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
 }
 
 pub(crate) fn shl(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = __stack_pop_2(bctx)?;
-    let a = load_i256(bctx, a)?;
-    let b = load_i256(bctx, b)?;
-    let result = bctx.builder.build_left_shift(a, b, "shl_result")?;
+    let (shift, value) = __stack_pop_2(bctx)?;
+    let shift = load_i256(bctx, shift)?;
+    let value = load_i256(bctx, value)?;
+    let result = bctx.builder.build_left_shift(value, shift, "shl_result")?;
     __stack_push_int(bctx, result)?;
     Ok(())
 }
 
 pub(crate) fn shr(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = __stack_pop_2(bctx)?;
-    let a = load_i256(bctx, a)?;
-    let b = load_i256(bctx, b)?;
-    let result = bctx.builder.build_right_shift(a, b, false, "shr_result")?;
+    let (shift, value) = __stack_pop_2(bctx)?;
+    let shift = load_i256(bctx, shift)?;
+    let value = load_i256(bctx, value)?;
+    let result = bctx.builder.build_right_shift(value, shift, false, "shr_result")?;
     __stack_push_int(bctx, result)?;
     Ok(())
 }
 
 pub(crate) fn sar(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = __stack_pop_2(bctx)?;
-    let a = load_i256(bctx, a)?;
-    let b = load_i256(bctx, b)?;
-    let result = bctx.builder.build_right_shift(a, b, true, "sar_result")?;
+    let (shift, value) = __stack_pop_2(bctx)?;
+    let shift = load_i256(bctx, shift)?;
+    let value = load_i256(bctx, value)?;
+    let result = bctx.builder.build_right_shift(value, shift, true, "sar_result")?;
     __stack_push_int(bctx, result)?;
     Ok(())
 }

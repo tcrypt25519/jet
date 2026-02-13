@@ -12,11 +12,11 @@ This document provides a comprehensive analysis of test coverage for the jet EVM
 
 | Metric | Count |
 |--------|------:|
-| **Total Opcodes Defined** | 112 |
-| **Implemented Opcodes** | 48 |
+| **Total Opcodes Defined** | 148 |
+| **Implemented Opcodes** | ~80 (with meaningful implementation) |
 | **Tested Opcodes** | 37 |
-| **Untested (Implemented)** | 11 |
-| **Test Coverage Rate** | 77.1% |
+| **Untested (Implemented)** | ~43 |
+| **Test Coverage Rate** | ~46% (37/80) |
 
 ### Coverage by Category
 
@@ -76,9 +76,9 @@ This document provides a comprehensive analysis of test coverage for the jet EVM
 | **XOR** | 0x18 | Bitwise XOR | 3 tests: basic, identity with zero, self-cancel | ✅ Tested |
 | **NOT** | 0x19 | Bitwise NOT | 3 tests: invert zeros, invert ones, single byte | ✅ Tested |
 | **BYTE** | 0x1A | Extract byte | 3 tests: index 0 (MSB), out of range, from zero | ✅ Tested |
-| **SHL** | 0x1B | Shift left | 3 tests: by 0, by 1, by 8 | ⚠️ Implementation bug: arguments swapped |
-| **SHR** | 0x1C | Logical shift right | 3 tests: by 0, by 1, by 8 | ⚠️ Implementation bug: arguments swapped |
-| **SAR** | 0x1D | Arithmetic shift right | 3 tests: positive by 0, positive by 1, negative preserves sign | ⚠️ Implementation bug: arguments swapped |
+| **SHL** | 0x1B | Shift left | 3 tests: by 0, by 1, by 8 | ✅ Tested |
+| **SHR** | 0x1C | Logical shift right | 3 tests: by 0, by 1, by 8 | ✅ Tested |
+| **SAR** | 0x1D | Arithmetic shift right | 3 tests: positive by 0, positive by 1, negative preserves sign | ✅ Tested |
 
 ### Memory Operations (3 tested) ✅
 
