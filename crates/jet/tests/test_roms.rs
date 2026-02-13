@@ -32,6 +32,9 @@ define_ops!(
     SUB,
     DIV,
     MOD,
+    SMOD,
+    ADDMOD,
+    MULMOD,
     EXP,
     SIGNEXTEND,
     KECCAK256,
@@ -523,6 +526,50 @@ rom_tests! {
             PUSH1!(0x00),
             PUSH1!(0x0E),
             MOD!(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x00])],
+            ..Default::default()
+        },
+    },
+
+    // Tests signed modulo by zero: EVM spec requires -8 % 0 = 0
+    smod_by_zero: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x00),
+            PUSH1!(0x08),
+            SMOD!(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x00])],
+            ..Default::default()
+        },
+    },
+
+    // Tests addmod by zero: EVM spec requires (10 + 20) % 0 = 0
+    addmod_by_zero: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x00),
+            PUSH1!(0x14),
+            PUSH1!(0x0A),
+            ADDMOD!(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x00])],
+            ..Default::default()
+        },
+    },
+
+    // Tests mulmod by zero: EVM spec requires (10 * 20) % 0 = 0
+    mulmod_by_zero: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x00),
+            PUSH1!(0x14),
+            PUSH1!(0x0A),
+            MULMOD!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
