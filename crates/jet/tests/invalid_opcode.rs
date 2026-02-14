@@ -9,7 +9,7 @@ use jet::{
 #[test]
 fn invalid_opcode_returns_error() {
     let ctx = Context::create();
-    let opts = Options::new(Debug, false, false, true);
+    let opts = Options::new(Debug, false, true);
     let mut engine = Engine::new(&ctx, opts).expect("engine initializes");
 
     let err = engine
