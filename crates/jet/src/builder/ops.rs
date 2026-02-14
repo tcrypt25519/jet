@@ -127,21 +127,36 @@ pub(crate) fn sdiv(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     build_zero_guard(bctx, b_is_zero, "sdiv", |cont| {
         // Guard 2: MIN_INT256 / -1 overflows in LLVM sdiv (poison).
         // EVM spec: the result wraps back to MIN_INT256.
-        let min_int = t.i256.const_int_arbitrary_precision(&[0, 0, 0, 0x8000_0000_0000_0000]);
+        let min_int = t
+            .i256
+            .const_int_arbitrary_precision(&[0, 0, 0, 0x8000_0000_0000_0000]);
         let neg_one = t.i256.const_all_ones();
-        let a_is_min =
-            bctx.builder
-                .build_int_compare(inkwell::IntPredicate::EQ, a, min_int, "sdiv_a_is_min")?;
-        let b_is_neg_one =
-            bctx.builder
-                .build_int_compare(inkwell::IntPredicate::EQ, b, neg_one, "sdiv_b_is_neg_one")?;
-        let is_overflow =
-            bctx.builder.build_and(a_is_min, b_is_neg_one, "sdiv_is_overflow")?;
+        let a_is_min = bctx.builder.build_int_compare(
+            inkwell::IntPredicate::EQ,
+            a,
+            min_int,
+            "sdiv_a_is_min",
+        )?;
+        let b_is_neg_one = bctx.builder.build_int_compare(
+            inkwell::IntPredicate::EQ,
+            b,
+            neg_one,
+            "sdiv_b_is_neg_one",
+        )?;
+        let is_overflow = bctx
+            .builder
+            .build_and(a_is_min, b_is_neg_one, "sdiv_is_overflow")?;
 
-        let overflow_block =
-            bctx.env.context().append_basic_block(bctx.func, "sdiv_overflow");
-        let normal_block = bctx.env.context().append_basic_block(bctx.func, "sdiv_normal");
-        bctx.builder.build_conditional_branch(is_overflow, overflow_block, normal_block)?;
+        let overflow_block = bctx
+            .env
+            .context()
+            .append_basic_block(bctx.func, "sdiv_overflow");
+        let normal_block = bctx
+            .env
+            .context()
+            .append_basic_block(bctx.func, "sdiv_normal");
+        bctx.builder
+            .build_conditional_branch(is_overflow, overflow_block, normal_block)?;
 
         bctx.builder.position_at_end(overflow_block);
         stack_push_int(bctx, min_int)?;
@@ -189,21 +204,36 @@ pub(crate) fn smod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     build_zero_guard(bctx, b_is_zero, "smod", |cont| {
         // Guard 2: MIN_INT256 % -1 — LLVM srem overflows (poison).
         // Mathematically the remainder is 0 (MIN_INT is exactly divisible by -1).
-        let min_int = t.i256.const_int_arbitrary_precision(&[0, 0, 0, 0x8000_0000_0000_0000]);
+        let min_int = t
+            .i256
+            .const_int_arbitrary_precision(&[0, 0, 0, 0x8000_0000_0000_0000]);
         let neg_one = t.i256.const_all_ones();
-        let a_is_min =
-            bctx.builder
-                .build_int_compare(inkwell::IntPredicate::EQ, a, min_int, "smod_a_is_min")?;
-        let b_is_neg_one =
-            bctx.builder
-                .build_int_compare(inkwell::IntPredicate::EQ, b, neg_one, "smod_b_is_neg_one")?;
-        let is_overflow =
-            bctx.builder.build_and(a_is_min, b_is_neg_one, "smod_is_overflow")?;
+        let a_is_min = bctx.builder.build_int_compare(
+            inkwell::IntPredicate::EQ,
+            a,
+            min_int,
+            "smod_a_is_min",
+        )?;
+        let b_is_neg_one = bctx.builder.build_int_compare(
+            inkwell::IntPredicate::EQ,
+            b,
+            neg_one,
+            "smod_b_is_neg_one",
+        )?;
+        let is_overflow = bctx
+            .builder
+            .build_and(a_is_min, b_is_neg_one, "smod_is_overflow")?;
 
-        let overflow_block =
-            bctx.env.context().append_basic_block(bctx.func, "smod_overflow");
-        let normal_block = bctx.env.context().append_basic_block(bctx.func, "smod_normal");
-        bctx.builder.build_conditional_branch(is_overflow, overflow_block, normal_block)?;
+        let overflow_block = bctx
+            .env
+            .context()
+            .append_basic_block(bctx.func, "smod_overflow");
+        let normal_block = bctx
+            .env
+            .context()
+            .append_basic_block(bctx.func, "smod_normal");
+        bctx.builder
+            .build_conditional_branch(is_overflow, overflow_block, normal_block)?;
 
         bctx.builder.position_at_end(overflow_block);
         stack_push_int(bctx, zero)?;
@@ -230,7 +260,9 @@ pub(crate) fn addmod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
             .build_int_compare(inkwell::IntPredicate::EQ, n, zero, "addmod_n_is_zero")?;
     build_zero_guard(bctx, n_is_zero, "addmod", |cont| {
         let sum = bctx.builder.build_int_add(a, b, "addmod_sum")?;
-        let result = bctx.builder.build_int_unsigned_rem(sum, n, "addmod_result")?;
+        let result = bctx
+            .builder
+            .build_int_unsigned_rem(sum, n, "addmod_result")?;
         stack_push_int(bctx, result)?;
         bctx.builder.build_unconditional_branch(cont)?;
         Ok(())
@@ -250,7 +282,9 @@ pub(crate) fn mulmod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
             .build_int_compare(inkwell::IntPredicate::EQ, n, zero, "mulmod_n_is_zero")?;
     build_zero_guard(bctx, n_is_zero, "mulmod", |cont| {
         let product = bctx.builder.build_int_mul(a, b, "mulmod_product")?;
-        let result = bctx.builder.build_int_unsigned_rem(product, n, "mulmod_result")?;
+        let result = bctx
+            .builder
+            .build_int_unsigned_rem(product, n, "mulmod_result")?;
         stack_push_int(bctx, result)?;
         bctx.builder.build_unconditional_branch(cont)?;
         Ok(())
@@ -972,14 +1006,21 @@ where
 {
     let zero = bctx.env.types().i256.const_zero();
 
-    let zero_block =
-        bctx.env.context().append_basic_block(bctx.func, &format!("{op_name}_zero"));
-    let nonzero_block =
-        bctx.env.context().append_basic_block(bctx.func, &format!("{op_name}_nonzero"));
-    let cont =
-        bctx.env.context().append_basic_block(bctx.func, &format!("{op_name}_cont"));
+    let zero_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, &format!("{op_name}_zero"));
+    let nonzero_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, &format!("{op_name}_nonzero"));
+    let cont = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, &format!("{op_name}_cont"));
 
-    bctx.builder.build_conditional_branch(is_zero_cond, zero_block, nonzero_block)?;
+    bctx.builder
+        .build_conditional_branch(is_zero_cond, zero_block, nonzero_block)?;
 
     bctx.builder.position_at_end(zero_block);
     stack_push_int(bctx, zero)?;
