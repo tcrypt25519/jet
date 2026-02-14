@@ -250,34 +250,30 @@ pub(crate) fn smod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
 pub(crate) fn addmod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     let (a, b, c) = stack_pop_3(bctx)?;
 
-    // Allocate result buffer on stack
-    let result_alloca = bctx.builder.build_alloca(bctx.env.types().word_bytes, "addmod_result")?;
-
-    // Call 512-bit addmod builtin for EVM-compliant overflow-safe arithmetic
+    // Call 512-bit addmod builtin, reusing `a` as the result buffer
     bctx.builder.build_call(
         bctx.env.symbols().addmod(),
-        &[result_alloca.into(), a.into(), b.into(), c.into()],
+        &[a.into(), a.into(), b.into(), c.into()],
         "addmod_call",
     )?;
 
-    stack_push_ptr(bctx, result_alloca)?;
+    // Push result back onto stack (reusing the `a` buffer which now contains the result)
+    call_stack_push_ptr(bctx, a)?;
     Ok(())
 }
 
 pub(crate) fn mulmod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     let (a, b, c) = stack_pop_3(bctx)?;
 
-    // Allocate result buffer on stack
-    let result_alloca = bctx.builder.build_alloca(bctx.env.types().word_bytes, "mulmod_result")?;
-
-    // Call 512-bit mulmod builtin for EVM-compliant overflow-safe arithmetic
+    // Call 512-bit mulmod builtin, reusing `a` as the result buffer
     bctx.builder.build_call(
         bctx.env.symbols().mulmod(),
-        &[result_alloca.into(), a.into(), b.into(), c.into()],
+        &[a.into(), a.into(), b.into(), c.into()],
         "mulmod_call",
     )?;
 
-    stack_push_ptr(bctx, result_alloca)?;
+    // Push result back onto stack (reusing the `a` buffer which now contains the result)
+    call_stack_push_ptr(bctx, a)?;
     Ok(())
 }
 

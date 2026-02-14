@@ -93,6 +93,8 @@ impl<'ctx> Engine<'ctx> {
             builtins::jet_ops_keccak256 as *const () as usize,
         );
         map_fn(sym.exp(), builtins::jet_ops_exp as *const () as usize);
+        map_fn(sym.addmod(), builtins::jet_ops_addmod as *const () as usize);
+        map_fn(sym.mulmod(), builtins::jet_ops_mulmod as *const () as usize);
         map_fn(
             sym.mem_expand(),
             builtins::jet_mem_expand as *const () as usize,
