@@ -108,7 +108,7 @@ The chunking algorithm partitions raw EVM bytecode into discrete basic blocks. T
 1. **SSA Construction:** LLVM requires control flow to be represented as explicit basic blocks with distinct entry and exit points.
 2. **CFG Correctness:** EVM semantics allow dynamic jumps to JUMPDEST instructions. The compiler must identify all valid jump targets ahead of time.
 3. **LLVM Structural Requirements:** Every basic block must end with a terminator instruction; the chunking algorithm identifies where these terminators belong.
-4. **Fallthrough Prevention:** EVM does not have implicit fallthrough. If execution reaches a JUMPDEST without an explicit jump, the compiler must insert an unconditional branch.
+4. **LLVM Fallthrough Modeling:** Although the EVM program counter advances sequentially by default (so execution may reach a `JUMPDEST` via linear fallthrough), LLVM basic blocks still require explicit terminators. Whenever EVM execution can continue into the next chunk, the compiler inserts an unconditional branch between the corresponding LLVM basic blocks.
 
 ### Block Boundary Conditions
 
