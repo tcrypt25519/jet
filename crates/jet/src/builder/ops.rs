@@ -25,284 +25,15 @@ type StackPop7<'ctx> = (
     PointerValue<'ctx>,
 );
 
-// Stdlib callers
+// OPCode implementations
 //
 
-fn __call_stack_push_i256<'ctx>(
-    bctx: &BuildCtx<'ctx, '_>,
-    value: IntValue<'ctx>,
-) -> Result<CallSiteValue<'ctx>, BuilderError> {
-    bctx.builder.build_call(
-        bctx.env.symbols().stack_push_word(),
-        &[bctx.registers.exec_ctx.into(), value.into()],
-        "stack_push_i256",
-    )
-}
-
-fn __call_stack_push_ptr<'ctx>(
-    bctx: &BuildCtx<'ctx, '_>,
-    ptr: PointerValue<'ctx>,
-) -> Result<CallSiteValue<'ctx>, BuilderError> {
-    bctx.builder.build_call(
-        bctx.env.symbols().stack_push_ptr(),
-        &[bctx.registers.exec_ctx.into(), ptr.into()],
-        "stack_push_ptr",
-    )
-}
-
-fn __call_stack_pop<'ctx>(bctx: &BuildCtx<'ctx, '_>) -> Result<PointerValue<'ctx>, Error> {
-    let ret = bctx.builder.build_call(
-        bctx.env.symbols().stack_pop(),
-        &[bctx.registers.exec_ctx.into()],
-        "word_ptr",
-    )?;
-    Ok(call_return_to_ptr(ret))
-}
-
-fn __call_stack_peek<'ctx>(
-    bctx: &BuildCtx<'ctx, '_>,
-    index: u8,
-) -> Result<PointerValue<'ctx>, Error> {
-    let index_value = bctx.env.types().i8.const_int(index as u64, false);
-    let ret = bctx.builder.build_call(
-        bctx.env.symbols().stack_peek(),
-        &[bctx.registers.exec_ctx.into(), index_value.into()],
-        "stack_peek_word_result",
-    )?;
-    Ok(call_return_to_ptr(ret))
-}
-
-fn __call_stack_swap(bctx: &BuildCtx<'_, '_>, index: u8) -> Result<(), Error> {
-    let index_value = bctx.env.types().i8.const_int(index as u64, false);
-
-    bctx.builder.build_call(
-        bctx.env.symbols().stack_swap(),
-        &[bctx.registers.exec_ctx.into(), index_value.into()],
-        "stack_swap_ret",
-    )?;
-    Ok(())
-}
-
-// Helpers
-//
-
-pub(crate) fn __sync_vstack(_bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    // TODO: Re-enable
-    // for value in bctx.vstack().iter() {
-    //     __call_stack_push_word(bctx, *value)?;
-    // }
-    // bctx.vstack_mut().clear();
-    Ok(())
-}
-
-fn __stack_push_int<'ctx>(bctx: &BuildCtx<'ctx, '_>, value: IntValue<'ctx>) -> Result<(), Error> {
-    // TODO: Re-enable
-    // if bctx.env.opts().vstack() {
-    //     trace!("Pushing to vstack: {:?}", value);
-    //     bctx.vstack_mut().push(value);
-    //     return Ok(());
-    // }
-
-    let bit_width = value.get_type().get_bit_width();
-    let value_i256 = match bit_width {
-        1 | 8 | 32 => {
-            bctx.builder
-                .build_int_z_extend(value, bctx.env.types().i256, "int_to_word")?
-        }
-        256 => value,
-        _ => {
-            return Err(Error::InvalidBitWidth(bit_width));
-        }
-    };
-
-    __call_stack_push_i256(bctx, value_i256)?;
-    Ok(())
-}
-
-fn __stack_push_ptr<'ctx>(
-    bctx: &BuildCtx<'ctx, '_>,
-    value: PointerValue<'ctx>,
-) -> Result<(), Error> {
-    __call_stack_push_ptr(bctx, value)?;
-    Ok(())
-}
-
-fn __stack_pop_1<'ctx>(bctx: &BuildCtx<'ctx, '_>) -> Result<StackPop1<'ctx>, Error> {
-    // TODO: Re-enable
-    // if bctx.env.opts().vstack() {
-    //     let a = match bctx.vstack_mut().pop() {
-    //         Some(a) => a,
-    //         None => __call_stack_pop(bctx)?,
-    //     };
-    //     return Ok(a);
-    // }
-
-    let a = __call_stack_pop(bctx)?;
-    Ok(a)
-}
-
-fn __stack_pop_2<'ctx>(bctx: &BuildCtx<'ctx, '_>) -> Result<StackPop2<'ctx>, Error> {
-    // TODO: Re-enable
-    // if bctx.env.opts().vstack() {
-    //     let mut vstack = bctx.vstack_mut();
-    //     let a = match vstack.pop() {
-    //         Some(a) => a,
-    //         None => __call_stack_pop(bctx)?,
-    //     };
-    //     let b = match vstack.pop() {
-    //         Some(b) => b,
-    //         None => __call_stack_pop(bctx)?,
-    //     };
-    //     return Ok((a, b));
-    // }
-
-    let a = __call_stack_pop(bctx)?;
-    let b = __call_stack_pop(bctx)?;
-
-    Ok((a, b))
-}
-
-fn __stack_pop_3<'ctx>(bctx: &BuildCtx<'ctx, '_>) -> Result<StackPop3<'ctx>, Error> {
-    // TODO: Re-enable
-    // if bctx.env.opts().vstack() {
-    //     let mut vstack = bctx.vstack_mut();
-    //     let a = match vstack.pop() {
-    //         Some(a) => a,
-    //         None => __call_stack_pop(bctx)?,
-    //     };
-    //     let b = match vstack.pop() {
-    //         Some(b) => b,
-    //         None => __call_stack_pop(bctx)?,
-    //     };
-    //     let c = match vstack.pop() {
-    //         Some(c) => c,
-    //         None => __call_stack_pop(bctx)?,
-    //     };
-    //     return Ok((a, b, c));
-    // }
-
-    let a = __call_stack_pop(bctx)?;
-    let b = __call_stack_pop(bctx)?;
-    let c = __call_stack_pop(bctx)?;
-
-    Ok((a, b, c))
-}
-
-fn __stack_pop_7<'ctx>(bctx: &BuildCtx<'ctx, '_>) -> Result<StackPop7<'ctx>, Error> {
-    // TODO: Re-enable
-    // if bctx.env.opts().vstack() {
-    //     let mut vstack = bctx.vstack_mut();
-    //     let a = match vstack.pop() {
-    //         Some(a) => a,
-    //         None => __call_stack_pop(bctx)?,
-    //     };
-    //     let b = match vstack.pop() {
-    //         Some(b) => b,
-    //         None => __call_stack_pop(bctx)?,
-    //     };
-    //     let c = match vstack.pop() {
-    //         Some(c) => c,
-    //         None => __call_stack_pop(bctx)?,
-    //     };
-    //     let d = match vstack.pop() {
-    //         Some(d) => d,
-    //         None => __call_stack_pop(bctx)?,
-    //     };
-    //     let e = match vstack.pop() {
-    //         Some(e) => e,
-    //         None => __call_stack_pop(bctx)?,
-    //     };
-    //     let f = match vstack.pop() {
-    //         Some(f) => f,
-    //         None => __call_stack_pop(bctx)?,
-    //     };
-    //     let g = match vstack.pop() {
-    //         Some(g) => g,
-    //         None => __call_stack_pop(bctx)?,
-    //     };
-    //     return Ok((a, b, c, d, e, f, g));
-    // }
-
-    let a = __call_stack_pop(bctx)?;
-    let b = __call_stack_pop(bctx)?;
-    let c = __call_stack_pop(bctx)?;
-    let d = __call_stack_pop(bctx)?;
-    let e = __call_stack_pop(bctx)?;
-    let f = __call_stack_pop(bctx)?;
-    let g = __call_stack_pop(bctx)?;
-
-    Ok((a, b, c, d, e, f, g))
-}
-
-pub(crate) fn __invalid_jump_return(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    __build_return(bctx, ReturnCode::InvalidJumpBlock)
-}
-
-pub(crate) fn __build_return(
-    bctx: &BuildCtx<'_, '_>,
-    return_value: ReturnCode,
-) -> Result<(), Error> {
-    __sync_vstack(bctx)?;
-
+pub(crate) fn build_return(bctx: &BuildCtx<'_, '_>, return_value: ReturnCode) -> Result<(), Error> {
     let return_value = bctx.env.types().i8.const_int(return_value as u64, false);
     bctx.builder.build_return(Some(&return_value))?;
     Ok(())
 }
 
-fn load_i8<'a>(bctx: &BuildCtx<'a, '_>, ptr: PointerValue<'a>) -> Result<IntValue<'a>, Error> {
-    let int = load_int(bctx, ptr, bctx.env.types().i8)?;
-    Ok(int)
-}
-
-fn load_i32<'a>(bctx: &BuildCtx<'a, '_>, ptr: PointerValue<'a>) -> Result<IntValue<'a>, Error> {
-    let int = load_int(bctx, ptr, bctx.env.types().i32)?;
-    Ok(int)
-}
-
-fn load_i64<'a>(bctx: &BuildCtx<'a, '_>, ptr: PointerValue<'a>) -> Result<IntValue<'a>, Error> {
-    let int = load_int(bctx, ptr, bctx.env.types().i64)?;
-    Ok(int)
-}
-
-fn load_i256<'a>(bctx: &BuildCtx<'a, '_>, ptr: PointerValue<'a>) -> Result<IntValue<'a>, Error> {
-    let int = load_int(bctx, ptr, bctx.env.types().i256)?;
-    Ok(int)
-}
-
-fn load_int<'a>(
-    bctx: &BuildCtx,
-    ptr: PointerValue<'a>,
-    ty: IntType<'a>,
-) -> Result<IntValue<'a>, Error> {
-    let value = bctx.builder.build_load(ty, ptr, "load_int")?;
-    let value_ref = value.as_value_ref();
-    let value_int = unsafe { IntValue::new(value_ref) };
-    Ok(value_int)
-}
-
-fn call_return_to_ptr(ret: CallSiteValue) -> PointerValue {
-    let value_ref = ret.as_value_ref();
-    unsafe { PointerValue::new(value_ref) }
-}
-
-// Block info getter helpers
-//
-
-fn __block_info_hash(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let hash_ptr = bctx.builder.build_struct_gep(
-        bctx.env.types().block_info,
-        bctx.registers.block_info,
-        7,
-        "block_info_hash_ptr",
-    )?;
-
-    let hash = load_i256(bctx, hash_ptr)?;
-    __stack_push_int(bctx, hash)?;
-    Ok(())
-}
-
-// OPCode implementations
-//
 pub(crate) fn push(bctx: &BuildCtx<'_, '_>, bytes: [u8; 32]) -> Result<(), Error> {
     let t = bctx.env.types();
 
@@ -315,71 +46,55 @@ pub(crate) fn push(bctx: &BuildCtx<'_, '_>, bytes: [u8; 32]) -> Result<(), Error
     let values_ptr = bctx.builder.build_alloca(t.word_bytes, "push_bytes.ptr")?;
     bctx.builder.build_store(values_ptr, values)?;
 
-    // TODO: Re-enable
-    // if bctx.env.opts().vstack() {
-    //     // To push to the vstack, we need to push the bytes as a single word (i256) value
-    //     let arr_ptr = bctx
-    //         .builder
-    //         .build_alloca(bctx.env.types().i8.array_type(32), "stack_bytes.ptr")?;
-    //     bctx.builder.build_store(arr_ptr, values)?;
-    //     let word = bctx.builder.build_load(t.i256, arr_ptr, "stack_word")?;
-    //
-    //     bctx.vstack_mut().push(word.into_int_value());
-    //
-    //     return Ok(());
-    // }
-
-    __stack_push_ptr(bctx, values_ptr)?;
+    stack_push_ptr(bctx, values_ptr)?;
 
     Ok(())
 }
 
 pub(crate) fn dup(bctx: &BuildCtx<'_, '_>, index: u8) -> Result<(), Error> {
-    __sync_vstack(bctx)?;
-    let peeked_value_ptr = __call_stack_peek(bctx, index)?;
-    __call_stack_push_ptr(bctx, peeked_value_ptr)?;
+    let peeked_value_ptr = call_stack_peek(bctx, index)?;
+    call_stack_push_ptr(bctx, peeked_value_ptr)?;
     Ok(())
 }
 
 pub(crate) fn swap(bctx: &BuildCtx<'_, '_>, index: u8) -> Result<(), Error> {
-    __sync_vstack(bctx)?;
-    __call_stack_swap(bctx, index)?;
+    call_stack_swap(bctx, index)?;
     Ok(())
 }
 
 pub(crate) fn stop(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    __build_return(bctx, ReturnCode::Stop)
+    build_return(bctx, ReturnCode::Stop)
 }
 
 pub(crate) fn add(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = __stack_pop_2(bctx)?;
+    let (a, b) = stack_pop_2(bctx)?;
     let a = load_i256(bctx, a)?;
     let b = load_i256(bctx, b)?;
     let result = bctx.builder.build_int_add(a, b, "add_result")?;
-    __call_stack_push_i256(bctx, result)?;
+    call_stack_push_i256(bctx, result)?;
     Ok(())
 }
 
 pub(crate) fn mul(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = __stack_pop_2(bctx)?;
+    let (a, b) = stack_pop_2(bctx)?;
     let a = load_i256(bctx, a)?;
     let b = load_i256(bctx, b)?;
     let result = bctx.builder.build_int_mul(a, b, "mul_result")?;
-    __call_stack_push_i256(bctx, result)?;
+    call_stack_push_i256(bctx, result)?;
     Ok(())
 }
 
 pub(crate) fn sub(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = __stack_pop_2(bctx)?;
+    let (a, b) = stack_pop_2(bctx)?;
     let a = load_i256(bctx, a)?;
     let b = load_i256(bctx, b)?;
     let result = bctx.builder.build_int_sub(a, b, "sub_result")?;
-    __stack_push_int(bctx, result)?;
+    stack_push_int(bctx, result)?;
     Ok(())
 }
 
 pub(crate) fn div(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = __stack_pop_2(bctx)?;
+    let (a, b) = stack_pop_2(bctx)?;
     let a = load_i256(bctx, a)?;
     let b = load_i256(bctx, b)?;
 
@@ -395,21 +110,21 @@ pub(crate) fn div(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
         .build_select(b_is_zero, zero, div_result, "div_final")?;
     let result = result.into_int_value();
 
-    __stack_push_int(bctx, result)?;
+    stack_push_int(bctx, result)?;
     Ok(())
 }
 
 pub(crate) fn sdiv(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = __stack_pop_2(bctx)?;
+    let (a, b) = stack_pop_2(bctx)?;
     let a = load_i256(bctx, a)?;
     let b = load_i256(bctx, b)?;
     let result = bctx.builder.build_int_signed_div(a, b, "sdiv_result")?;
-    __stack_push_int(bctx, result)?;
+    stack_push_int(bctx, result)?;
     Ok(())
 }
 
 pub(crate) fn _mod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = __stack_pop_2(bctx)?;
+    let (a, b) = stack_pop_2(bctx)?;
     let a = load_i256(bctx, a)?;
     let b = load_i256(bctx, b)?;
 
@@ -425,21 +140,21 @@ pub(crate) fn _mod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
         .build_select(b_is_zero, zero, mod_result, "mod_final")?;
     let result = result.into_int_value();
 
-    __stack_push_int(bctx, result)?;
+    stack_push_int(bctx, result)?;
     Ok(())
 }
 
 pub(crate) fn smod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = __stack_pop_2(bctx)?;
+    let (a, b) = stack_pop_2(bctx)?;
     let a = load_i256(bctx, a)?;
     let b = load_i256(bctx, b)?;
     let result = bctx.builder.build_int_signed_rem(a, b, "smod_result")?;
-    __stack_push_int(bctx, result)?;
+    stack_push_int(bctx, result)?;
     Ok(())
 }
 
 pub(crate) fn addmod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b, c) = __stack_pop_3(bctx)?;
+    let (a, b, c) = stack_pop_3(bctx)?;
     let a = load_i256(bctx, a)?;
     let b = load_i256(bctx, b)?;
     let c = load_i256(bctx, c)?;
@@ -447,12 +162,12 @@ pub(crate) fn addmod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     let result = bctx
         .builder
         .build_int_unsigned_rem(result, c, "addmod_mod_result")?;
-    __stack_push_int(bctx, result)?;
+    stack_push_int(bctx, result)?;
     Ok(())
 }
 
 pub(crate) fn mulmod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b, c) = __stack_pop_3(bctx)?;
+    let (a, b, c) = stack_pop_3(bctx)?;
     let a = load_i256(bctx, a)?;
     let b = load_i256(bctx, b)?;
     let c = load_i256(bctx, c)?;
@@ -460,23 +175,23 @@ pub(crate) fn mulmod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     let result = bctx
         .builder
         .build_int_unsigned_rem(result, c, "mulmod_mod_result")?;
-    __stack_push_int(bctx, result)?;
+    stack_push_int(bctx, result)?;
     Ok(())
 }
 
 pub(crate) fn exp(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (base, exponent) = __stack_pop_2(bctx)?;
+    let (base, exponent) = stack_pop_2(bctx)?;
     bctx.builder.build_call(
         bctx.env.symbols().exp(),
         &[base.into(), exponent.into()],
         "exp_result",
     )?;
-    __call_stack_push_ptr(bctx, base)?;
+    call_stack_push_ptr(bctx, base)?;
     Ok(())
 }
 
 pub(crate) fn signextend(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (b_ptr, x_ptr) = __stack_pop_2(bctx)?;
+    let (b_ptr, x_ptr) = stack_pop_2(bctx)?;
     let b = load_i256(bctx, b_ptr)?;
     let x = load_i256(bctx, x_ptr)?;
 
@@ -519,67 +234,67 @@ pub(crate) fn signextend(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
         .build_select(in_range, extended, x, "signextend_result")?
         .into_int_value();
 
-    __stack_push_int(bctx, result)?;
+    stack_push_int(bctx, result)?;
     Ok(())
 }
 
 pub(crate) fn lt(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = __stack_pop_2(bctx)?;
+    let (a, b) = stack_pop_2(bctx)?;
     let a = load_i256(bctx, a)?;
     let b = load_i256(bctx, b)?;
     let result = bctx
         .builder
         .build_int_compare(inkwell::IntPredicate::ULT, a, b, "lt_result")?;
-    __stack_push_int(bctx, result)?;
+    stack_push_int(bctx, result)?;
     Ok(())
 }
 
 pub(crate) fn gt(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = __stack_pop_2(bctx)?;
+    let (a, b) = stack_pop_2(bctx)?;
     let a = load_i256(bctx, a)?;
     let b = load_i256(bctx, b)?;
     let result = bctx
         .builder
         .build_int_compare(inkwell::IntPredicate::UGT, a, b, "gt_result")?;
-    __stack_push_int(bctx, result)?;
+    stack_push_int(bctx, result)?;
     Ok(())
 }
 
 pub(crate) fn slt(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = __stack_pop_2(bctx)?;
+    let (a, b) = stack_pop_2(bctx)?;
     let a = load_i256(bctx, a)?;
     let b = load_i256(bctx, b)?;
     let result = bctx
         .builder
         .build_int_compare(inkwell::IntPredicate::SLT, a, b, "slt_result")?;
-    __stack_push_int(bctx, result)?;
+    stack_push_int(bctx, result)?;
     Ok(())
 }
 
 pub(crate) fn sgt(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = __stack_pop_2(bctx)?;
+    let (a, b) = stack_pop_2(bctx)?;
     let a = load_i256(bctx, a)?;
     let b = load_i256(bctx, b)?;
     let result = bctx
         .builder
         .build_int_compare(inkwell::IntPredicate::SGT, a, b, "sgt_result")?;
-    __stack_push_int(bctx, result)?;
+    stack_push_int(bctx, result)?;
     Ok(())
 }
 
 pub(crate) fn eq(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = __stack_pop_2(bctx)?;
+    let (a, b) = stack_pop_2(bctx)?;
     let a = load_i256(bctx, a)?;
     let b = load_i256(bctx, b)?;
     let result = bctx
         .builder
         .build_int_compare(inkwell::IntPredicate::EQ, a, b, "eq_result")?;
-    __stack_push_int(bctx, result)?;
+    stack_push_int(bctx, result)?;
     Ok(())
 }
 
 pub(crate) fn iszero(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let a = __stack_pop_1(bctx)?;
+    let a = stack_pop_1(bctx)?;
     let a = load_i256(bctx, a)?;
     let result = bctx.builder.build_int_compare(
         inkwell::IntPredicate::EQ,
@@ -587,47 +302,47 @@ pub(crate) fn iszero(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
         bctx.env.types().i256.const_zero(),
         "iszero_result",
     )?;
-    __stack_push_int(bctx, result)?;
+    stack_push_int(bctx, result)?;
     Ok(())
 }
 
 pub(crate) fn and(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = __stack_pop_2(bctx)?;
+    let (a, b) = stack_pop_2(bctx)?;
     let a = load_i256(bctx, a)?;
     let b = load_i256(bctx, b)?;
     let result = bctx.builder.build_and(a, b, "and_result")?;
-    __stack_push_int(bctx, result)?;
+    stack_push_int(bctx, result)?;
     Ok(())
 }
 
 pub(crate) fn or(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = __stack_pop_2(bctx)?;
+    let (a, b) = stack_pop_2(bctx)?;
     let a = load_i256(bctx, a)?;
     let b = load_i256(bctx, b)?;
     let result = bctx.builder.build_or(a, b, "or_result")?;
-    __stack_push_int(bctx, result)?;
+    stack_push_int(bctx, result)?;
     Ok(())
 }
 
 pub(crate) fn xor(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = __stack_pop_2(bctx)?;
+    let (a, b) = stack_pop_2(bctx)?;
     let a = load_i256(bctx, a)?;
     let b = load_i256(bctx, b)?;
     let result = bctx.builder.build_xor(a, b, "xor_result")?;
-    __stack_push_int(bctx, result)?;
+    stack_push_int(bctx, result)?;
     Ok(())
 }
 
 pub(crate) fn not(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let a = __stack_pop_1(bctx)?;
+    let a = stack_pop_1(bctx)?;
     let a = load_i256(bctx, a)?;
     let result = bctx.builder.build_not(a, "not_result")?;
-    __stack_push_int(bctx, result)?;
+    stack_push_int(bctx, result)?;
     Ok(())
 }
 
 pub(crate) fn byte(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (idx, word) = __stack_pop_2(bctx)?;
+    let (idx, word) = stack_pop_2(bctx)?;
 
     // Load the index and sub from 31 to reverse endianess
     let idx = load_i32(bctx, idx)?;
@@ -642,44 +357,44 @@ pub(crate) fn byte(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     // Load byte and then push as an int instead of pushing as pointer directly, otherwise we'll
     // write 31 bytes of garbage instead of padding.
     let byte = load_i8(bctx, byte_ptr)?;
-    __stack_push_int(bctx, byte)?;
+    stack_push_int(bctx, byte)?;
 
     Ok(())
 }
 
 pub(crate) fn shl(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (shift, value) = __stack_pop_2(bctx)?;
+    let (shift, value) = stack_pop_2(bctx)?;
     let shift = load_i256(bctx, shift)?;
     let value = load_i256(bctx, value)?;
     let result = bctx.builder.build_left_shift(value, shift, "shl_result")?;
-    __stack_push_int(bctx, result)?;
+    stack_push_int(bctx, result)?;
     Ok(())
 }
 
 pub(crate) fn shr(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (shift, value) = __stack_pop_2(bctx)?;
+    let (shift, value) = stack_pop_2(bctx)?;
     let shift = load_i256(bctx, shift)?;
     let value = load_i256(bctx, value)?;
     let result = bctx
         .builder
         .build_right_shift(value, shift, false, "shr_result")?;
-    __stack_push_int(bctx, result)?;
+    stack_push_int(bctx, result)?;
     Ok(())
 }
 
 pub(crate) fn sar(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (shift, value) = __stack_pop_2(bctx)?;
+    let (shift, value) = stack_pop_2(bctx)?;
     let shift = load_i256(bctx, shift)?;
     let value = load_i256(bctx, value)?;
     let result = bctx
         .builder
         .build_right_shift(value, shift, true, "sar_result")?;
-    __stack_push_int(bctx, result)?;
+    stack_push_int(bctx, result)?;
     Ok(())
 }
 
 pub(crate) fn keccak256(ctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let data_ptr = __stack_pop_1(ctx)?;
+    let data_ptr = stack_pop_1(ctx)?;
 
     // TODO: Check return code
     ctx.builder.build_call(
@@ -689,7 +404,7 @@ pub(crate) fn keccak256(ctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     )?;
 
     // TODO: We could instead simply increase the stack ptr
-    __call_stack_push_ptr(ctx, data_ptr)?;
+    call_stack_push_ptr(ctx, data_ptr)?;
     Ok(())
 }
 
@@ -713,12 +428,12 @@ pub(crate) fn returndatasize(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
 
     let return_length = load_i32(bctx, return_length_ptr)?;
 
-    __stack_push_int(bctx, return_length)?;
+    stack_push_int(bctx, return_length)?;
     Ok(())
 }
 
 pub(crate) fn returndatacopy(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (dest_off, src_off, len) = __stack_pop_3(bctx)?;
+    let (dest_off, src_off, len) = stack_pop_3(bctx)?;
 
     // Load sub call ctx
     let sub_call_ctx_ptr = bctx.builder.build_load(
@@ -750,18 +465,18 @@ pub(crate) fn returndatacopy(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
 }
 
 pub(crate) fn blockhash(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    __block_info_hash(bctx)?;
+    block_info_hash(bctx)?;
     Ok(())
 }
 
 pub(crate) fn pop(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     // TODO: We could simply decrement stack ptr
-    __stack_pop_1(bctx)?;
+    stack_pop_1(bctx)?;
     Ok(())
 }
 
 pub(crate) fn mload(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let loc = __stack_pop_1(bctx)?;
+    let loc = stack_pop_1(bctx)?;
     let mem_ptr = bctx.builder.build_call(
         bctx.env.symbols().mem_load(),
         &[bctx.registers.exec_ctx.into(), loc.into()],
@@ -769,13 +484,13 @@ pub(crate) fn mload(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     )?;
 
     let mem_ptr = unsafe { PointerValue::new(mem_ptr.as_value_ref()) };
-    __stack_push_ptr(bctx, mem_ptr)?;
+    stack_push_ptr(bctx, mem_ptr)?;
 
     Ok(())
 }
 
 pub(crate) fn mstore(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (loc, val) = __stack_pop_2(bctx)?;
+    let (loc, val) = stack_pop_2(bctx)?;
 
     // Expand memory if needed (MSTORE writes 32 bytes)
     let loc_i32 = load_i32(bctx, loc)?;
@@ -795,7 +510,7 @@ pub(crate) fn mstore(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
 }
 
 pub(crate) fn mstore8(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (loc, val) = __stack_pop_2(bctx)?;
+    let (loc, val) = stack_pop_2(bctx)?;
 
     // Expand memory if needed (MSTORE8 writes 1 byte)
     let loc_i32 = load_i32(bctx, loc)?;
@@ -815,7 +530,7 @@ pub(crate) fn mstore8(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
 }
 
 pub(crate) fn jump(bctx: &BuildCtx<'_, '_>, jump_block: BasicBlock) -> Result<(), Error> {
-    let pc = __stack_pop_1(bctx)?;
+    let pc = stack_pop_1(bctx)?;
 
     let pc_i32 = load_i32(bctx, pc)?;
 
@@ -830,7 +545,7 @@ pub(crate) fn jumpi(
     jump_block: BasicBlock,
     jump_else_block: BasicBlock,
 ) -> Result<(), Error> {
-    let (pc, cond) = __stack_pop_2(bctx)?;
+    let (pc, cond) = stack_pop_2(bctx)?;
 
     let pc = load_i32(bctx, pc)?;
     let cond = load_i64(bctx, cond)?;
@@ -847,12 +562,12 @@ pub(crate) fn jumpi(
 
 pub(crate) fn pc(bctx: &BuildCtx<'_, '_>, pc: usize) -> Result<(), Error> {
     let pc = bctx.env.types().i256.const_int(pc as u64, false);
-    __stack_push_int(bctx, pc)?;
+    stack_push_int(bctx, pc)?;
     Ok(())
 }
 
 pub(crate) fn call(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (_gas, to, _value, _in_off, _in_len, out_off, out_len) = __stack_pop_7(bctx)?;
+    let (_gas, to, _value, _in_off, _in_len, out_off, out_len) = stack_pop_7(bctx)?;
 
     // Call the contract with the call context
     let contract_call_fn = bctx.env.symbols().contract_call();
@@ -872,13 +587,13 @@ pub(crate) fn call(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
 
     let ret = unsafe { IntValue::new(make_contract_call.as_value_ref()) };
 
-    __stack_push_int(bctx, ret)?;
+    stack_push_int(bctx, ret)?;
 
     Ok(())
 }
 
 pub(crate) fn _return(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (offset, size) = __stack_pop_2(bctx)?;
+    let (offset, size) = stack_pop_2(bctx)?;
 
     // TODO: Copy instead of load and re-store
     let offset = load_i32(bctx, offset)?;
@@ -889,17 +604,178 @@ pub(crate) fn _return(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     bctx.builder
         .build_store(bctx.registers.return_length, size)?;
 
-    __build_return(bctx, ReturnCode::ExplicitReturn)
+    build_return(bctx, ReturnCode::ExplicitReturn)
 }
 
 pub(crate) fn revert(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    __build_return(bctx, ReturnCode::Revert)
+    build_return(bctx, ReturnCode::Revert)
 }
 
 pub(crate) fn invalid(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    __build_return(bctx, ReturnCode::Invalid)
+    build_return(bctx, ReturnCode::Invalid)
 }
 
 pub(crate) fn selfdestruct(_bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     Err(Error::UnimplementedInstruction(Instruction::SELFDESTRUCT))
+}
+
+// Private helpers
+//
+
+fn block_info_hash(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
+    let hash_ptr = bctx.builder.build_struct_gep(
+        bctx.env.types().block_info,
+        bctx.registers.block_info,
+        7,
+        "block_info_hash_ptr",
+    )?;
+
+    let hash = load_i256(bctx, hash_ptr)?;
+    stack_push_int(bctx, hash)?;
+    Ok(())
+}
+
+fn stack_push_int<'ctx>(bctx: &BuildCtx<'ctx, '_>, value: IntValue<'ctx>) -> Result<(), Error> {
+    let bit_width = value.get_type().get_bit_width();
+    let value_i256 = match bit_width {
+        1 | 8 | 32 => {
+            bctx.builder
+                .build_int_z_extend(value, bctx.env.types().i256, "int_to_word")?
+        }
+        256 => value,
+        _ => {
+            return Err(Error::InvalidBitWidth(bit_width));
+        }
+    };
+
+    call_stack_push_i256(bctx, value_i256)?;
+    Ok(())
+}
+
+fn stack_push_ptr<'ctx>(bctx: &BuildCtx<'ctx, '_>, value: PointerValue<'ctx>) -> Result<(), Error> {
+    call_stack_push_ptr(bctx, value)?;
+    Ok(())
+}
+
+fn stack_pop_1<'ctx>(bctx: &BuildCtx<'ctx, '_>) -> Result<StackPop1<'ctx>, Error> {
+    let a = call_stack_pop(bctx)?;
+    Ok(a)
+}
+
+fn stack_pop_2<'ctx>(bctx: &BuildCtx<'ctx, '_>) -> Result<StackPop2<'ctx>, Error> {
+    let a = call_stack_pop(bctx)?;
+    let b = call_stack_pop(bctx)?;
+
+    Ok((a, b))
+}
+
+fn stack_pop_3<'ctx>(bctx: &BuildCtx<'ctx, '_>) -> Result<StackPop3<'ctx>, Error> {
+    let a = call_stack_pop(bctx)?;
+    let b = call_stack_pop(bctx)?;
+    let c = call_stack_pop(bctx)?;
+
+    Ok((a, b, c))
+}
+
+fn stack_pop_7<'ctx>(bctx: &BuildCtx<'ctx, '_>) -> Result<StackPop7<'ctx>, Error> {
+    let a = call_stack_pop(bctx)?;
+    let b = call_stack_pop(bctx)?;
+    let c = call_stack_pop(bctx)?;
+    let d = call_stack_pop(bctx)?;
+    let e = call_stack_pop(bctx)?;
+    let f = call_stack_pop(bctx)?;
+    let g = call_stack_pop(bctx)?;
+
+    Ok((a, b, c, d, e, f, g))
+}
+
+fn call_stack_push_i256<'ctx>(
+    bctx: &BuildCtx<'ctx, '_>,
+    value: IntValue<'ctx>,
+) -> Result<CallSiteValue<'ctx>, BuilderError> {
+    bctx.builder.build_call(
+        bctx.env.symbols().stack_push_word(),
+        &[bctx.registers.exec_ctx.into(), value.into()],
+        "stack_push_i256",
+    )
+}
+
+fn call_stack_push_ptr<'ctx>(
+    bctx: &BuildCtx<'ctx, '_>,
+    ptr: PointerValue<'ctx>,
+) -> Result<CallSiteValue<'ctx>, BuilderError> {
+    bctx.builder.build_call(
+        bctx.env.symbols().stack_push_ptr(),
+        &[bctx.registers.exec_ctx.into(), ptr.into()],
+        "stack_push_ptr",
+    )
+}
+
+fn call_stack_pop<'ctx>(bctx: &BuildCtx<'ctx, '_>) -> Result<PointerValue<'ctx>, Error> {
+    let ret = bctx.builder.build_call(
+        bctx.env.symbols().stack_pop(),
+        &[bctx.registers.exec_ctx.into()],
+        "word_ptr",
+    )?;
+    Ok(call_return_to_ptr(ret))
+}
+
+fn call_stack_peek<'ctx>(
+    bctx: &BuildCtx<'ctx, '_>,
+    index: u8,
+) -> Result<PointerValue<'ctx>, Error> {
+    let index_value = bctx.env.types().i8.const_int(index as u64, false);
+    let ret = bctx.builder.build_call(
+        bctx.env.symbols().stack_peek(),
+        &[bctx.registers.exec_ctx.into(), index_value.into()],
+        "stack_peek_word_result",
+    )?;
+    Ok(call_return_to_ptr(ret))
+}
+
+fn call_stack_swap(bctx: &BuildCtx<'_, '_>, index: u8) -> Result<(), Error> {
+    let index_value = bctx.env.types().i8.const_int(index as u64, false);
+
+    bctx.builder.build_call(
+        bctx.env.symbols().stack_swap(),
+        &[bctx.registers.exec_ctx.into(), index_value.into()],
+        "stack_swap_ret",
+    )?;
+    Ok(())
+}
+
+fn load_i8<'a>(bctx: &BuildCtx<'a, '_>, ptr: PointerValue<'a>) -> Result<IntValue<'a>, Error> {
+    let int = load_int(bctx, ptr, bctx.env.types().i8)?;
+    Ok(int)
+}
+
+fn load_i32<'a>(bctx: &BuildCtx<'a, '_>, ptr: PointerValue<'a>) -> Result<IntValue<'a>, Error> {
+    let int = load_int(bctx, ptr, bctx.env.types().i32)?;
+    Ok(int)
+}
+
+fn load_i64<'a>(bctx: &BuildCtx<'a, '_>, ptr: PointerValue<'a>) -> Result<IntValue<'a>, Error> {
+    let int = load_int(bctx, ptr, bctx.env.types().i64)?;
+    Ok(int)
+}
+
+fn load_i256<'a>(bctx: &BuildCtx<'a, '_>, ptr: PointerValue<'a>) -> Result<IntValue<'a>, Error> {
+    let int = load_int(bctx, ptr, bctx.env.types().i256)?;
+    Ok(int)
+}
+
+fn load_int<'a>(
+    bctx: &BuildCtx,
+    ptr: PointerValue<'a>,
+    ty: IntType<'a>,
+) -> Result<IntValue<'a>, Error> {
+    let value = bctx.builder.build_load(ty, ptr, "load_int")?;
+    let value_ref = value.as_value_ref();
+    let value_int = unsafe { IntValue::new(value_ref) };
+    Ok(value_int)
+}
+
+fn call_return_to_ptr(ret: CallSiteValue) -> PointerValue {
+    let value_ref = ret.as_value_ref();
+    unsafe { PointerValue::new(value_ref) }
 }

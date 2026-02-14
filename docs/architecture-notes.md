@@ -55,27 +55,23 @@ JET is an LLVM-based JIT compiler for the Ethereum Virtual Machine (EVM). It tak
 
 **The Core Challenge**: EVM is a stack-based virtual machine, while LLVM IR is register-based with SSA (Static Single Assignment) form.
 
-**Solution - Hybrid Stack Model**:
-The design uses a **real stack** in the execution context (`Context.stack`) as the source of truth, with an optional **virtual stack (vstack)** optimization that tracks values in LLVM SSA registers during basic block execution.
+**Solution - Real Stack Model**:
+The design uses a **real stack** in the execution context (`Context.stack`) as the single source of truth. All stack operations are implemented as runtime function calls.
 
 **Current Implementation**:
 - Values are stored in a 1024-element stack of 32-byte words (`[Word; 1024]`)
 - Stack operations (`push`, `pop`, `peek`, `swap`) are implemented as runtime function calls
-- The `vstack` feature is scaffolded but currently disabled (all logic commented out)
-- When enabled, `vstack` would keep recently pushed values in LLVM registers and only sync to the real stack at basic block boundaries
 
 **Runtime Stack Builtins**:
 - `stack_push_word` / `stack_push_ptr` - Push Word or pointer to Word
 - `stack_pop` - Decrement stack_ptr, return &Word
 - `stack_peek` - Read at (stack_ptr - peek_idx - 1) without popping
 - `stack_swap` - Swap top with indexed value
-- `__stack_push_int` - Zero-extend small integer widths to i256
+- `stack_push_int` - Zero-extend small integer widths to i256
 
 **Why This Matters**:
-- Pure stack simulation via memory is slow (function calls for every operation)
-- Keeping values in SSA registers enables LLVM optimizations (constant folding, dead code elimination)
-- The `__sync_vstack` function flushes the virtual stack to real stack at block boundaries
 - Stack-machine semantics are preserved via runtime stack builtins instead of SSA register juggling
+- Pure stack simulation via memory is straightforward but incurs function calls for every operation
 
 ### 2. Basic Block Discovery and Control Flow
 
@@ -393,14 +389,14 @@ pub(crate) fn mstore(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
 - **`build_jump_table()`**: Creates the switch statement for dynamic jumps
 
 ### `jet/src/builder/env.rs`
-- **`Options`**: Build configuration (mode Debug/Release, vstack flag, emit_llvm, assert)
+- **`Options`**: Build configuration (mode Debug/Release, emit_llvm, assert)
 - **`Types`**: All LLVM type definitions (i8/i32/i64/i160/i256, ptr, word_bytes, stack, mem, exec_ctx)
 - **`Symbols`**: Runtime function lookups, mapped to `jet_runtime::symbols`
 - **`Env`**: Wraps context, module, types, symbols
 
 ### `jet/src/builder/ops.rs`
 - Implementations for each EVM opcode
-- Helper functions for stack operations (`__stack_pop_1`, `__stack_pop_2`, `__stack_push_int`, `__call_stack_push_i256`)
+- Helper functions for stack operations (`stack_pop_1`, `stack_pop_2`, `stack_push_int`, `call_stack_push_i256`)
 - **Pattern**: Pop inputs → Load values → LLVM operation → Push result
 - Handles arithmetic, comparison, bitwise, memory, control flow
 - Many opcodes return `Error::UnimplementedInstruction`
@@ -470,7 +466,6 @@ The test framework (`tests/roms/mod.rs`) provides:
 - Contract calls and return data (call, returndatacopy)
 - Keccak256 hashing
 - Program counter tracking (PC)
-- vstack-specific test exists (but vstack behavior is disabled)
 
 ---
 
@@ -478,8 +473,7 @@ The test framework (`tests/roms/mod.rs`) provides:
 
 ### Implementation Gaps
 
-1. **vstack disabled**: Virtual stack optimization is scaffolded but commented out; current behavior always uses runtime stack
-2. **Memory bounds checking**: TODO comments indicate incomplete bounds validation
+1. **Memory bounds checking**: TODO comments indicate incomplete bounds validation
 3. **Gas accounting**: Mentioned in docs/jet-description.md but not yet implemented
 4. **Many opcodes unimplemented**: SLOAD/SSTORE, LOG*, CREATE/CREATE2, DELEGATECALL, etc.
 5. **Code eviction**: No memory management for compiled contract cache
@@ -511,7 +505,6 @@ The test framework (`tests/roms/mod.rs`) provides:
 
 ### 3. Stack Implementation
 
-- Real stack with optional vstack is more conservative
 - Pure register allocation would be faster but more complex
 - Current approach is easier to verify correctness
 - Stack-machine semantics preserved via runtime builtins instead of SSA register juggling
@@ -536,4 +529,4 @@ The test framework (`tests/roms/mod.rs`) provides:
 
 JET demonstrates a practical approach to JIT compilation of stack-based bytecode, balancing correctness, performance, and implementation complexity. The hybrid stack model, two-pass compilation, and Rust-LLVM integration create a foundation for incremental optimization while maintaining EVM semantics.
 
-The current implementation focuses on a minimal but functional core, with many optimization opportunities (vstack, inlined operations, gas accounting) clearly marked for future development.
+The current implementation focuses on a minimal but functional core, with many optimization opportunities (inlined operations, gas accounting) clearly marked for future development.
