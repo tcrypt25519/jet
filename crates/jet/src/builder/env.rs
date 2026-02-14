@@ -186,11 +186,11 @@ impl<'ctx> Symbols<'ctx> {
     pub(crate) fn exp(&self) -> FunctionValue<'ctx> {
         self.exp
     }
-    
+
     pub(crate) fn addmod(&self) -> FunctionValue<'ctx> {
         self.addmod
     }
-    
+
     pub(crate) fn mulmod(&self) -> FunctionValue<'ctx> {
         self.mulmod
     }

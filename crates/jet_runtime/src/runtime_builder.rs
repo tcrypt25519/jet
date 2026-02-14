@@ -98,7 +98,7 @@ impl<'ctx> RuntimeBuilder<'ctx> {
                 .fn_type(&[self.types.ptr.into(), self.types.ptr.into()], false),
             None,
         );
-        
+
         self.module.add_function(
             "jet.ops.addmod",
             self.types.i8.fn_type(
@@ -112,7 +112,7 @@ impl<'ctx> RuntimeBuilder<'ctx> {
             ),
             None,
         );
-        
+
         self.module.add_function(
             "jet.ops.mulmod",
             self.types.i8.fn_type(

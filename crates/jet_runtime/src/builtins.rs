@@ -260,35 +260,40 @@ fn u256_to_u512(val: bnum::types::U256) -> bnum::types::U512 {
 /// Computes (a + b) % n using 512-bit intermediate arithmetic to prevent overflow.
 /// Note: result and a may point to the same buffer, but this is safe because
 /// all inputs are read into local variables before result is written.
-pub extern "C" fn jet_ops_addmod(result: &mut [u8; 32], a: &[u8; 32], b: &[u8; 32], n: &[u8; 32]) -> i8 {
+pub extern "C" fn jet_ops_addmod(
+    result: &mut [u8; 32],
+    a: &[u8; 32],
+    b: &[u8; 32],
+    n: &[u8; 32],
+) -> i8 {
     // Read all inputs into local variables before writing to result
     let a_u256 = read_u256(a);
     let b_u256 = read_u256(b);
     let n_u256 = read_u256(n);
-    
+
     // EVM spec: if n == 0, return 0
     if n_u256 == bnum::types::U256::ZERO {
         write_u256(result, bnum::types::U256::ZERO);
         return 0;
     }
-    
+
     // Convert to 512-bit for addition without overflow
     let a_u512 = u256_to_u512(a_u256);
     let b_u512 = u256_to_u512(b_u256);
     let n_u512 = u256_to_u512(n_u256);
-    
+
     // Perform addition in 512-bit
     let sum = a_u512 + b_u512;
-    
+
     // Modulo operation
     let mod_result = sum % n_u512;
-    
+
     // Convert back to 256-bit by taking lower 256 bits
     // This is safe because mod_result < n < 2^256
     let digits = mod_result.digits();
     let result_u256 = bnum::types::U256::from_digits([digits[0], digits[1], digits[2], digits[3]]);
     write_u256(result, result_u256);
-    
+
     0
 }
 
@@ -296,35 +301,40 @@ pub extern "C" fn jet_ops_addmod(result: &mut [u8; 32], a: &[u8; 32], b: &[u8; 3
 /// Computes (a * b) % n using 512-bit intermediate arithmetic to prevent overflow.
 /// Note: result and a may point to the same buffer, but this is safe because
 /// all inputs are read into local variables before result is written.
-pub extern "C" fn jet_ops_mulmod(result: &mut [u8; 32], a: &[u8; 32], b: &[u8; 32], n: &[u8; 32]) -> i8 {
+pub extern "C" fn jet_ops_mulmod(
+    result: &mut [u8; 32],
+    a: &[u8; 32],
+    b: &[u8; 32],
+    n: &[u8; 32],
+) -> i8 {
     // Read all inputs into local variables before writing to result
     let a_u256 = read_u256(a);
     let b_u256 = read_u256(b);
     let n_u256 = read_u256(n);
-    
+
     // EVM spec: if n == 0, return 0
     if n_u256 == bnum::types::U256::ZERO {
         write_u256(result, bnum::types::U256::ZERO);
         return 0;
     }
-    
+
     // Convert to 512-bit for multiplication without overflow
     let a_u512 = u256_to_u512(a_u256);
     let b_u512 = u256_to_u512(b_u256);
     let n_u512 = u256_to_u512(n_u256);
-    
+
     // Perform multiplication in 512-bit
     let product = a_u512 * b_u512;
-    
+
     // Modulo operation
     let mod_result = product % n_u512;
-    
+
     // Convert back to 256-bit by taking lower 256 bits
     // This is safe because mod_result < n < 2^256
     let digits = mod_result.digits();
     let result_u256 = bnum::types::U256::from_digits([digits[0], digits[1], digits[2], digits[3]]);
     write_u256(result, result_u256);
-    
+
     0
 }
 
