@@ -1018,14 +1018,7 @@ rom_tests! {
         },
     },
 
-    // SDIV: overflow case
-    // FIXME(bug): EVM spec (docs/ext/evm/05.mdx) requires SDIV overflow (MIN_INT / -1) to return MIN_INT.
-    // MIN_INT is 0x80 followed by 31 zero bytes (0x8000...0000), representing -2^255 in two's complement.
-    // Current implementation incorrectly returns 0x00...0080 (decimal 128) instead of 0x80...00 (MIN_INT).
-    // The SDIV implementation needs overflow handling for the MIN_INT / -1 edge case.
-    // This test is commented out because the implementation doesn't handle overflow correctly.
-    // Uncomment once the SDIV implementation is fixed to handle this overflow case per EVM spec.
-    /*
+    // SDIV: overflow case — MIN_INT / -1 must return MIN_INT per EVM spec
     sdiv_overflow: Test {
         roms: vec![bytecode![
             PUSH32!(
@@ -1045,14 +1038,15 @@ rom_tests! {
         expected: TestContractRun {
             stack_ptr: 1,
             stack: vec![{
+                // Stack words are stored little-endian (LSB at index 0).
+                // MIN_INT256 = 2^255, whose most-significant byte (0x80) is at index 31.
                 let mut w = [0x00_u8; 32];
-                w[0] = 0x80;
+                w[31] = 0x80;
                 w
             }],
             ..Default::default()
         },
     },
-    */
 
     // === Arithmetic Operations: SMOD (Signed Modulo) ===
 
@@ -1070,12 +1064,7 @@ rom_tests! {
         },
     },
 
-    // SMOD: modulo by zero behavior (implementation-specific)
-    // FIXME(bug): EVM spec (docs/ext/evm/07.mdx) requires SMOD with divisor=0 to return 0.
-    // Current implementation incorrectly returns the dividend unchanged.
-    // This test is commented out because it tests buggy behavior instead of EVM spec compliance.
-    // Uncomment and update expected to stack_word(&[0x00]) once the bug is fixed.
-    /*
+    // SMOD: divisor = 0 must return 0 per EVM spec
     smod_by_zero: Test {
         roms: vec![bytecode![
             PUSH1!(0x00),
@@ -1084,11 +1073,10 @@ rom_tests! {
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
-            stack: vec![stack_word(&[0x0A])],
+            stack: vec![stack_word(&[0x00])],
             ..Default::default()
         },
     },
-    */
 
     // SMOD: negative dividend
     smod_negative_dividend: Test {
@@ -1145,12 +1133,7 @@ rom_tests! {
         },
     },
 
-    // ADDMOD: modulo by zero behavior (implementation-specific)
-    // FIXME(bug): EVM spec (docs/ext/evm/08.mdx) requires ADDMOD with denominator=0 to return 0.
-    // Current implementation incorrectly returns the sum unchanged.
-    // This test is commented out because it tests buggy behavior instead of EVM spec compliance.
-    // Uncomment and update expected to stack_word(&[0x00]) once the bug is fixed.
-    /*
+    // ADDMOD: N = 0 must return 0 per EVM spec
     addmod_by_zero: Test {
         roms: vec![bytecode![
             PUSH1!(0x00),
@@ -1160,11 +1143,10 @@ rom_tests! {
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
-            stack: vec![stack_word(&[0x08])],
+            stack: vec![stack_word(&[0x00])],
             ..Default::default()
         },
     },
-    */
 
     // ADDMOD: large values
     addmod_large_values: Test {
@@ -1218,12 +1200,7 @@ rom_tests! {
         },
     },
 
-    // MULMOD: modulo by zero behavior (implementation-specific)
-    // FIXME(bug): EVM spec (docs/ext/evm/09.mdx) requires MULMOD with denominator=0 to return 0.
-    // Current implementation incorrectly returns the product unchanged.
-    // This test is commented out because it tests buggy behavior instead of EVM spec compliance.
-    // Uncomment and update expected to stack_word(&[0x00]) once the bug is fixed.
-    /*
+    // MULMOD: N = 0 must return 0 per EVM spec
     mulmod_by_zero: Test {
         roms: vec![bytecode![
             PUSH1!(0x00),
@@ -1233,11 +1210,10 @@ rom_tests! {
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
-            stack: vec![stack_word(&[0x0F])],
+            stack: vec![stack_word(&[0x00])],
             ..Default::default()
         },
     },
-    */
 
     // MULMOD: large values
     mulmod_large_values: Test {
