@@ -923,7 +923,25 @@ fn call_stack_pop<'ctx>(bctx: &BuildCtx<'ctx, '_>) -> Result<PointerValue<'ctx>,
         &[bctx.registers.exec_ctx.into()],
         "word_ptr",
     )?;
-    Ok(call_return_to_ptr(ret))
+    let ptr = call_return_to_ptr(ret);
+    
+    // Check if stack underflow occurred (null pointer returned)
+    let is_null = bctx.builder.build_is_null(ptr, "is_stack_underflow")?;
+    
+    // Create basic blocks for handling null/non-null cases
+    let underflow_block = bctx.env.context().append_basic_block(bctx.func, "stack_underflow");
+    let valid_block = bctx.env.context().append_basic_block(bctx.func, "stack_valid");
+    
+    bctx.builder.build_conditional_branch(is_null, underflow_block, valid_block)?;
+    
+    // In underflow block, return with StackUnderflow error
+    bctx.builder.position_at_end(underflow_block);
+    build_return(bctx, ReturnCode::StackUnderflow)?;
+    
+    // Continue in valid block
+    bctx.builder.position_at_end(valid_block);
+    
+    Ok(ptr)
 }
 
 fn call_stack_peek<'ctx>(

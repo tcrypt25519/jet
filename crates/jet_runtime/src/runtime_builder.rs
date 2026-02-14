@@ -300,6 +300,32 @@ impl<'ctx> RuntimeBuilder<'ctx> {
             .unwrap()
             .into_int_value();
 
+        // Bounds check: ensure stack_ptr > 0 before popping
+        let is_underflow = self
+            .builder
+            .build_int_compare(
+                inkwell::IntPredicate::EQ,
+                stack_ptr,
+                self.types.i32.const_zero(),
+                "is_underflow",
+            )
+            .unwrap();
+
+        let underflow_block = self.context.append_basic_block(function, "underflow");
+        let valid_block = self.context.append_basic_block(function, "valid");
+
+        self.builder
+            .build_conditional_branch(is_underflow, underflow_block, valid_block)
+            .unwrap();
+
+        // Underflow case: return null pointer
+        self.builder.position_at_end(underflow_block);
+        let null_ptr = self.types.ptr.const_null();
+        self.builder.build_return(Some(&null_ptr)).unwrap();
+
+        // Valid case: proceed with pop
+        self.builder.position_at_end(valid_block);
+
         // Decrement stack pointer
         let stack_ptr_prev = self
             .builder
