@@ -8,7 +8,7 @@ use jet::{
     engine,
     engine::Engine,
 };
-use jet_runtime::{self, exec, exec::ReturnCode};
+use jet_runtime::{self, Address, exec, exec::ReturnCode};
 
 #[derive(Error, Debug)]
 #[error(transparent)]
@@ -100,16 +100,13 @@ pub(crate) fn _test_rom_body(t: Test) -> Result<(), Error> {
 
     assert_ne!(t.roms.len(), 0);
     for (i, rom) in t.roms.iter().enumerate() {
-        let mut addr_bytes = vec![0u8; jet_runtime::ADDRESS_SIZE_BYTES];
-        addr_bytes[jet_runtime::ADDRESS_SIZE_BYTES - 1] = i as u8;
-        let prefixed_addr = format!("0x{}", hex::encode(&addr_bytes));
-        trace!("Building contract at address {}", prefixed_addr);
-        engine.build_contract(prefixed_addr.as_str(), rom.as_slice())?;
+        let mut addr = Address::ZERO;
+        addr.as_bytes_mut()[Address::LEN - 1] = i as u8;
+        trace!("Building contract at address {}", addr);
+        engine.build_contract(addr, rom.as_slice())?;
     }
 
-    let entry_addr_bytes = vec![0u8; jet_runtime::ADDRESS_SIZE_BYTES];
-    let entry_addr = format!("0x{}", hex::encode(&entry_addr_bytes));
-    let run = engine.run_contract(entry_addr.as_str(), &block_info)?;
+    let run = engine.run_contract(Address::ZERO, &block_info)?;
     t.expected.assert_eq(&run);
 
     Ok(())
@@ -127,7 +124,7 @@ fn new_test_block_info() -> exec::BlockInfo {
         25, 26, 27, 28, 29, 30, 31,
     ];
     let hash_history = new_test_block_info_hash_history();
-    let coinbase = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let coinbase = Address::new([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     exec::BlockInfo::new(
         42,
         100,

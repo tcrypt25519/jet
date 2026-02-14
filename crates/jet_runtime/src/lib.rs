@@ -1,3 +1,4 @@
+pub mod address;
 pub mod binding;
 pub mod builtins;
 pub mod error;
@@ -8,6 +9,7 @@ pub mod symbols;
 #[cfg(test)]
 mod layout_tests;
 
+pub use address::Address;
 pub use error::{Result, RuntimeError};
 pub use jet_ir::*;
 pub use runtime_builder::RuntimeBuilder;
