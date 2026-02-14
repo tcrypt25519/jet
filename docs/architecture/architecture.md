@@ -3,19 +3,22 @@
 ## Table of Contents
 
 1. [Project Overview](#project-overview)
-2. [System Architecture](#system-architecture)
-3. [Core Components](#core-components)
-4. [The Stack Machine to Register Machine Translation](#the-stack-machine-to-register-machine-translation)
-5. [Compilation Pipeline](#compilation-pipeline)
-6. [Memory Model](#memory-model)
-7. [Control Flow and Jump Tables](#control-flow-and-jump-tables)
-8. [Runtime Function Architecture](#runtime-function-architecture)
-9. [Symbol Management and Linking](#symbol-management-and-linking)
-10. [Code Organization](#code-organization)
-11. [Implementation Patterns](#implementation-patterns)
-12. [Testing Strategy](#testing-strategy)
-13. [Known Limitations and Future Work](#known-limitations-and-future-work)
-14. [Quick Reference](#quick-reference)
+2. [History and Genesis](#history-and-genesis)
+3. [Design Motivation: The MEV Use Case](#design-motivation-the-mev-use-case)
+4. [System Architecture](#system-architecture)
+5. [Core Components](#core-components)
+6. [The Stack Machine to Register Machine Translation](#the-stack-machine-to-register-machine-translation)
+7. [Compilation Pipeline](#compilation-pipeline)
+8. [Memory Model](#memory-model)
+9. [Control Flow and Jump Tables](#control-flow-and-jump-tables)
+10. [Runtime Function Architecture](#runtime-function-architecture)
+11. [Symbol Management and Linking](#symbol-management-and-linking)
+12. [Code Organization](#code-organization)
+13. [File-by-File Summary](#file-by-file-summary)
+14. [Implementation Patterns](#implementation-patterns)
+15. [Testing Strategy](#testing-strategy)
+16. [Known Limitations and Future Work](#known-limitations-and-future-work)
+17. [Quick Reference](#quick-reference)
 
 ---
 
@@ -40,6 +43,26 @@ The system compiles Ethereum Virtual Machine (EVM) bytecode into LLVM IR and the
 - **LLVM Version**: 18.0
 - **LLVM Bindings**: `inkwell` crate
 - **Target**: ORC (On-Request Compilation) JIT
+
+---
+
+## History and Genesis
+
+The project originated in 2020 at Ava Labs, where the initial concept was to build a native-machine smart contract platform that went beyond EVM optimization to rethink the execution substrate entirely.
+
+After the internal project was discontinued due to organizational changes, the concept was reimplemented from scratch in Rust. This clean-room rewrite served multiple purposes: learning Rust, ensuring complete IP provenance clarity, and signaling a fresh implementation with no connection to prior internal work. The Rust implementation also proved well-suited to the problem domain, with explicit ownership semantics for JIT lifetimes and intentional use of unsafe code around executable memory.
+
+The project was renamed to "Jet," a name that naturally captures the "EVM in a JIT" concept while suggesting speed and providing short, composable naming for components like JetBuilder (IR construction) and JetEngine (ORC instantiation and execution).
+
+---
+
+## Design Motivation: The MEV Use Case
+
+A key insight driving the project came from observing MEV (Maximal Extractable Value) operations. MEV searchers commonly instantiate a local EVM to simulate contract executions—for example, calculating Uniswap trade outcomes by crafting transactions that call relevant pool functions and executing them locally.
+
+The standard objection to EVM JIT compilation—that I/O bottlenecks in state management dominate execution time—doesn't apply in this context. MEV searchers load all relevant state data into memory once, then execute the same functions thousands of times over in-memory data. This scenario is the ideal use case for JIT compilation: amortizing compilation costs over many executions with warm data.
+
+This extends to a broader architectural pattern: contracts could be lowered directly to shared libraries that any program could link against. For instance, Uniswap utility contracts could be compiled to native code libraries, allowing direct programmatic access to their functionality without EVM overhead.
 
 ---
 
@@ -110,6 +133,14 @@ jet/
 └── runtime-ir/
     └── jet.ll                  # LLVM IR runtime declarations
 ```
+
+### Tiered Compilation Strategy
+
+Jet employs compilation at two levels:
+
+**EVM to LLVM IR Phase**: A mixture of eager and lazy compilation. The system can analyze contract execution frequency to determine compilation priorities. Contracts can be identified as frequently-executed by examining their deployment code—Solidity's optimizer makes size-versus-execution-frequency tradeoffs that signal expected usage patterns. Popular contracts can be pre-compiled during initialization.
+
+**IR to Native Machine Code Phase**: ORC not only performs initial compilation but can actively analyze executing code and recompile with different optimizations. The database stores LLVM IR rather than machine code, making it portable across architectures—the same compiled IR can be moved between systems and will lower to the appropriate machine code at runtime.
 
 ---
 
@@ -436,6 +467,10 @@ fn run_contract(&self, addr, block_info) -> ContractRun {
     ContractRun::new(result, ctx)
 }
 ```
+
+### Gas Accounting
+
+Gas accounting is designed but not yet implemented. The intended approach exploits LLVM's basic block structure: since a basic block either executes completely or not at all, gas costs can be amortized across the entire block. Many contracts have infrequent jumps, resulting in large basic blocks where gas accounting reduces to a single addition at the block's end. Instructions with dynamic gas costs require additional logic only when needed.
 
 ---
 
@@ -781,6 +816,91 @@ Contract symbols are mangled with `jet.contracts.` prefix and the address string
 
 ---
 
+## File-by-File Summary
+
+### `jet/src/lib.rs`
+- Module structure declaration
+- Enables `allocator_api` feature
+
+### `jet/src/instructions.rs`
+- Macro-based EVM opcode enum definition (`instruction!` macro)
+- Implements `TryFrom<u8>`, `Display`, `opcode()` methods
+- Custom `Iterator` that handles PUSH data bytes
+- Converts PUSH data from big-endian to little-endian (bytes reversed)
+
+### `jet/src/builder/mod.rs`
+- Error enum for build failures
+- Module declarations
+
+### `jet/src/builder/contract.rs`
+- **`Registers`**: Caches pointers into exec_ctx (jump_ptr, return_offset, return_length, sub_call)
+- **`BuildCtx`**: Wraps Env, Builder, current function, and Registers
+- **`CodeBlock`**: Represents a basic block with offset, ROM slice, flags
+- **`CodeBlocks`**: Collection of CodeBlocks with helper methods
+- **`build()`**: Main entry point - creates function, discovers blocks, generates IR
+- **`find_code_blocks()`**: First pass - discovers basic block boundaries
+- **`build_contract_body()`**: Second pass - generates IR for all blocks
+- **`build_code_block()`**: Generates IR for a single block
+- **`build_jump_table()`**: Creates the switch statement for dynamic jumps
+
+### `jet/src/builder/env.rs`
+- **`Options`**: Build configuration (mode Debug/Release, emit_llvm, assert)
+- **`Types`**: All LLVM type definitions (i8/i32/i64/i160/i256, ptr, word_bytes, stack, mem, exec_ctx)
+- **`Symbols`**: Runtime function lookups, mapped to `jet_runtime::symbols`
+- **`Env`**: Wraps context, module, types, symbols
+
+### `jet/src/builder/ops.rs`
+- Implementations for each EVM opcode
+- Helper functions for stack operations (`stack_pop_1/2/3/7`, `stack_push_int`, `call_stack_push_i256`)
+- **Pattern**: Pop inputs → Load values → LLVM operation → Push result
+- Many opcodes return `Error::UnimplementedInstruction`
+
+### `jet/src/builder/manager.rs`
+- **`Manager`**: Wraps Env and adds functions per contract address
+- Builds contract, optionally prints IR via syntect, and verifies
+
+### `jet/src/engine/mod.rs`
+- **`Engine`**: Wraps Manager, handles compilation and execution
+- Loads runtime IR module from `runtime-ir/jet.ll`
+- Creates JIT execution engine
+- Links Rust runtime functions at JIT time via `add_global_mapping`
+- Executes contracts and returns `ContractRun`
+
+### `jet_runtime/src/lib.rs`
+- System constants (word size, stack size, memory size)
+
+### `jet_runtime/src/exec.rs`
+- **`Word`**: 32-byte array type alias (`[u8; 32]`)
+- **`Context`**: Execution context struct with stack, memory, registers
+- **`BlockInfo`**: EVM block metadata struct (hash, coinbase, etc)
+- **`ReturnCode`**: Enum for execution results (encodes EVM and Jet-level success/failure)
+- **`ContractRun`**: Wraps result and context
+- **`ContractFunc`**: Function pointer type for compiled contracts
+- Stack operations: push Word, pop/peek/swap logic
+
+### `jet_runtime/src/builtins.rs`
+- Unsafe `extern "C"` functions callable from LLVM IR
+- Stack operations, memory operations, contract calls
+- Keccak256 implementation using sha3 crate
+- `mem_store`, `mem_load`, `mem_store_byte` operate on Context memory slice
+
+### `jet_runtime/src/symbols.rs`
+- String constants for all symbol names
+- Used for consistent linking between Rust and LLVM
+- Contract symbols prefixed with "jet.contracts."
+
+### `jet_runtime/src/binding.rs`
+- Display implementations for debugging
+
+### `runtime-ir/jet.ll`
+- LLVM IR file with type definitions and function declarations
+- Contains `@jet.stack.push.i256` implementation (IR-based)
+- Loaded at startup to provide runtime function signatures
+- Uses macOS x86_64 target triple and datalayout (portability issue; see Known Limitations)
+- Declares exec_ctx layout in LLVM IR
+
+---
+
 ## Implementation Patterns
 
 ### Standard Opcode Implementation
@@ -900,13 +1020,14 @@ Several opcode families are stubbed:
 ### Known TODOs and Constraints
 
 1. **Memory bounds checking**: Incomplete in runtime functions (bounds checks are TODOs)
-3. **Gas accounting**: Not implemented
-4. **Code eviction**: No memory management for compiled contracts
-5. **Error handling**: Some panics need conversion to Results
-6. **Runtime IR target triple**: macOS x86_64; host mismatch is likely
-7. **Symbol naming inconsistencies**: Between runtime IR and symbols (e.g., push.word vs push.i256)
-8. **Address size**: Currently 2 bytes, not 20 bytes
-9. **Struct layout alignment**: Requires careful alignment between Rust structs and LLVM types
+2. **Gas accounting**: Not implemented
+3. **Code eviction**: No memory management for compiled contracts
+4. **Error handling**: Some panics need conversion to Results
+5. **Runtime IR target triple**: macOS x86_64; host mismatch is likely
+6. **Symbol naming inconsistencies**: `runtime-ir/jet.ll` declares `jet.stack.push.word`, but symbols expect `jet.stack.push.i256`
+7. **Struct layout alignment**: Runtime IR exec_ctx layout differs from Env::Types (memory struct vs inlined memory array) and from exec::Context (memory size). Requires investigation.
+8. **Address size**: Currently `ADDRESS_SIZE_BYTES = 2` in tests; EVM addresses are 20 bytes
+9. **JUMPI type mismatch**: Condition uses `load_i64` but compares with i256 zero
 
 ### Design Decisions and Trade-offs
 
@@ -934,13 +1055,11 @@ Several opcode families are stubbed:
 4. **Shared library extraction**: Compile contracts to standalone `.so`/`.dll` files
 5. **Add memory length/capacity tracking**: And bounds checks
 6. **Expand opcode coverage**: With a test-first approach
+7. **Shared IR layer (`jet_ir` crate)**: A planned refactoring would extract a shared `jet_ir` crate providing unified LLVM types and constants used by both the builder and runtime, eliminating layout drift between the two.
 
 ### Suggested Next Steps
 
-1. Reconcile struct layouts and symbol names between:
-   - `exec::Context`
-   - `builder::env::Types`
-   - `runtime-ir/jet.ll`
+1. Reconcile struct layouts and symbol names between `exec::Context`, `builder::env::Types`, and `runtime-ir/jet.ll`
 2. Add memory length/capacity tracking and bounds checks
 3. Expand opcode coverage with a test-first approach
 
