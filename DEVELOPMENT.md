@@ -140,8 +140,8 @@ The CI pipeline runs on GitHub Actions as a single sequential job with the follo
 5. **Set LLVM environment variables** - Configures LLVM_SYS_211_PREFIX
 6. **Cache Rust build artifacts** - Uses Swatinem/rust-cache
 7. **Install Rust stable** - With rustfmt and clippy components
-8. **Apply formatting fixes** - `cargo fmt --all` (auto-fixes code)
-9. **Commit formatting fixes** - Commits formatting changes if any (conditional)
+8. **Apply formatting fixes** - `cargo fmt --all`
+9. **Commit formatting fixes** - Automatically commits and pushes formatting changes (conditional)
 10. **Run clippy** - `cargo clippy --all-targets --all-features -- -D warnings`
 11. **Install cargo-nextest** - Test runner
 12. **Check all targets** - `cargo check --all-targets --all-features`
@@ -155,7 +155,7 @@ The CI pipeline runs on GitHub Actions as a single sequential job with the follo
 - **Smart caching**: Uses `Swatinem/rust-cache` for optimized Rust artifact caching and LLVM binary caching
 - **LLVM Setup**: Automatically installs and caches LLVM 21 using project scripts
 - **Strict Mode**: Warnings are treated as errors (`-D warnings`)
-- **Auto-formatting**: Automatically applies formatting fixes and commits them on push/PR
+- **Auto-formatting**: Automatically applies formatting fixes and pushes them back to the branch on push/PR
 
 ## Configuration Files
 
