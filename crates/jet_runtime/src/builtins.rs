@@ -233,6 +233,111 @@ pub extern "C" fn jet_ops_exp(base: &mut [u8; 32], exp: &[u8; 32]) -> i8 {
     0
 }
 
+// Helper functions for U256/U512 conversions shared by ADDMOD and MULMOD
+fn read_u256(bytes: &[u8; 32]) -> bnum::types::U256 {
+    bnum::types::U256::from_digits([
+        u64::from_le_bytes(bytes[0..8].try_into().unwrap()),
+        u64::from_le_bytes(bytes[8..16].try_into().unwrap()),
+        u64::from_le_bytes(bytes[16..24].try_into().unwrap()),
+        u64::from_le_bytes(bytes[24..32].try_into().unwrap()),
+    ])
+}
+
+fn write_u256(bytes: &mut [u8; 32], val: bnum::types::U256) {
+    let d = val.digits();
+    bytes[0..8].copy_from_slice(&d[0].to_le_bytes());
+    bytes[8..16].copy_from_slice(&d[1].to_le_bytes());
+    bytes[16..24].copy_from_slice(&d[2].to_le_bytes());
+    bytes[24..32].copy_from_slice(&d[3].to_le_bytes());
+}
+
+fn u256_to_u512(val: bnum::types::U256) -> bnum::types::U512 {
+    let d = val.digits();
+    bnum::types::U512::from_digits([d[0], d[1], d[2], d[3], 0, 0, 0, 0])
+}
+
+/// ADDMOD with 512-bit precision as required by EVM spec.
+/// Computes (a + b) % n using 512-bit intermediate arithmetic to prevent overflow.
+/// Note: result and a may point to the same buffer, but this is safe because
+/// all inputs are read into local variables before result is written.
+pub extern "C" fn jet_ops_addmod(
+    result: &mut [u8; 32],
+    a: &[u8; 32],
+    b: &[u8; 32],
+    n: &[u8; 32],
+) -> i8 {
+    // Read all inputs into local variables before writing to result
+    let a_u256 = read_u256(a);
+    let b_u256 = read_u256(b);
+    let n_u256 = read_u256(n);
+
+    // EVM spec: if n == 0, return 0
+    if n_u256 == bnum::types::U256::ZERO {
+        write_u256(result, bnum::types::U256::ZERO);
+        return 0;
+    }
+
+    // Convert to 512-bit for addition without overflow
+    let a_u512 = u256_to_u512(a_u256);
+    let b_u512 = u256_to_u512(b_u256);
+    let n_u512 = u256_to_u512(n_u256);
+
+    // Perform addition in 512-bit
+    let sum = a_u512 + b_u512;
+
+    // Modulo operation
+    let mod_result = sum % n_u512;
+
+    // Convert back to 256-bit by taking lower 256 bits
+    // This is safe because mod_result < n < 2^256
+    let digits = mod_result.digits();
+    let result_u256 = bnum::types::U256::from_digits([digits[0], digits[1], digits[2], digits[3]]);
+    write_u256(result, result_u256);
+
+    0
+}
+
+/// MULMOD with 512-bit precision as required by EVM spec.
+/// Computes (a * b) % n using 512-bit intermediate arithmetic to prevent overflow.
+/// Note: result and a may point to the same buffer, but this is safe because
+/// all inputs are read into local variables before result is written.
+pub extern "C" fn jet_ops_mulmod(
+    result: &mut [u8; 32],
+    a: &[u8; 32],
+    b: &[u8; 32],
+    n: &[u8; 32],
+) -> i8 {
+    // Read all inputs into local variables before writing to result
+    let a_u256 = read_u256(a);
+    let b_u256 = read_u256(b);
+    let n_u256 = read_u256(n);
+
+    // EVM spec: if n == 0, return 0
+    if n_u256 == bnum::types::U256::ZERO {
+        write_u256(result, bnum::types::U256::ZERO);
+        return 0;
+    }
+
+    // Convert to 512-bit for multiplication without overflow
+    let a_u512 = u256_to_u512(a_u256);
+    let b_u512 = u256_to_u512(b_u256);
+    let n_u512 = u256_to_u512(n_u256);
+
+    // Perform multiplication in 512-bit
+    let product = a_u512 * b_u512;
+
+    // Modulo operation
+    let mod_result = product % n_u512;
+
+    // Convert back to 256-bit by taking lower 256 bits
+    // This is safe because mod_result < n < 2^256
+    let digits = mod_result.digits();
+    let result_u256 = bnum::types::U256::from_digits([digits[0], digits[1], digits[2], digits[3]]);
+    write_u256(result, result_u256);
+
+    0
+}
+
 pub extern "C" fn jet_ops_keccak256(buffer: &mut [u8; 32]) -> u8 {
     // Hash the bytes
     use sha3::{Digest, Keccak256};

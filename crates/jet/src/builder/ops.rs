@@ -248,47 +248,33 @@ pub(crate) fn smod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
 }
 
 pub(crate) fn addmod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b, n) = stack_pop_3(bctx)?;
-    let a = load_i256(bctx, a)?;
-    let b = load_i256(bctx, b)?;
-    let n = load_i256(bctx, n)?;
+    let (a, b, c) = stack_pop_3(bctx)?;
 
-    let zero = bctx.env.types().i256.const_zero();
-    // EVM spec: if N == 0 the result is 0
-    let n_is_zero =
-        bctx.builder
-            .build_int_compare(inkwell::IntPredicate::EQ, n, zero, "addmod_n_is_zero")?;
-    build_zero_guard(bctx, n_is_zero, "addmod", |cont| {
-        let sum = bctx.builder.build_int_add(a, b, "addmod_sum")?;
-        let result = bctx
-            .builder
-            .build_int_unsigned_rem(sum, n, "addmod_result")?;
-        stack_push_int(bctx, result)?;
-        bctx.builder.build_unconditional_branch(cont)?;
-        Ok(())
-    })
+    // Call 512-bit addmod builtin, reusing `a` as the result buffer
+    bctx.builder.build_call(
+        bctx.env.symbols().addmod(),
+        &[a.into(), a.into(), b.into(), c.into()],
+        "addmod_call",
+    )?;
+
+    // Push result back onto stack (reusing the `a` buffer which now contains the result)
+    call_stack_push_ptr(bctx, a)?;
+    Ok(())
 }
 
 pub(crate) fn mulmod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b, n) = stack_pop_3(bctx)?;
-    let a = load_i256(bctx, a)?;
-    let b = load_i256(bctx, b)?;
-    let n = load_i256(bctx, n)?;
+    let (a, b, c) = stack_pop_3(bctx)?;
 
-    let zero = bctx.env.types().i256.const_zero();
-    // EVM spec: if N == 0 the result is 0
-    let n_is_zero =
-        bctx.builder
-            .build_int_compare(inkwell::IntPredicate::EQ, n, zero, "mulmod_n_is_zero")?;
-    build_zero_guard(bctx, n_is_zero, "mulmod", |cont| {
-        let product = bctx.builder.build_int_mul(a, b, "mulmod_product")?;
-        let result = bctx
-            .builder
-            .build_int_unsigned_rem(product, n, "mulmod_result")?;
-        stack_push_int(bctx, result)?;
-        bctx.builder.build_unconditional_branch(cont)?;
-        Ok(())
-    })
+    // Call 512-bit mulmod builtin, reusing `a` as the result buffer
+    bctx.builder.build_call(
+        bctx.env.symbols().mulmod(),
+        &[a.into(), a.into(), b.into(), c.into()],
+        "mulmod_call",
+    )?;
+
+    // Push result back onto stack (reusing the `a` buffer which now contains the result)
+    call_stack_push_ptr(bctx, a)?;
+    Ok(())
 }
 
 pub(crate) fn exp(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
@@ -693,14 +679,16 @@ pub(crate) fn mload(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     let size = bctx.env.types().i32.const_int(32, false);
     call_mem_expand_checked(bctx, loc_i32, size, "mload")?;
 
-    let mem_ptr = bctx.builder.build_call(
+    let mem_value = bctx.builder.build_call(
         bctx.env.symbols().mem_load(),
         &[bctx.registers.exec_ctx.into(), loc.into()],
         "mload",
     )?;
 
-    let mem_ptr = unsafe { PointerValue::new(mem_ptr.as_value_ref()) };
-    stack_push_ptr(bctx, mem_ptr)?;
+    // mem_load returns the i256 value directly (not a pointer), preventing
+    // UAF when memory is reallocated.
+    let value = unsafe { IntValue::new(mem_value.as_value_ref()) };
+    call_stack_push_i256(bctx, value)?;
 
     Ok(())
 }
@@ -923,7 +911,32 @@ fn call_stack_pop<'ctx>(bctx: &BuildCtx<'ctx, '_>) -> Result<PointerValue<'ctx>,
         &[bctx.registers.exec_ctx.into()],
         "word_ptr",
     )?;
-    Ok(call_return_to_ptr(ret))
+    let ptr = call_return_to_ptr(ret);
+
+    // Check if stack underflow occurred (null pointer returned)
+    let is_null = bctx.builder.build_is_null(ptr, "is_stack_underflow")?;
+
+    // Create basic blocks for handling null/non-null cases
+    let underflow_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "stack_underflow");
+    let valid_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "stack_valid");
+
+    bctx.builder
+        .build_conditional_branch(is_null, underflow_block, valid_block)?;
+
+    // In underflow block, return with StackUnderflow error
+    bctx.builder.position_at_end(underflow_block);
+    build_return(bctx, ReturnCode::StackUnderflow)?;
+
+    // Continue in valid block
+    bctx.builder.position_at_end(valid_block);
+
+    Ok(ptr)
 }
 
 fn call_stack_peek<'ctx>(
