@@ -179,9 +179,11 @@ function find_code_blocks(bytecode):
 1. **Instruction Iterator:** `instructions::Iter` handles PUSH data automatically, yielding `IterItem::PushData` for PUSH instructions and `IterItem::Instr` for all others.
 
 2. **Block Lifecycle:**
-   - A block is "open" when `current_block.rom` is empty.
-   - A block is "closed" when its `rom` slice is assigned.
-   - Once closed, a new block is immediately opened for the next bytecode.
+   - A block is "open" from creation until its `rom` slice is assigned.
+   - A block is "closed" when its `rom` slice is assigned (even if the assigned slice is empty for zero-length blocks).
+   - The implementation checks `current_block.rom.is_empty()` to determine whether to assign the slice, but this check serves to prevent reassignment rather than indicate open/closed state.
+   - Zero-length blocks (e.g., consecutive JUMPDESTs) will have empty `rom` slices after being closed.
+   - Once a block's rom is assigned, a new block is immediately opened for the next bytecode.
 
 3. **JUMPDEST Handling:**
    - JUMPDEST closes the current block at `offset..pc` (not including the JUMPDEST byte).
