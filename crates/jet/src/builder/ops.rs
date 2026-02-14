@@ -248,47 +248,37 @@ pub(crate) fn smod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
 }
 
 pub(crate) fn addmod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b, n) = stack_pop_3(bctx)?;
-    let a = load_i256(bctx, a)?;
-    let b = load_i256(bctx, b)?;
-    let n = load_i256(bctx, n)?;
+    let (a, b, c) = stack_pop_3(bctx)?;
 
-    let zero = bctx.env.types().i256.const_zero();
-    // EVM spec: if N == 0 the result is 0
-    let n_is_zero =
-        bctx.builder
-            .build_int_compare(inkwell::IntPredicate::EQ, n, zero, "addmod_n_is_zero")?;
-    build_zero_guard(bctx, n_is_zero, "addmod", |cont| {
-        let sum = bctx.builder.build_int_add(a, b, "addmod_sum")?;
-        let result = bctx
-            .builder
-            .build_int_unsigned_rem(sum, n, "addmod_result")?;
-        stack_push_int(bctx, result)?;
-        bctx.builder.build_unconditional_branch(cont)?;
-        Ok(())
-    })
+    // Allocate result buffer on stack
+    let result_alloca = bctx.builder.build_alloca(bctx.env.types().word_bytes, "addmod_result")?;
+
+    // Call 512-bit addmod builtin for EVM-compliant overflow-safe arithmetic
+    bctx.builder.build_call(
+        bctx.env.symbols().addmod(),
+        &[result_alloca.into(), a.into(), b.into(), c.into()],
+        "addmod_call",
+    )?;
+
+    stack_push_ptr(bctx, result_alloca)?;
+    Ok(())
 }
 
 pub(crate) fn mulmod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b, n) = stack_pop_3(bctx)?;
-    let a = load_i256(bctx, a)?;
-    let b = load_i256(bctx, b)?;
-    let n = load_i256(bctx, n)?;
+    let (a, b, c) = stack_pop_3(bctx)?;
 
-    let zero = bctx.env.types().i256.const_zero();
-    // EVM spec: if N == 0 the result is 0
-    let n_is_zero =
-        bctx.builder
-            .build_int_compare(inkwell::IntPredicate::EQ, n, zero, "mulmod_n_is_zero")?;
-    build_zero_guard(bctx, n_is_zero, "mulmod", |cont| {
-        let product = bctx.builder.build_int_mul(a, b, "mulmod_product")?;
-        let result = bctx
-            .builder
-            .build_int_unsigned_rem(product, n, "mulmod_result")?;
-        stack_push_int(bctx, result)?;
-        bctx.builder.build_unconditional_branch(cont)?;
-        Ok(())
-    })
+    // Allocate result buffer on stack
+    let result_alloca = bctx.builder.build_alloca(bctx.env.types().word_bytes, "mulmod_result")?;
+
+    // Call 512-bit mulmod builtin for EVM-compliant overflow-safe arithmetic
+    bctx.builder.build_call(
+        bctx.env.symbols().mulmod(),
+        &[result_alloca.into(), a.into(), b.into(), c.into()],
+        "mulmod_call",
+    )?;
+
+    stack_push_ptr(bctx, result_alloca)?;
+    Ok(())
 }
 
 pub(crate) fn exp(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {

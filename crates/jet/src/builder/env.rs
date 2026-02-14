@@ -77,6 +77,8 @@ pub(crate) struct Symbols<'ctx> {
 
     keccak256: FunctionValue<'ctx>,
     exp: FunctionValue<'ctx>,
+    addmod: FunctionValue<'ctx>,
+    mulmod: FunctionValue<'ctx>,
 }
 
 impl<'ctx> Symbols<'ctx> {
@@ -101,6 +103,8 @@ impl<'ctx> Symbols<'ctx> {
 
         let keccak256 = module.get_function(jet_runtime::symbols::FN_KECCAK256)?;
         let exp = module.get_function(jet_runtime::symbols::FN_EXP)?;
+        let addmod = module.get_function(jet_runtime::symbols::FN_ADDMOD)?;
+        let mulmod = module.get_function(jet_runtime::symbols::FN_MULMOD)?;
 
         Some(Self {
             jit_engine,
@@ -122,6 +126,8 @@ impl<'ctx> Symbols<'ctx> {
 
             keccak256,
             exp,
+            addmod,
+            mulmod,
         })
     }
 
@@ -179,6 +185,14 @@ impl<'ctx> Symbols<'ctx> {
 
     pub(crate) fn exp(&self) -> FunctionValue<'ctx> {
         self.exp
+    }
+    
+    pub(crate) fn addmod(&self) -> FunctionValue<'ctx> {
+        self.addmod
+    }
+    
+    pub(crate) fn mulmod(&self) -> FunctionValue<'ctx> {
+        self.mulmod
     }
 }
 
