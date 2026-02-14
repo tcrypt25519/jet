@@ -23,16 +23,10 @@ macro_rules! rom_tests {
     ($($name:ident: $test:expr),* $(,)?) => {
         $(
             paste::item! {
-                // #[test]
-                // fn [<test_rom_with_vstack_ $name>]() -> Result<(), Error> {
-                //     let t: Test = $test;
-                //     _test_rom_body(t, true)
-                // }
-
                 #[test]
                 fn [<test_rom_with_real_stack_ $name>]() -> Result<(), Error> {
                     let t: Test = $test;
-                    _test_rom_body(t, false)
+                    _test_rom_body(t)
                 }
             }
         )*
@@ -77,20 +71,11 @@ impl TestContractRun {
         assert_eq_named!("return_len", ctx.return_len(), self.return_length);
         assert_eq_named!("stack_len", ctx.stack_ptr(), self.stack.len() as u32);
 
-        // let actual_stack = ctx.stack();
         assert_eq_named!(
             "stack",
             &ctx.stack()[..self.stack.len()],
             self.stack.as_slice()
         );
-        // for (i, expected_word) in self.stack.iter().enumerate() {
-        //     // let idx = i * 32;
-        //     // let mut actual_word: Word = [0; 32];
-        //     // actual_word[..].copy_from_slice(actual_stack[i]);
-        //     // assert_eq!(actual_stack[i], *expected_word);
-        //     let actual_word = actual_stack[i];
-        //     assert_eq_named!("stack word", actual_word, *expected_word);
-        // }
 
         if let Some(expected_memory) = &self.memory {
             assert_eq_named!(
@@ -106,9 +91,9 @@ impl TestContractRun {
     }
 }
 
-pub(crate) fn _test_rom_body(t: Test, use_vstack: bool) -> Result<(), Error> {
+pub(crate) fn _test_rom_body(t: Test) -> Result<(), Error> {
     let llvm_ctx = Context::create();
-    let opts = Options::new(Debug, use_vstack, false, true);
+    let opts = Options::new(Debug, false, true);
     let block_info = new_test_block_info();
 
     let mut engine = Engine::new(&llvm_ctx, opts)?;

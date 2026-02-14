@@ -142,7 +142,6 @@ pub(crate) struct BuildCtx<'ctx, 'b> {
     pub(crate) env: &'b Env<'ctx>,           // Global environment
     pub(crate) builder: &'b inkwell::builder::Builder<'ctx>,  // LLVM builder
     pub(crate) registers: Registers<'ctx>,    // Execution context pointers
-    _vstack: RefCell<Vec<IntValue<'ctx>>>,   // Virtual stack (optimization)
     func: FunctionValue<'ctx>,                // Current function
 }
 ```
@@ -161,7 +160,7 @@ Each opcode follows a consistent implementation pattern:
 ```rust
 pub(crate) fn opcode_name(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     // 1. Pop operands from stack (typed)
-    let (a, b) = __stack_pop_2(bctx)?;
+    let (a, b) = stack_pop_2(bctx)?;
 
     // 2. Load values from pointers
     let a = load_i256(bctx, a)?;
@@ -171,7 +170,7 @@ pub(crate) fn opcode_name(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     let result = bctx.builder.build_int_add(a, b, "result_name")?;
 
     // 4. Push result back to stack
-    __stack_push_int(bctx, result)?;
+    stack_push_int(bctx, result)?;
 
     Ok(())
 }
@@ -189,10 +188,10 @@ Stack operations use typed helper functions:
 
 ```rust
 // Pop variants by count
-fn __stack_pop_1<'ctx>(bctx: &BuildCtx<'ctx, '_>) -> Result<StackPop1<'ctx>, Error>
-fn __stack_pop_2<'ctx>(bctx: &BuildCtx<'ctx, '_>) -> Result<StackPop2<'ctx>, Error>
-fn __stack_pop_3<'ctx>(bctx: &BuildCtx<'ctx, '_>) -> Result<StackPop3<'ctx>, Error>
-fn __stack_pop_7<'ctx>(bctx: &BuildCtx<'ctx, '_>) -> Result<StackPop7<'ctx>, Error>
+fn stack_pop_1<'ctx>(bctx: &BuildCtx<'ctx, '_>) -> Result<StackPop1<'ctx>, Error>
+fn stack_pop_2<'ctx>(bctx: &BuildCtx<'ctx, '_>) -> Result<StackPop2<'ctx>, Error>
+fn stack_pop_3<'ctx>(bctx: &BuildCtx<'ctx, '_>) -> Result<StackPop3<'ctx>, Error>
+fn stack_pop_7<'ctx>(bctx: &BuildCtx<'ctx, '_>) -> Result<StackPop7<'ctx>, Error>
 
 // Load variants by type
 fn load_i8<'a>(bctx: &BuildCtx<'a, '_>, ptr: PointerValue<'a>) -> Result<IntValue<'a>, Error>
@@ -396,18 +395,6 @@ The following instructions are declared but return `UnimplementedInstruction`:
 - `EXP` - Stub exists, needs runtime power function
 - `SIGNEXTEND` - Stub exists, needs implementation
 
-#### Virtual Stack Optimization
-
-The virtual stack (`vstack`) optimization is commented out throughout `ops.rs`. This optimization would:
-
-- Keep stack values in LLVM virtual registers within basic blocks
-- Sync to real stack only at block boundaries
-- Reduce memory traffic significantly
-
-**Status:** Framework exists but disabled. All `TODO: Re-enable` comments mark this.
-
-**Reconstruction Priority:** Medium - performance optimization, not correctness.
-
 #### Memory Length Tracking
 
 Memory bounds checking is stubbed with `TODO: Handle this after we correctly handle memory_len`:
@@ -434,14 +421,6 @@ Gas accounting is designed but not implemented:
 **Reconstruction Priority:** Medium-High for production use.
 
 ### 4.2 The "Caution Zone" (Problematic Patterns)
-
-#### The Virtual Stack (`vstack`)
-
-- **Concept:** Keep EVM stack items in LLVM SSA registers (virtual stack) instead of writing them to the `Context` stack array for every opcode.
-- **Current State:** **DISABLED** (commented out in `ops.rs`).
-- **Risk:** Re-enabling this requires perfect synchronization (`__sync_vstack`) at every basic block boundary and jump target. It is the highest-value optimization but also the highest source of potential bugs. **Do not re-enable until basic reconstruction is complete.**
-- **Issue:** Large blocks of commented code reduce readability.
-- **Recommendation:** Either complete the vstack implementation or remove the dead code, documenting the intent elsewhere.
 
 #### Unsafe Runtime
 
