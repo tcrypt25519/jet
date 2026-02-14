@@ -44,7 +44,11 @@ impl<'ctx> Engine<'ctx> {
         Ok(())
     }
 
-    pub fn run_contract(&self, addr: Address, _block_info: &BlockInfo) -> Result<ContractRun, Error> {
+    pub fn run_contract(
+        &self,
+        addr: Address,
+        _block_info: &BlockInfo,
+    ) -> Result<ContractRun, Error> {
         // Create a JIT execution engine
         let jit = self
             .build_manager

@@ -115,12 +115,17 @@ mod tests {
 
     #[test]
     fn zero_address() {
-        assert_eq!(Address::ZERO.to_string(), "0x0000000000000000000000000000000000000000");
+        assert_eq!(
+            Address::ZERO.to_string(),
+            "0x0000000000000000000000000000000000000000"
+        );
     }
 
     #[test]
     fn from_bytes_roundtrip() {
-        let bytes = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
+        let bytes = [
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+        ];
         let addr = Address::new(bytes);
         assert_eq!(*addr.as_bytes(), bytes);
         assert_eq!(<[u8; 20]>::from(addr), bytes);
@@ -136,13 +141,19 @@ mod tests {
     #[test]
     fn parse_short_address_left_pads() {
         let addr: Address = "0x1234".parse().unwrap();
-        assert_eq!(addr.to_string(), "0x0000000000000000000000000000000000001234");
+        assert_eq!(
+            addr.to_string(),
+            "0x0000000000000000000000000000000000001234"
+        );
     }
 
     #[test]
     fn parse_without_prefix() {
         let addr: Address = "1234".parse().unwrap();
-        assert_eq!(addr.to_string(), "0x0000000000000000000000000000000000001234");
+        assert_eq!(
+            addr.to_string(),
+            "0x0000000000000000000000000000000000001234"
+        );
     }
 
     #[test]
