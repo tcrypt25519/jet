@@ -32,10 +32,7 @@ pub(crate) fn invalid_jump_return(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> 
     build_return(bctx, ReturnCode::InvalidJumpBlock)
 }
 
-pub(crate) fn build_return(
-    bctx: &BuildCtx<'_, '_>,
-    return_value: ReturnCode,
-) -> Result<(), Error> {
+pub(crate) fn build_return(bctx: &BuildCtx<'_, '_>, return_value: ReturnCode) -> Result<(), Error> {
     let return_value = bctx.env.types().i8.const_int(return_value as u64, false);
     bctx.builder.build_return(Some(&return_value))?;
     Ok(())
@@ -659,10 +656,7 @@ fn stack_push_int<'ctx>(bctx: &BuildCtx<'ctx, '_>, value: IntValue<'ctx>) -> Res
     Ok(())
 }
 
-fn stack_push_ptr<'ctx>(
-    bctx: &BuildCtx<'ctx, '_>,
-    value: PointerValue<'ctx>,
-) -> Result<(), Error> {
+fn stack_push_ptr<'ctx>(bctx: &BuildCtx<'ctx, '_>, value: PointerValue<'ctx>) -> Result<(), Error> {
     call_stack_push_ptr(bctx, value)?;
     Ok(())
 }
