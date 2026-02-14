@@ -693,14 +693,16 @@ pub(crate) fn mload(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     let size = bctx.env.types().i32.const_int(32, false);
     call_mem_expand_checked(bctx, loc_i32, size, "mload")?;
 
-    let mem_ptr = bctx.builder.build_call(
+    let mem_value = bctx.builder.build_call(
         bctx.env.symbols().mem_load(),
         &[bctx.registers.exec_ctx.into(), loc.into()],
         "mload",
     )?;
 
-    let mem_ptr = unsafe { PointerValue::new(mem_ptr.as_value_ref()) };
-    stack_push_ptr(bctx, mem_ptr)?;
+    // mem_load returns the i256 value directly (not a pointer), preventing
+    // UAF when memory is reallocated.
+    let value = unsafe { IntValue::new(mem_value.as_value_ref()) };
+    call_stack_push_i256(bctx, value)?;
 
     Ok(())
 }
