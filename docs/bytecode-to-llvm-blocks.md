@@ -215,8 +215,8 @@ function find_code_blocks(bytecode):
    - LLVM's optimizer may eliminate it, but Jet creates the block regardless for correctness.
 
 4. **Empty Bytecode:**
-   - If bytecode is empty, a single block is created with an empty `rom` slice.
-   - This is an invariant violation and results in an error during compilation.
+   - If bytecode is empty, `find_code_blocks` still creates a single block at offset 0 with an empty `rom` slice.
+   - `build_contract_body` then inserts an implicit return for this block, so compilation succeeds and the contract immediately returns a status code without executing any bytecode.
 
 5. **JUMPDEST at Offset 0:**
    - JUMPDEST at offset 0 is invalid in Jet's model.
