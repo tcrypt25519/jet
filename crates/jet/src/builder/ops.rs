@@ -86,23 +86,7 @@ fn __call_stack_swap(bctx: &BuildCtx<'_, '_>, index: u8) -> Result<(), Error> {
 // Helpers
 //
 
-pub(crate) fn __sync_vstack(_bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    // TODO: Re-enable
-    // for value in bctx.vstack().iter() {
-    //     __call_stack_push_word(bctx, *value)?;
-    // }
-    // bctx.vstack_mut().clear();
-    Ok(())
-}
-
 fn __stack_push_int<'ctx>(bctx: &BuildCtx<'ctx, '_>, value: IntValue<'ctx>) -> Result<(), Error> {
-    // TODO: Re-enable
-    // if bctx.env.opts().vstack() {
-    //     trace!("Pushing to vstack: {:?}", value);
-    //     bctx.vstack_mut().push(value);
-    //     return Ok(());
-    // }
-
     let bit_width = value.get_type().get_bit_width();
     let value_i256 = match bit_width {
         1 | 8 | 32 => {
@@ -128,34 +112,11 @@ fn __stack_push_ptr<'ctx>(
 }
 
 fn __stack_pop_1<'ctx>(bctx: &BuildCtx<'ctx, '_>) -> Result<StackPop1<'ctx>, Error> {
-    // TODO: Re-enable
-    // if bctx.env.opts().vstack() {
-    //     let a = match bctx.vstack_mut().pop() {
-    //         Some(a) => a,
-    //         None => __call_stack_pop(bctx)?,
-    //     };
-    //     return Ok(a);
-    // }
-
     let a = __call_stack_pop(bctx)?;
     Ok(a)
 }
 
 fn __stack_pop_2<'ctx>(bctx: &BuildCtx<'ctx, '_>) -> Result<StackPop2<'ctx>, Error> {
-    // TODO: Re-enable
-    // if bctx.env.opts().vstack() {
-    //     let mut vstack = bctx.vstack_mut();
-    //     let a = match vstack.pop() {
-    //         Some(a) => a,
-    //         None => __call_stack_pop(bctx)?,
-    //     };
-    //     let b = match vstack.pop() {
-    //         Some(b) => b,
-    //         None => __call_stack_pop(bctx)?,
-    //     };
-    //     return Ok((a, b));
-    // }
-
     let a = __call_stack_pop(bctx)?;
     let b = __call_stack_pop(bctx)?;
 
@@ -163,24 +124,6 @@ fn __stack_pop_2<'ctx>(bctx: &BuildCtx<'ctx, '_>) -> Result<StackPop2<'ctx>, Err
 }
 
 fn __stack_pop_3<'ctx>(bctx: &BuildCtx<'ctx, '_>) -> Result<StackPop3<'ctx>, Error> {
-    // TODO: Re-enable
-    // if bctx.env.opts().vstack() {
-    //     let mut vstack = bctx.vstack_mut();
-    //     let a = match vstack.pop() {
-    //         Some(a) => a,
-    //         None => __call_stack_pop(bctx)?,
-    //     };
-    //     let b = match vstack.pop() {
-    //         Some(b) => b,
-    //         None => __call_stack_pop(bctx)?,
-    //     };
-    //     let c = match vstack.pop() {
-    //         Some(c) => c,
-    //         None => __call_stack_pop(bctx)?,
-    //     };
-    //     return Ok((a, b, c));
-    // }
-
     let a = __call_stack_pop(bctx)?;
     let b = __call_stack_pop(bctx)?;
     let c = __call_stack_pop(bctx)?;
@@ -189,40 +132,6 @@ fn __stack_pop_3<'ctx>(bctx: &BuildCtx<'ctx, '_>) -> Result<StackPop3<'ctx>, Err
 }
 
 fn __stack_pop_7<'ctx>(bctx: &BuildCtx<'ctx, '_>) -> Result<StackPop7<'ctx>, Error> {
-    // TODO: Re-enable
-    // if bctx.env.opts().vstack() {
-    //     let mut vstack = bctx.vstack_mut();
-    //     let a = match vstack.pop() {
-    //         Some(a) => a,
-    //         None => __call_stack_pop(bctx)?,
-    //     };
-    //     let b = match vstack.pop() {
-    //         Some(b) => b,
-    //         None => __call_stack_pop(bctx)?,
-    //     };
-    //     let c = match vstack.pop() {
-    //         Some(c) => c,
-    //         None => __call_stack_pop(bctx)?,
-    //     };
-    //     let d = match vstack.pop() {
-    //         Some(d) => d,
-    //         None => __call_stack_pop(bctx)?,
-    //     };
-    //     let e = match vstack.pop() {
-    //         Some(e) => e,
-    //         None => __call_stack_pop(bctx)?,
-    //     };
-    //     let f = match vstack.pop() {
-    //         Some(f) => f,
-    //         None => __call_stack_pop(bctx)?,
-    //     };
-    //     let g = match vstack.pop() {
-    //         Some(g) => g,
-    //         None => __call_stack_pop(bctx)?,
-    //     };
-    //     return Ok((a, b, c, d, e, f, g));
-    // }
-
     let a = __call_stack_pop(bctx)?;
     let b = __call_stack_pop(bctx)?;
     let c = __call_stack_pop(bctx)?;
@@ -242,8 +151,6 @@ pub(crate) fn __build_return(
     bctx: &BuildCtx<'_, '_>,
     return_value: ReturnCode,
 ) -> Result<(), Error> {
-    __sync_vstack(bctx)?;
-
     let return_value = bctx.env.types().i8.const_int(return_value as u64, false);
     bctx.builder.build_return(Some(&return_value))?;
     Ok(())
@@ -315,34 +222,18 @@ pub(crate) fn push(bctx: &BuildCtx<'_, '_>, bytes: [u8; 32]) -> Result<(), Error
     let values_ptr = bctx.builder.build_alloca(t.word_bytes, "push_bytes.ptr")?;
     bctx.builder.build_store(values_ptr, values)?;
 
-    // TODO: Re-enable
-    // if bctx.env.opts().vstack() {
-    //     // To push to the vstack, we need to push the bytes as a single word (i256) value
-    //     let arr_ptr = bctx
-    //         .builder
-    //         .build_alloca(bctx.env.types().i8.array_type(32), "stack_bytes.ptr")?;
-    //     bctx.builder.build_store(arr_ptr, values)?;
-    //     let word = bctx.builder.build_load(t.i256, arr_ptr, "stack_word")?;
-    //
-    //     bctx.vstack_mut().push(word.into_int_value());
-    //
-    //     return Ok(());
-    // }
-
     __stack_push_ptr(bctx, values_ptr)?;
 
     Ok(())
 }
 
 pub(crate) fn dup(bctx: &BuildCtx<'_, '_>, index: u8) -> Result<(), Error> {
-    __sync_vstack(bctx)?;
     let peeked_value_ptr = __call_stack_peek(bctx, index)?;
     __call_stack_push_ptr(bctx, peeked_value_ptr)?;
     Ok(())
 }
 
 pub(crate) fn swap(bctx: &BuildCtx<'_, '_>, index: u8) -> Result<(), Error> {
-    __sync_vstack(bctx)?;
     __call_stack_swap(bctx, index)?;
     Ok(())
 }
