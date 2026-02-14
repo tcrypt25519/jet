@@ -28,10 +28,6 @@ type StackPop7<'ctx> = (
 // OPCode implementations
 //
 
-pub(crate) fn invalid_jump_return(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    build_return(bctx, ReturnCode::InvalidJumpBlock)
-}
-
 pub(crate) fn build_return(bctx: &BuildCtx<'_, '_>, return_value: ReturnCode) -> Result<(), Error> {
     let return_value = bctx.env.types().i8.const_int(return_value as u64, false);
     bctx.builder.build_return(Some(&return_value))?;
