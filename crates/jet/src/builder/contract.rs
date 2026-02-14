@@ -327,7 +327,7 @@ fn build_contract_body<'ctx, 'b>(
                     .unwrap();
                 Ok(())
             }
-            None => ops::__build_return(bctx, ReturnCode::ImplicitReturn),
+            None => ops::build_return(bctx, ReturnCode::ImplicitReturn),
         }?;
     }
 
