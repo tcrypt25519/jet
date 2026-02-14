@@ -684,6 +684,19 @@ pub(crate) fn pop(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
 
 pub(crate) fn mload(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     let loc = stack_pop_1(bctx)?;
+
+    // Expand memory if needed (MLOAD reads 32 bytes).
+    // This must happen before jet.mem.load so that memory_ptr in the context
+    // is up-to-date; jet_mem_expand may reallocate the buffer and update the
+    // pointer, and jet.mem.load re-reads it from the context after the call.
+    let loc_i32 = load_i32(bctx, loc)?;
+    let size = bctx.env.types().i32.const_int(32, false);
+    bctx.builder.build_call(
+        bctx.env.symbols().mem_expand(),
+        &[bctx.registers.exec_ctx.into(), loc_i32.into(), size.into()],
+        "mload_expand",
+    )?;
+
     let mem_ptr = bctx.builder.build_call(
         bctx.env.symbols().mem_load(),
         &[bctx.registers.exec_ctx.into(), loc.into()],
