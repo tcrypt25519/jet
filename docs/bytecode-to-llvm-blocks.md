@@ -138,10 +138,10 @@ function find_code_blocks(bytecode):
                 current_block.rom = bytecode[current_block_offset..pc+1]
                 current_block.terminates = true
                 
-                # Start a new block at the next instruction (if any)
+                # Advance the offset to the next instruction (if any);
+                # block creation at this offset is handled elsewhere.
                 if pc + 1 < len(bytecode):
                     current_block_offset = pc + 1
-                    create_block_at(current_block_offset)
 
             Instr(pc, JUMPI):
                 # Close current block (includes JUMPI)
