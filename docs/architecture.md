@@ -187,7 +187,6 @@ struct BuildCtx<'ctx, 'b> {
     env: &Env,
     builder: &Builder,
     registers: Registers,
-    _vstack: RefCell<Vec<IntValue>>,  // Virtual stack (disabled)
     func: FunctionValue,
 }
 
@@ -302,58 +301,30 @@ LLVM IR is a **register machine** with SSA (Static Single Assignment): every val
 %c = add i256 %a, %b
 ```
 
-### JET's Solution: Hybrid Stack Model
+### JET's Solution: Real Stack Model
 
-JET implements a **hybrid approach**:
-
-1. **Real Stack**: A physical stack array in the `Context` struct serves as the source of truth
-2. **Virtual Stack (vstack)**: An optimization (currently disabled) that tracks values in LLVM SSA registers within a basic block
-
-**Current Implementation** (vstack disabled):
+JET uses a **real stack** in the `Context` struct as the single source of truth. Every stack operation is a runtime function call:
 
 ```rust
-// Every operation calls runtime functions
 pub fn add(bctx: &BuildCtx) -> Result<(), Error> {
-    let (a, b) = __stack_pop_2(bctx)?;  // Calls runtime `stack_pop`
-    let a = load_i256(bctx, a)?;         // LLVM load from pointer
+    let (a, b) = stack_pop_2(bctx)?;     // Calls runtime `stack_pop`
+    let a = load_i256(bctx, a)?;          // LLVM load from pointer
     let b = load_i256(bctx, b)?;
     let result = bctx.builder.build_int_add(a, b, "add_result")?;
-    __call_stack_push_i256(bctx, result)?;  // Calls runtime `stack_push`
+    call_stack_push_i256(bctx, result)?;  // Calls runtime `stack_push`
     Ok(())
 }
 ```
 
 This preserves EVM stack semantics by keeping the canonical stack in runtime memory and operating on it via builtins. In LLVM IR:
-- Stack values are often handled as pointers to 32-byte words
+- Stack values are handled as pointers to 32-byte words
 - Arithmetic opcodes load i256 values from those pointers, compute in SSA, and then push the result back to the runtime stack
 
 This avoids complex SSA stack simulation at the cost of runtime calls.
 
-**With vstack enabled** (future optimization):
-
-```rust
-// Within a basic block, values stay in registers
-pub fn add(bctx: &BuildCtx) -> Result<(), Error> {
-    let a = bctx.vstack_mut().pop();  // Pop from virtual stack
-    let b = bctx.vstack_mut().pop();
-    let result = bctx.builder.build_int_add(a, b, "add_result")?;
-    bctx.vstack_mut().push(result);   // Push to virtual stack
-    Ok(())
-}
-// At block boundaries, vstack syncs to real stack
-```
-
-**Virtual Stack (planned optimization)**: `BuildCtx` contains a `vstack` intended to hold stack values in SSA temporaries, reducing calls into runtime builtins. The code is present but currently disabled (commented out) and `__sync_vstack` is a no-op. The intent is:
-- Use vstack for straight-line code
-- Flush vstack into the runtime stack when control flow merges or jumps
-
-This design mirrors common stack-to-SSA strategies in VM compilers.
-
 ### Why This Design?
 
 1. **Correctness First**: The real stack ensures correct semantics even with complex control flow
-2. **Optimization Opportunity**: vstack enables LLVM optimizations within blocks
-3. **Incremental Adoption**: Can enable vstack after validation
 
 **Trade-offs**:
 - **Pros**: Simplifies opcode lowering; avoids complex SSA stack modeling
@@ -857,9 +828,6 @@ pub(crate) fn control_op(
     bctx: &BuildCtx<'_, '_>,
     target_block: BasicBlock,
 ) -> Result<(), Error> {
-    // Sync virtual stack before leaving block
-    __sync_vstack(bctx)?;
-
     // Build branch
     bctx.builder.build_unconditional_branch(target_block)?;
 
@@ -931,8 +899,7 @@ Several opcode families are stubbed:
 
 ### Known TODOs and Constraints
 
-1. **vstack disabled**: Virtual stack optimization is present but disabled (needs validation)
-2. **Memory bounds checking**: Incomplete in runtime functions (bounds checks are TODOs)
+1. **Memory bounds checking**: Incomplete in runtime functions (bounds checks are TODOs)
 3. **Gas accounting**: Not implemented
 4. **Code eviction**: No memory management for compiled contracts
 5. **Error handling**: Some panics need conversion to Results
@@ -961,14 +928,12 @@ Several opcode families are stubbed:
 
 ### Future Optimization Opportunities
 
-1. **Enable vstack**: Keep values in registers within basic blocks
-2. **Inline runtime functions**: Convert Rust builtins to LLVM IR
-3. **Gas amortization**: Compute gas per basic block, not per instruction
-4. **Profile-guided optimization**: Use ORC's profiling for hot path optimization
-5. **Shared library extraction**: Compile contracts to standalone `.so`/`.dll` files
-6. **Implement vstack flushing**: For straight-line blocks
-7. **Add memory length/capacity tracking**: And bounds checks
-8. **Expand opcode coverage**: With a test-first approach
+1. **Inline runtime functions**: Convert Rust builtins to LLVM IR
+2. **Gas amortization**: Compute gas per basic block, not per instruction
+3. **Profile-guided optimization**: Use ORC's profiling for hot path optimization
+4. **Shared library extraction**: Compile contracts to standalone `.so`/`.dll` files
+5. **Add memory length/capacity tracking**: And bounds checks
+6. **Expand opcode coverage**: With a test-first approach
 
 ### Suggested Next Steps
 
@@ -976,9 +941,8 @@ Several opcode families are stubbed:
    - `exec::Context`
    - `builder::env::Types`
    - `runtime-ir/jet.ll`
-2. Implement vstack flushing for straight-line blocks
-3. Add memory length/capacity tracking and bounds checks
-4. Expand opcode coverage with a test-first approach
+2. Add memory length/capacity tracking and bounds checks
+3. Expand opcode coverage with a test-first approach
 
 ---
 
@@ -1028,7 +992,6 @@ cargo run --bin jetdbg -- build --emit-llvm
 | **Basic Block** | A sequence of instructions with one entry point and one exit point |
 | **SSA** | Static Single Assignment - each variable assigned exactly once |
 | **ORC** | On-Request Compilation - LLVM's modern JIT framework |
-| **vstack** | Virtual stack - compile-time tracking of stack values in registers |
 | **JUMPDEST** | EVM opcode marking valid jump destinations |
 | **Word** | 256-bit (32-byte) value, the fundamental unit in EVM |
 | **ROM** | Read-only memory containing bytecode |

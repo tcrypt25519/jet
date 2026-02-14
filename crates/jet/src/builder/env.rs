@@ -12,16 +12,14 @@ use jet_runtime;
 #[derive(serde::Serialize, Clone, Debug, Default)]
 pub struct Options {
     mode: Mode,
-    vstack: bool,
     emit_llvm: bool,
     assert: bool,
 }
 
 impl Options {
-    pub fn new(mode: Mode, vstack: bool, emit_llvm: bool, assert: bool) -> Self {
+    pub fn new(mode: Mode, emit_llvm: bool, assert: bool) -> Self {
         Self {
             mode,
-            vstack,
             emit_llvm,
             assert,
         }
@@ -29,10 +27,6 @@ impl Options {
 
     pub fn mode(&self) -> Mode {
         self.mode.clone()
-    }
-
-    pub fn vstack(&self) -> bool {
-        self.vstack
     }
 
     pub fn emit_llvm(&self) -> bool {

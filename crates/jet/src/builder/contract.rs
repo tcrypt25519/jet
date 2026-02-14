@@ -1,5 +1,3 @@
-use std::cell::{Ref, RefCell, RefMut};
-
 use inkwell::{
     basic_block::BasicBlock,
     values::{FunctionValue, IntValue},
@@ -13,8 +11,6 @@ use crate::{
     instructions,
     instructions::{Instruction, IterItem},
 };
-
-const VSTACK_INIT_SIZE: usize = 32;
 
 pub(crate) struct Registers<'ctx> {
     // Function parameters
@@ -67,7 +63,6 @@ pub(crate) struct BuildCtx<'ctx, 'b> {
     pub(crate) env: &'b Env<'ctx>,
     pub(crate) builder: &'b inkwell::builder::Builder<'ctx>,
     pub(crate) registers: Registers<'ctx>,
-    _vstack: RefCell<Vec<IntValue<'ctx>>>,
     func: FunctionValue<'ctx>,
 }
 
@@ -77,22 +72,12 @@ impl<'ctx, 'b> BuildCtx<'ctx, 'b> {
         builder: &'b inkwell::builder::Builder<'ctx>,
         func: FunctionValue<'ctx>,
     ) -> Self {
-        let vstack = RefCell::new(Vec::with_capacity(VSTACK_INIT_SIZE));
         Self {
             env,
             builder,
-            _vstack: vstack,
             func,
             registers: Registers::new(env, builder, func),
         }
-    }
-
-    pub(crate) fn _vstack(&self) -> Ref<'_, Vec<IntValue<'ctx>>> {
-        self._vstack.borrow()
-    }
-
-    pub(crate) fn _vstack_mut(&self) -> RefMut<'_, Vec<IntValue<'ctx>>> {
-        self._vstack.borrow_mut()
     }
 }
 
@@ -337,16 +322,12 @@ fn build_contract_body<'ctx, 'b>(
         // we will either jump to the next block or return from the function.
         match following_block {
             Some(next_block) => {
-                // Sync the vstack with the real stack
-                // Terminator instructions will handle the stack themselves
-                ops::__sync_vstack(bctx)?;
-
                 bctx.builder
                     .build_unconditional_branch(next_block.basic_block)
                     .unwrap();
                 Ok(())
             }
-            None => ops::__build_return(bctx, ReturnCode::ImplicitReturn),
+            None => ops::build_return(bctx, ReturnCode::ImplicitReturn),
         }?;
     }
 
