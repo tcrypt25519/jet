@@ -63,7 +63,7 @@ pub(crate) struct BuildCtx<'ctx, 'b> {
     pub(crate) env: &'b Env<'ctx>,
     pub(crate) builder: &'b inkwell::builder::Builder<'ctx>,
     pub(crate) registers: Registers<'ctx>,
-    func: FunctionValue<'ctx>,
+    pub(crate) func: FunctionValue<'ctx>,
 }
 
 impl<'ctx, 'b> BuildCtx<'ctx, 'b> {
@@ -85,7 +85,7 @@ impl<'ctx, 'b> BuildCtx<'ctx, 'b> {
 struct CodeBlock<'ctx, 'b> {
     offset: usize,
     rom: &'b [u8],
-    basic_block: BasicBlock<'ctx>,
+    entry_block: BasicBlock<'ctx>,
     is_jumpdest: bool,
     terminates: bool,
 }
@@ -120,13 +120,13 @@ impl<'ctx, 'b> CodeBlocks<'ctx, 'b> {
     pub(crate) fn add(
         &mut self,
         offset: usize,
-        basic_block: BasicBlock<'ctx>,
+        entry_block: BasicBlock<'ctx>,
         // bb_ctor: fn(usize) -> BasicBlock<'ctx>,
     ) -> Result<&mut CodeBlock<'ctx, 'b>, Error> {
         self.blocks.push(CodeBlock {
             offset,
             rom: &[],
-            basic_block,
+            entry_block,
             is_jumpdest: false,
             terminates: false,
         });
@@ -182,7 +182,7 @@ pub fn build(env: &'_ Env<'_>, name: &str, rom: &[u8]) -> Result<(), Error> {
         .ok_or_else(|| Error::InvariantViolation("No code blocks found".to_string()))?;
     bctx.builder.position_at_end(preamble_block);
     bctx.builder
-        .build_unconditional_branch(entry_block.basic_block)?;
+        .build_unconditional_branch(entry_block.entry_block)?;
     Ok(())
 }
 
@@ -305,7 +305,7 @@ fn build_contract_body<'ctx, 'b>(
                 return Err(Error::invariant_violation("Jump destination at offset 0"));
             }
             offset -= 1;
-            jump_cases.push((t.i32.const_int(offset, false), code_block.basic_block));
+            jump_cases.push((t.i32.const_int(offset, false), code_block.entry_block));
         }
 
         let following_block = code_blocks_iter.peek();
@@ -323,7 +323,7 @@ fn build_contract_body<'ctx, 'b>(
         match following_block {
             Some(next_block) => {
                 bctx.builder
-                    .build_unconditional_branch(next_block.basic_block)
+                    .build_unconditional_branch(next_block.entry_block)
                     .unwrap();
                 Ok(())
             }
@@ -351,7 +351,7 @@ fn build_code_block(
 
     // Prepare for building the IR for this code block. Move the builder to this basic block
     // and start a relative PC at 0.
-    bctx.builder.position_at_end(code_block.basic_block);
+    bctx.builder.position_at_end(code_block.entry_block);
 
     for item in instructions::Iter::new(code_block.rom) {
         match item {
@@ -422,7 +422,7 @@ fn build_code_block(
                     },
                     Instruction::JUMPI => match (jump_block, following_block) {
                         (Some(jump_block), Some(following_block)) => {
-                            ops::jumpi(bctx, jump_block, following_block.basic_block)
+                            ops::jumpi(bctx, jump_block, following_block.entry_block)
                         }
                         (Some(_), None) => {
                             return Err(Error::invariant_violation(
