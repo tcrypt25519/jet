@@ -315,6 +315,7 @@ impl BlockInfo {
 pub enum ReturnCode {
     // Jet-level failures
     InvalidJumpBlock = -1,
+    StackUnderflow = -2,
 
     // EVM-level successes
     #[default]
