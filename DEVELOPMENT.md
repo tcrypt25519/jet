@@ -134,17 +134,20 @@ The CI pipeline runs on GitHub Actions as a single sequential job with the follo
 ### CI Workflow Steps
 
 1. **Cache LLVM 21** - Checks for cached LLVM installation
-2. **Install LLVM 21** - Uses `scripts/install-llvm.sh` if not cached
-3. **Set LLVM environment variables** - Configures LLVM_SYS_211_PREFIX
-4. **Cache Rust build artifacts** - Uses Swatinem/rust-cache
-5. **Install Rust stable** - With rustfmt and clippy components
-6. **Apply formatting fixes** - `cargo fmt --all` (auto-fixes and commits)
-7. **Run clippy** - `cargo clippy --all-targets --all-features -- -D warnings`
-8. **Install cargo-nextest** - Test runner
-9. **Check all targets** - `cargo check --all-targets --all-features`
-10. **Build** - `cargo build --verbose --all-features`
-11. **Run tests with nextest** - `cargo nextest run --all-features --no-fail-fast`
-12. **Run doctests** - `cargo test --doc --all-features`
+2. **Restore LLVM from cache** - Restores if cache hit (conditional)
+3. **Install LLVM 21** - Uses `scripts/install-llvm.sh` if not cached (conditional)
+4. **Log LLVM shared libraries** - Verification step
+5. **Set LLVM environment variables** - Configures LLVM_SYS_211_PREFIX
+6. **Cache Rust build artifacts** - Uses Swatinem/rust-cache
+7. **Install Rust stable** - With rustfmt and clippy components
+8. **Apply formatting fixes** - `cargo fmt --all` (auto-fixes code)
+9. **Commit formatting fixes** - Commits formatting changes if any (conditional)
+10. **Run clippy** - `cargo clippy --all-targets --all-features -- -D warnings`
+11. **Install cargo-nextest** - Test runner
+12. **Check all targets** - `cargo check --all-targets --all-features`
+13. **Build** - `cargo build --verbose --all-features`
+14. **Run tests with nextest** - `cargo nextest run --all-features --no-fail-fast`
+15. **Run doctests** - `cargo test --doc --all-features`
 
 ### CI Features
 
