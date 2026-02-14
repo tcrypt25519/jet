@@ -108,9 +108,13 @@ pub(crate) fn div(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
             .build_int_compare(inkwell::IntPredicate::EQ, b, zero, "div_by_zero")?;
 
     let zero_block = bctx.env.context().append_basic_block(bctx.func, "div_zero");
-    let nonzero_block = bctx.env.context().append_basic_block(bctx.func, "div_nonzero");
+    let nonzero_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "div_nonzero");
     let cont = bctx.env.context().append_basic_block(bctx.func, "div_cont");
-    bctx.builder.build_conditional_branch(b_is_zero, zero_block, nonzero_block)?;
+    bctx.builder
+        .build_conditional_branch(b_is_zero, zero_block, nonzero_block)?;
 
     bctx.builder.position_at_end(zero_block);
     stack_push_int(bctx, zero)?;
@@ -138,10 +142,20 @@ pub(crate) fn sdiv(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
         bctx.builder
             .build_int_compare(inkwell::IntPredicate::EQ, b, zero, "sdiv_b_is_zero")?;
 
-    let zero_block = bctx.env.context().append_basic_block(bctx.func, "sdiv_zero");
-    let nonzero_block = bctx.env.context().append_basic_block(bctx.func, "sdiv_nonzero");
-    let cont = bctx.env.context().append_basic_block(bctx.func, "sdiv_cont");
-    bctx.builder.build_conditional_branch(b_is_zero, zero_block, nonzero_block)?;
+    let zero_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "sdiv_zero");
+    let nonzero_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "sdiv_nonzero");
+    let cont = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "sdiv_cont");
+    bctx.builder
+        .build_conditional_branch(b_is_zero, zero_block, nonzero_block)?;
 
     bctx.builder.position_at_end(zero_block);
     stack_push_int(bctx, zero)?;
@@ -150,19 +164,33 @@ pub(crate) fn sdiv(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     // Guard 2 (inside nonzero path): MIN_INT256 / -1 overflows in LLVM sdiv (poison).
     // EVM spec: the result wraps back to MIN_INT256.
     bctx.builder.position_at_end(nonzero_block);
-    let min_int = t.i256.const_int_arbitrary_precision(&[0, 0, 0, 0x8000_0000_0000_0000]);
+    let min_int = t
+        .i256
+        .const_int_arbitrary_precision(&[0, 0, 0, 0x8000_0000_0000_0000]);
     let neg_one = t.i256.const_all_ones();
     let a_is_min =
         bctx.builder
             .build_int_compare(inkwell::IntPredicate::EQ, a, min_int, "sdiv_a_is_min")?;
-    let b_is_neg_one =
-        bctx.builder
-            .build_int_compare(inkwell::IntPredicate::EQ, b, neg_one, "sdiv_b_is_neg_one")?;
-    let is_overflow = bctx.builder.build_and(a_is_min, b_is_neg_one, "sdiv_is_overflow")?;
+    let b_is_neg_one = bctx.builder.build_int_compare(
+        inkwell::IntPredicate::EQ,
+        b,
+        neg_one,
+        "sdiv_b_is_neg_one",
+    )?;
+    let is_overflow = bctx
+        .builder
+        .build_and(a_is_min, b_is_neg_one, "sdiv_is_overflow")?;
 
-    let overflow_block = bctx.env.context().append_basic_block(bctx.func, "sdiv_overflow");
-    let normal_block = bctx.env.context().append_basic_block(bctx.func, "sdiv_normal");
-    bctx.builder.build_conditional_branch(is_overflow, overflow_block, normal_block)?;
+    let overflow_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "sdiv_overflow");
+    let normal_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "sdiv_normal");
+    bctx.builder
+        .build_conditional_branch(is_overflow, overflow_block, normal_block)?;
 
     bctx.builder.position_at_end(overflow_block);
     stack_push_int(bctx, min_int)?;
@@ -192,9 +220,13 @@ pub(crate) fn _mod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
             .build_int_compare(inkwell::IntPredicate::EQ, b, zero, "mod_by_zero")?;
 
     let zero_block = bctx.env.context().append_basic_block(bctx.func, "mod_zero");
-    let nonzero_block = bctx.env.context().append_basic_block(bctx.func, "mod_nonzero");
+    let nonzero_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "mod_nonzero");
     let cont = bctx.env.context().append_basic_block(bctx.func, "mod_cont");
-    bctx.builder.build_conditional_branch(b_is_zero, zero_block, nonzero_block)?;
+    bctx.builder
+        .build_conditional_branch(b_is_zero, zero_block, nonzero_block)?;
 
     bctx.builder.position_at_end(zero_block);
     stack_push_int(bctx, zero)?;
@@ -222,10 +254,20 @@ pub(crate) fn smod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
         bctx.builder
             .build_int_compare(inkwell::IntPredicate::EQ, b, zero, "smod_b_is_zero")?;
 
-    let zero_block = bctx.env.context().append_basic_block(bctx.func, "smod_zero");
-    let nonzero_block = bctx.env.context().append_basic_block(bctx.func, "smod_nonzero");
-    let cont = bctx.env.context().append_basic_block(bctx.func, "smod_cont");
-    bctx.builder.build_conditional_branch(b_is_zero, zero_block, nonzero_block)?;
+    let zero_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "smod_zero");
+    let nonzero_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "smod_nonzero");
+    let cont = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "smod_cont");
+    bctx.builder
+        .build_conditional_branch(b_is_zero, zero_block, nonzero_block)?;
 
     bctx.builder.position_at_end(zero_block);
     stack_push_int(bctx, zero)?;
@@ -234,19 +276,33 @@ pub(crate) fn smod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     // Guard 2: MIN_INT256 % -1 — LLVM srem overflows (poison).
     // Mathematically the remainder is 0 (MIN_INT is exactly divisible by -1).
     bctx.builder.position_at_end(nonzero_block);
-    let min_int = t.i256.const_int_arbitrary_precision(&[0, 0, 0, 0x8000_0000_0000_0000]);
+    let min_int = t
+        .i256
+        .const_int_arbitrary_precision(&[0, 0, 0, 0x8000_0000_0000_0000]);
     let neg_one = t.i256.const_all_ones();
     let a_is_min =
         bctx.builder
             .build_int_compare(inkwell::IntPredicate::EQ, a, min_int, "smod_a_is_min")?;
-    let b_is_neg_one =
-        bctx.builder
-            .build_int_compare(inkwell::IntPredicate::EQ, b, neg_one, "smod_b_is_neg_one")?;
-    let is_overflow = bctx.builder.build_and(a_is_min, b_is_neg_one, "smod_is_overflow")?;
+    let b_is_neg_one = bctx.builder.build_int_compare(
+        inkwell::IntPredicate::EQ,
+        b,
+        neg_one,
+        "smod_b_is_neg_one",
+    )?;
+    let is_overflow = bctx
+        .builder
+        .build_and(a_is_min, b_is_neg_one, "smod_is_overflow")?;
 
-    let overflow_block = bctx.env.context().append_basic_block(bctx.func, "smod_overflow");
-    let normal_block = bctx.env.context().append_basic_block(bctx.func, "smod_normal");
-    bctx.builder.build_conditional_branch(is_overflow, overflow_block, normal_block)?;
+    let overflow_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "smod_overflow");
+    let normal_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "smod_normal");
+    bctx.builder
+        .build_conditional_branch(is_overflow, overflow_block, normal_block)?;
 
     bctx.builder.position_at_end(overflow_block);
     stack_push_int(bctx, zero)?;
@@ -275,10 +331,20 @@ pub(crate) fn addmod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
         bctx.builder
             .build_int_compare(inkwell::IntPredicate::EQ, n, zero, "addmod_n_is_zero")?;
 
-    let zero_block = bctx.env.context().append_basic_block(bctx.func, "addmod_zero");
-    let nonzero_block = bctx.env.context().append_basic_block(bctx.func, "addmod_nonzero");
-    let cont = bctx.env.context().append_basic_block(bctx.func, "addmod_cont");
-    bctx.builder.build_conditional_branch(n_is_zero, zero_block, nonzero_block)?;
+    let zero_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "addmod_zero");
+    let nonzero_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "addmod_nonzero");
+    let cont = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "addmod_cont");
+    bctx.builder
+        .build_conditional_branch(n_is_zero, zero_block, nonzero_block)?;
 
     bctx.builder.position_at_end(zero_block);
     stack_push_int(bctx, zero)?;
@@ -286,7 +352,9 @@ pub(crate) fn addmod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
 
     bctx.builder.position_at_end(nonzero_block);
     let sum = bctx.builder.build_int_add(a, b, "addmod_sum")?;
-    let result = bctx.builder.build_int_unsigned_rem(sum, n, "addmod_result")?;
+    let result = bctx
+        .builder
+        .build_int_unsigned_rem(sum, n, "addmod_result")?;
     stack_push_int(bctx, result)?;
     bctx.builder.build_unconditional_branch(cont)?;
 
@@ -308,10 +376,20 @@ pub(crate) fn mulmod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
         bctx.builder
             .build_int_compare(inkwell::IntPredicate::EQ, n, zero, "mulmod_n_is_zero")?;
 
-    let zero_block = bctx.env.context().append_basic_block(bctx.func, "mulmod_zero");
-    let nonzero_block = bctx.env.context().append_basic_block(bctx.func, "mulmod_nonzero");
-    let cont = bctx.env.context().append_basic_block(bctx.func, "mulmod_cont");
-    bctx.builder.build_conditional_branch(n_is_zero, zero_block, nonzero_block)?;
+    let zero_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "mulmod_zero");
+    let nonzero_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "mulmod_nonzero");
+    let cont = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "mulmod_cont");
+    bctx.builder
+        .build_conditional_branch(n_is_zero, zero_block, nonzero_block)?;
 
     bctx.builder.position_at_end(zero_block);
     stack_push_int(bctx, zero)?;
@@ -319,7 +397,9 @@ pub(crate) fn mulmod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
 
     bctx.builder.position_at_end(nonzero_block);
     let product = bctx.builder.build_int_mul(a, b, "mulmod_product")?;
-    let result = bctx.builder.build_int_unsigned_rem(product, n, "mulmod_result")?;
+    let result = bctx
+        .builder
+        .build_int_unsigned_rem(product, n, "mulmod_result")?;
     stack_push_int(bctx, result)?;
     bctx.builder.build_unconditional_branch(cont)?;
 
@@ -506,9 +586,16 @@ pub(crate) fn byte(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
             .build_int_compare(inkwell::IntPredicate::UGE, idx, const_32, "byte_oob")?;
 
     let oob_block = bctx.env.context().append_basic_block(bctx.func, "byte_oob");
-    let inbounds_block = bctx.env.context().append_basic_block(bctx.func, "byte_inbounds");
-    let cont = bctx.env.context().append_basic_block(bctx.func, "byte_cont");
-    bctx.builder.build_conditional_branch(is_oob, oob_block, inbounds_block)?;
+    let inbounds_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "byte_inbounds");
+    let cont = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "byte_cont");
+    bctx.builder
+        .build_conditional_branch(is_oob, oob_block, inbounds_block)?;
 
     bctx.builder.position_at_end(oob_block);
     stack_push_int(bctx, zero)?;
@@ -516,13 +603,19 @@ pub(crate) fn byte(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
 
     bctx.builder.position_at_end(inbounds_block);
     // Safe to truncate: idx is verified < 32, fits in i32.
-    let idx_i32 = bctx.builder.build_int_truncate(idx, t.i32, "byte_idx_i32")?;
+    let idx_i32 = bctx
+        .builder
+        .build_int_truncate(idx, t.i32, "byte_idx_i32")?;
     let const_31 = t.i32.const_int(31, false);
-    let idx_reversed = bctx.builder.build_int_sub(const_31, idx_i32, "byte_idx_reversed")?;
+    let idx_reversed = bctx
+        .builder
+        .build_int_sub(const_31, idx_i32, "byte_idx_reversed")?;
     let typ = t.word_bytes;
     let path = [idx_reversed];
-    let byte_ptr =
-        unsafe { bctx.builder.build_in_bounds_gep(typ, word, &path, "byte_ptr") }?;
+    let byte_ptr = unsafe {
+        bctx.builder
+            .build_in_bounds_gep(typ, word, &path, "byte_ptr")
+    }?;
     let byte = load_i8(bctx, byte_ptr)?;
     stack_push_int(bctx, byte)?;
     bctx.builder.build_unconditional_branch(cont)?;
@@ -542,14 +635,19 @@ pub(crate) fn shl(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
 
     // EVM spec: shift >= 256 → result = 0.
     // LLVM shl with shift >= 256 is poison, so clamp to 0 first, then select.
-    let is_large =
-        bctx.builder
-            .build_int_compare(inkwell::IntPredicate::UGT, shift, max_shift, "shl_is_large")?;
+    let is_large = bctx.builder.build_int_compare(
+        inkwell::IntPredicate::UGT,
+        shift,
+        max_shift,
+        "shl_is_large",
+    )?;
     let safe_shift = bctx
         .builder
         .build_select(is_large, zero, shift, "shl_safe_shift")?
         .into_int_value();
-    let shifted = bctx.builder.build_left_shift(value, safe_shift, "shl_shifted")?;
+    let shifted = bctx
+        .builder
+        .build_left_shift(value, safe_shift, "shl_shifted")?;
     let result = bctx
         .builder
         .build_select(is_large, zero, shifted, "shl_result")?
@@ -569,9 +667,12 @@ pub(crate) fn shr(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
 
     // EVM spec: shift >= 256 → result = 0.
     // LLVM lshr with shift >= 256 is poison, so clamp to 0 first, then select.
-    let is_large =
-        bctx.builder
-            .build_int_compare(inkwell::IntPredicate::UGT, shift, max_shift, "shr_is_large")?;
+    let is_large = bctx.builder.build_int_compare(
+        inkwell::IntPredicate::UGT,
+        shift,
+        max_shift,
+        "shr_is_large",
+    )?;
     let safe_shift = bctx
         .builder
         .build_select(is_large, zero, shift, "shr_safe_shift")?
@@ -598,9 +699,12 @@ pub(crate) fn sar(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     // EVM spec: shift >= 256 → fill with sign bit (0 or 0xFFFF…FF).
     // Clamp to 255: ashr(value, 255) already produces the correct sign-fill result,
     // so no select is needed — the clamp alone is sufficient.
-    let is_large =
-        bctx.builder
-            .build_int_compare(inkwell::IntPredicate::UGT, shift, max_shift, "sar_is_large")?;
+    let is_large = bctx.builder.build_int_compare(
+        inkwell::IntPredicate::UGT,
+        shift,
+        max_shift,
+        "sar_is_large",
+    )?;
     let safe_shift = bctx
         .builder
         .build_select(is_large, max_shift, shift, "sar_safe_shift")?
