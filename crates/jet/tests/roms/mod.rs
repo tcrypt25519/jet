@@ -100,13 +100,16 @@ pub(crate) fn _test_rom_body(t: Test) -> Result<(), Error> {
 
     assert_ne!(t.roms.len(), 0);
     for (i, rom) in t.roms.iter().enumerate() {
-        let addr = hex::encode(vec![0, i as u8]);
-        let prefixed_addr = format!("0x{}", addr);
+        let mut addr_bytes = vec![0u8; jet_runtime::ADDRESS_SIZE_BYTES];
+        addr_bytes[jet_runtime::ADDRESS_SIZE_BYTES - 1] = i as u8;
+        let prefixed_addr = format!("0x{}", hex::encode(&addr_bytes));
         trace!("Building contract at address {}", prefixed_addr);
         engine.build_contract(prefixed_addr.as_str(), rom.as_slice())?;
     }
 
-    let run = engine.run_contract("0x0000", &block_info)?;
+    let entry_addr_bytes = vec![0u8; jet_runtime::ADDRESS_SIZE_BYTES];
+    let entry_addr = format!("0x{}", hex::encode(&entry_addr_bytes));
+    let run = engine.run_contract(entry_addr.as_str(), &block_info)?;
     t.expected.assert_eq(&run);
 
     Ok(())

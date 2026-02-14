@@ -684,6 +684,15 @@ pub(crate) fn pop(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
 
 pub(crate) fn mload(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     let loc = stack_pop_1(bctx)?;
+
+    // Expand memory if needed (MLOAD reads 32 bytes).
+    // This must happen before jet.mem.load so that memory_ptr in the context
+    // is up-to-date; jet_mem_expand may reallocate the buffer and update the
+    // pointer, and jet.mem.load re-reads it from the context after the call.
+    let loc_i32 = load_i32(bctx, loc)?;
+    let size = bctx.env.types().i32.const_int(32, false);
+    call_mem_expand_checked(bctx, loc_i32, size, "mload")?;
+
     let mem_ptr = bctx.builder.build_call(
         bctx.env.symbols().mem_load(),
         &[bctx.registers.exec_ctx.into(), loc.into()],
@@ -699,14 +708,9 @@ pub(crate) fn mload(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
 pub(crate) fn mstore(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     let (loc, val) = stack_pop_2(bctx)?;
 
-    // Expand memory if needed (MSTORE writes 32 bytes)
     let loc_i32 = load_i32(bctx, loc)?;
     let size = bctx.env.types().i32.const_int(32, false);
-    bctx.builder.build_call(
-        bctx.env.symbols().mem_expand(),
-        &[bctx.registers.exec_ctx.into(), loc_i32.into(), size.into()],
-        "mstore_expand",
-    )?;
+    call_mem_expand_checked(bctx, loc_i32, size, "mstore")?;
 
     bctx.builder.build_call(
         bctx.env.symbols().mem_store(),
@@ -719,14 +723,9 @@ pub(crate) fn mstore(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
 pub(crate) fn mstore8(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     let (loc, val) = stack_pop_2(bctx)?;
 
-    // Expand memory if needed (MSTORE8 writes 1 byte)
     let loc_i32 = load_i32(bctx, loc)?;
     let size = bctx.env.types().i32.const_int(1, false);
-    bctx.builder.build_call(
-        bctx.env.symbols().mem_expand(),
-        &[bctx.registers.exec_ctx.into(), loc_i32.into(), size.into()],
-        "mstore8_expand",
-    )?;
+    call_mem_expand_checked(bctx, loc_i32, size, "mstore8")?;
 
     bctx.builder.build_call(
         bctx.env.symbols().mem_store_byte(),
@@ -985,6 +984,51 @@ fn load_int<'a>(
 fn call_return_to_ptr(ret: CallSiteValue) -> PointerValue {
     let value_ref = ret.as_value_ref();
     unsafe { PointerValue::new(value_ref) }
+}
+
+/// Emit jet.mem.expand and check its return value.
+///
+/// On success (return == 0) the builder is positioned at a new continuation block
+/// and this function returns `Ok(())`.  On failure the emitted IR returns
+/// `ReturnCode::Invalid` from the contract function directly, so the caller never
+/// sees a non-zero result.
+fn call_mem_expand_checked(
+    bctx: &BuildCtx<'_, '_>,
+    loc_i32: IntValue<'_>,
+    size: IntValue<'_>,
+    label: &str,
+) -> Result<(), Error> {
+    let ret = bctx.builder.build_call(
+        bctx.env.symbols().mem_expand(),
+        &[bctx.registers.exec_ctx.into(), loc_i32.into(), size.into()],
+        &format!("{label}_expand"),
+    )?;
+
+    let ret_i8 = unsafe { IntValue::new(ret.as_value_ref()) };
+    let zero = bctx.env.types().i8.const_int(0, false);
+    let is_ok = bctx.builder.build_int_compare(
+        inkwell::IntPredicate::EQ,
+        ret_i8,
+        zero,
+        &format!("{label}_expand_ok"),
+    )?;
+
+    let ok_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, &format!("{label}_mem_ok"));
+    let err_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, &format!("{label}_mem_err"));
+    bctx.builder
+        .build_conditional_branch(is_ok, ok_block, err_block)?;
+
+    bctx.builder.position_at_end(err_block);
+    build_return(bctx, ReturnCode::Invalid)?;
+
+    bctx.builder.position_at_end(ok_block);
+    Ok(())
 }
 
 /// Emit a guarded branch for operations whose denominator/modulus must not be zero.
