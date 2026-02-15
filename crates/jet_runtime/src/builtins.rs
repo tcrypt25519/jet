@@ -404,6 +404,9 @@ enum MemoryExpansionError {
 /// Expands memory to accommodate an access at offset with given size.
 /// Follows EVM semantics: rounds up to 32-byte boundaries and updates memory_len.
 ///
+/// Uses u32 for offset/size because EVM gas costs make >4GB memory economically
+/// impossible. See docs/adrs/adr-004.md for full analysis.
+///
 /// # Safety
 ///
 /// This function is unsafe because it dereferences the given pointer and may reallocate memory.
