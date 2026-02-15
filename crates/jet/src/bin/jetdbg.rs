@@ -5,7 +5,7 @@ use simple_logger::SimpleLogger;
 use thiserror::Error;
 
 use jet::instructions::Instruction;
-use jet_runtime::{self, exec};
+use jet_runtime::{Address, exec};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -107,12 +107,14 @@ fn build_cmd(args: BuildArgs) -> Result<(), Error> {
     let mut engine = jet::engine::Engine::new(&context, build_opts)?;
 
     // Build the contract
-    engine.build_contract("0x1234", alice_rom.as_slice())?;
-    engine.build_contract("0x0001", bob_rom.as_slice())?;
+    let alice_addr: Address = "0x1234".parse().expect("valid address");
+    let bob_addr: Address = "0x0001".parse().expect("valid address");
+    engine.build_contract(alice_addr, alice_rom.as_slice())?;
+    engine.build_contract(bob_addr, bob_rom.as_slice())?;
 
     // Run the contract with a test block
     let block_info = new_test_block_info();
-    let run = engine.run_contract("0x1234", &block_info)?;
+    let run = engine.run_contract(alice_addr, &block_info)?;
     info!("{}", run);
 
     Ok(())
@@ -148,7 +150,7 @@ fn new_test_block_info() -> exec::BlockInfo {
         25, 26, 27, 28, 29, 30, 31,
     ];
     let hash_history = new_test_block_info_hash_history();
-    let coinbase = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let coinbase = Address::new([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
 
     exec::BlockInfo::new(
         42,

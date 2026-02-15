@@ -1,4 +1,5 @@
 use inkwell::context::Context;
+use jet_runtime::Address;
 
 use jet::{
     builder,
@@ -13,7 +14,7 @@ fn invalid_opcode_returns_error() {
     let mut engine = Engine::new(&ctx, opts).expect("engine initializes");
 
     let err = engine
-        .build_contract("0x0000", &[0x0c])
+        .build_contract(Address::ZERO, &[0x0c])
         .expect_err("invalid opcode should fail");
 
     match err {

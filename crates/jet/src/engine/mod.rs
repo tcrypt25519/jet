@@ -9,7 +9,7 @@ use log::{info, trace};
 use thiserror::Error;
 
 use jet_runtime::{
-    RuntimeBuilder, builtins, exec,
+    Address, RuntimeBuilder, builtins, exec,
     exec::{BlockInfo, ContractFunc, ContractRun},
 };
 
@@ -39,12 +39,16 @@ impl<'ctx> Engine<'ctx> {
         Ok(Engine { build_manager })
     }
 
-    pub fn build_contract(&mut self, addr: &str, rom: &[u8]) -> Result<(), Error> {
+    pub fn build_contract(&mut self, addr: Address, rom: &[u8]) -> Result<(), Error> {
         self.build_manager.add_contract_function(addr, rom)?;
         Ok(())
     }
 
-    pub fn run_contract(&self, addr: &str, _block_info: &BlockInfo) -> Result<ContractRun, Error> {
+    pub fn run_contract(
+        &self,
+        addr: Address,
+        _block_info: &BlockInfo,
+    ) -> Result<ContractRun, Error> {
         // Create a JIT execution engine
         let jit = self
             .build_manager
@@ -104,9 +108,9 @@ impl<'ctx> Engine<'ctx> {
     fn get_contract_exec_fn(
         &self,
         ee: &ExecutionEngine<'ctx>,
-        addr: &str,
+        addr: Address,
     ) -> Result<JitFunction<'_, ContractFunc>, FunctionLookupError> {
-        let name = exec::mangle_contract_fn(addr);
+        let name = exec::mangle_contract_fn(&addr);
         info!("Looking up contract function {}", name);
         unsafe { ee.get_function(name.as_str()) }
     }
