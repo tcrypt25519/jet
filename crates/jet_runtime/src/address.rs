@@ -1,34 +1,35 @@
 use std::{fmt, str::FromStr};
 
-use jet_ir;
-
 /// A 20-byte Ethereum address.
 ///
 /// Wraps a `[u8; 20]` and provides a type-safe, semantically meaningful
 /// representation for Ethereum addresses throughout the runtime.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[repr(transparent)]
-pub struct Address([u8; 20]);
+pub struct Address([u8; Self::LEN]);
 
 impl Address {
     /// The zero address: `0x0000000000000000000000000000000000000000`.
-    pub const ZERO: Self = Self([0u8; 20]);
+    pub const ZERO: Self = Self([0u8; Self::LEN]);
 
-    /// The number of bytes in an address. Matches [`jet_ir::ADDRESS_SIZE_BYTES`].
-    pub const LEN: usize = jet_ir::ADDRESS_SIZE_BYTES;
+    /// The number of bytes in an Ethereum address.
+    pub const LEN: usize = 20;
+
+    /// Number of hex characters needed to represent a full address (2 per byte).
+    const HEX_LEN: usize = Self::LEN * 2;
 
     /// Creates an address from its raw bytes.
-    pub fn new(bytes: [u8; 20]) -> Self {
+    pub fn new(bytes: [u8; Self::LEN]) -> Self {
         Self(bytes)
     }
 
     /// Returns the raw bytes of the address.
-    pub fn as_bytes(&self) -> &[u8; 20] {
+    pub fn as_bytes(&self) -> &[u8; Self::LEN] {
         &self.0
     }
 
     /// Returns a mutable reference to the raw bytes.
-    pub fn as_bytes_mut(&mut self) -> &mut [u8; 20] {
+    pub fn as_bytes_mut(&mut self) -> &mut [u8; Self::LEN] {
         &mut self.0
     }
 }
@@ -39,13 +40,13 @@ impl AsRef<[u8]> for Address {
     }
 }
 
-impl From<[u8; 20]> for Address {
-    fn from(bytes: [u8; 20]) -> Self {
+impl From<[u8; Address::LEN]> for Address {
+    fn from(bytes: [u8; Address::LEN]) -> Self {
         Self(bytes)
     }
 }
 
-impl From<Address> for [u8; 20] {
+impl From<Address> for [u8; Address::LEN] {
     fn from(addr: Address) -> Self {
         addr.0
     }
@@ -86,19 +87,21 @@ impl FromStr for Address {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let hex_str = s.strip_prefix("0x").unwrap_or(s);
 
-        if hex_str.len() > 40 {
+        if hex_str.len() > Address::HEX_LEN {
             return Err(AddressParseError(format!(
-                "expected at most 40 hex chars, got {}",
+                "expected at most {} hex chars, got {}",
+                Address::HEX_LEN,
                 hex_str.len()
             )));
         }
 
-        // Left-pad with zeros to 40 hex chars (20 bytes) using a stack buffer.
-        let mut padded = [b'0'; 40];
-        padded[40 - hex_str.len()..].copy_from_slice(hex_str.as_bytes());
+        // Left-pad with zeros to HEX_LEN chars using a stack buffer.
+        let mut padded = [b'0'; Address::HEX_LEN];
+        padded[Address::HEX_LEN - hex_str.len()..].copy_from_slice(hex_str.as_bytes());
 
-        let mut arr = [0u8; 20];
-        hex::decode_to_slice(padded, &mut arr).map_err(|e| AddressParseError(e.to_string()))?;
+        let mut arr = [0u8; Address::LEN];
+        hex::decode_to_slice(padded, &mut arr)
+            .map_err(|e| AddressParseError(e.to_string()))?;
         Ok(Address(arr))
     }
 }
@@ -130,7 +133,7 @@ mod tests {
         ];
         let addr = Address::new(bytes);
         assert_eq!(*addr.as_bytes(), bytes);
-        assert_eq!(<[u8; 20]>::from(addr), bytes);
+        assert_eq!(<[u8; Address::LEN]>::from(addr), bytes);
     }
 
     #[test]
@@ -160,7 +163,7 @@ mod tests {
 
     #[test]
     fn parse_too_long_fails() {
-        let long = "0x".to_string() + &"a".repeat(42);
+        let long = "0x".to_string() + &"a".repeat(Address::HEX_LEN + 2);
         assert!(long.parse::<Address>().is_err());
     }
 }
