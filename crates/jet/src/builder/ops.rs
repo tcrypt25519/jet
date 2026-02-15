@@ -586,18 +586,28 @@ pub(crate) fn sar(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     Ok(())
 }
 
-pub(crate) fn keccak256(ctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let data_ptr = stack_pop_1(ctx)?;
+pub(crate) fn keccak256(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
+    // EVM: KECCAK256 pops offset (TOS) then size, reads size bytes from memory
+    // at offset, hashes them, and pushes the 32-byte result.
+    let (offset_ptr, size_ptr) = stack_pop_2(bctx)?;
+    let offset_i32 = load_i32(bctx, offset_ptr)?;
+    let size_i32 = load_i32(bctx, size_ptr)?;
 
-    // TODO: Check return code
-    ctx.builder.build_call(
-        ctx.env.symbols().keccak256(),
-        &[data_ptr.into()],
+    call_mem_expand_checked(bctx, offset_i32, size_i32, "keccak256")?;
+
+    // Reuse offset_ptr as the result buffer — the stack slot is free after pop.
+    bctx.builder.build_call(
+        bctx.env.symbols().keccak256(),
+        &[
+            bctx.registers.exec_ctx.into(),
+            offset_i32.into(),
+            size_i32.into(),
+            offset_ptr.into(),
+        ],
         "keccak256",
     )?;
 
-    // TODO: We could instead simply increase the stack ptr
-    call_stack_push_ptr(ctx, data_ptr)?;
+    call_stack_push_ptr(bctx, offset_ptr)?;
     Ok(())
 }
 

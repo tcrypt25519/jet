@@ -338,17 +338,42 @@ pub extern "C" fn jet_ops_mulmod(
     0
 }
 
-pub extern "C" fn jet_ops_keccak256(buffer: &mut [u8; 32]) -> u8 {
-    // Hash the bytes
+/// Compute Keccak-256 of `size` bytes at `offset` in the execution context's memory.
+///
+/// The result is written to `result`.  Memory must already be expanded to cover
+/// `[offset, offset + size)` by the caller (i.e. `jet_mem_expand` must have been
+/// called before this function).
+///
+/// # Safety
+///
+/// `ctx` must be a valid, non-null pointer to a `Context`.  `result` must point
+/// to a valid 32-byte aligned output buffer.
+pub unsafe extern "C" fn jet_ops_keccak256(
+    ctx: *mut Context,
+    offset: u32,
+    size: u32,
+    result: *mut [u8; 32],
+) -> i8 {
     use sha3::{Digest, Keccak256};
+    let memory_ptr = unsafe { (*ctx).memory_ptr };
+    let memory_len = unsafe { (*ctx).memory_len } as usize;
+
+    let start = offset as usize;
+    let end = start.saturating_add(size as usize);
+
+    // Guard: memory must cover the requested range (caller is responsible).
+    if end > memory_len {
+        return -1;
+    }
+
+    let data = unsafe { std::slice::from_raw_parts(memory_ptr.add(start), size as usize) };
+
     let mut hasher = Keccak256::new();
-    hasher.update(*buffer);
+    hasher.update(data);
     let hash = hasher.finalize();
 
-    // Write the hash back to the buffer
-    for i in 0..32 {
-        buffer[i] = hash[i];
-    }
+    let result_ref = unsafe { &mut *result };
+    result_ref.copy_from_slice(&hash);
     0
 }
 
