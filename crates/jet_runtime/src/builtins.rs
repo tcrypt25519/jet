@@ -364,8 +364,10 @@ pub unsafe extern "C" fn jet_ops_keccak256(
     }
 
     // SAFETY: ctx is non-null after check above
-    let memory_ptr = unsafe { (*ctx).memory_ptr };
-    let memory_len = unsafe { (*ctx).memory_len } as usize;
+    let (memory_ptr, memory_len) = unsafe {
+        let ctx_ref = &*ctx;
+        (ctx_ref.memory_ptr, ctx_ref.memory_len as usize)
+    };
 
     let start = offset as usize;
     let end = start.saturating_add(size as usize);
