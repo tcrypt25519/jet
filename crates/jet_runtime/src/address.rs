@@ -100,8 +100,7 @@ impl FromStr for Address {
         padded[Address::HEX_LEN - hex_str.len()..].copy_from_slice(hex_str.as_bytes());
 
         let mut arr = [0u8; Address::LEN];
-        hex::decode_to_slice(padded, &mut arr)
-            .map_err(|e| AddressParseError(e.to_string()))?;
+        hex::decode_to_slice(padded, &mut arr).map_err(|e| AddressParseError(e.to_string()))?;
         Ok(Address(arr))
     }
 }
