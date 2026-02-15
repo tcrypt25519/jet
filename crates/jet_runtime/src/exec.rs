@@ -342,8 +342,11 @@ pub fn mangle_contract_fn(address: &Address) -> String {
 pub fn jet_contract_fn_lookup(jit_engine: &ExecutionEngine, addr_slice: &[u8]) -> usize {
     // The stack stores values little-endian; reverse to get the canonical
     // big-endian address bytes.
+    // EVM stack words are 32 bytes but addresses are 20; take only the last
+    // ADDRESS_SIZE_BYTES bytes (the address occupies the low bytes of the word)
+    // after reversing from little-endian to big-endian order.
     let mut bytes = [0u8; ADDRESS_SIZE_BYTES];
-    for (i, b) in addr_slice.iter().rev().enumerate() {
+    for (i, b) in addr_slice.iter().rev().take(ADDRESS_SIZE_BYTES).enumerate() {
         bytes[i] = *b;
     }
     let address = Address::new(bytes);

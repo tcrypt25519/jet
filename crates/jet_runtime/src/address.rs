@@ -1,5 +1,7 @@
 use std::{fmt, str::FromStr};
 
+use jet_ir;
+
 /// A 20-byte Ethereum address.
 ///
 /// Wraps a `[u8; 20]` and provides a type-safe, semantically meaningful
@@ -12,8 +14,8 @@ impl Address {
     /// The zero address: `0x0000000000000000000000000000000000000000`.
     pub const ZERO: Self = Self([0u8; 20]);
 
-    /// The number of bytes in an address.
-    pub const LEN: usize = 20;
+    /// The number of bytes in an address. Matches [`jet_ir::ADDRESS_SIZE_BYTES`].
+    pub const LEN: usize = jet_ir::ADDRESS_SIZE_BYTES;
 
     /// Creates an address from its raw bytes.
     pub fn new(bytes: [u8; 20]) -> Self {
@@ -91,12 +93,13 @@ impl FromStr for Address {
             )));
         }
 
-        // Left-pad with zeros to 40 hex chars (20 bytes).
-        let padded = format!("{:0>40}", hex_str);
-        let bytes = hex::decode(&padded).map_err(|e| AddressParseError(e.to_string()))?;
+        // Left-pad with zeros to 40 hex chars (20 bytes) using a stack buffer.
+        let mut padded = [b'0'; 40];
+        padded[40 - hex_str.len()..].copy_from_slice(hex_str.as_bytes());
 
         let mut arr = [0u8; 20];
-        arr.copy_from_slice(&bytes);
+        hex::decode_to_slice(padded, &mut arr)
+            .map_err(|e| AddressParseError(e.to_string()))?;
         Ok(Address(arr))
     }
 }
