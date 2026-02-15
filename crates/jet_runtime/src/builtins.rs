@@ -344,9 +344,11 @@ pub extern "C" fn jet_ops_mulmod(
 /// `[offset, offset + size)` by the caller (i.e. `jet_mem_expand` must have been
 /// called before this function).
 ///
+/// Returns 0 on success, -1 if `ctx` is null or if the memory range is invalid.
+///
 /// # Safety
 ///
-/// `ctx` must be a valid, non-null pointer to a `Context`.  `result` must point
+/// `ctx` must be a valid pointer (non-null check is performed).  `result` must point
 /// to a valid 32-byte aligned output buffer.
 pub unsafe extern "C" fn jet_ops_keccak256(
     ctx: *mut Context,
@@ -355,6 +357,13 @@ pub unsafe extern "C" fn jet_ops_keccak256(
     result: *mut [u8; 32],
 ) -> i8 {
     use sha3::{Digest, Keccak256};
+    
+    // Check for null context pointer
+    if ctx.is_null() {
+        return -1;
+    }
+
+    // SAFETY: ctx is non-null after check above
     let memory_ptr = unsafe { (*ctx).memory_ptr };
     let memory_len = unsafe { (*ctx).memory_len } as usize;
 
@@ -366,12 +375,14 @@ pub unsafe extern "C" fn jet_ops_keccak256(
         return -1;
     }
 
+    // SAFETY: memory range [start, end) is validated above
     let data = unsafe { std::slice::from_raw_parts(memory_ptr.add(start), size as usize) };
 
     let mut hasher = Keccak256::new();
     hasher.update(data);
     let hash = hasher.finalize();
 
+    // SAFETY: result is a valid pointer per function contract
     let result_ref = unsafe { &mut *result };
     result_ref.copy_from_slice(&hash);
     0

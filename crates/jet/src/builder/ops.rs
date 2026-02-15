@@ -596,7 +596,7 @@ pub(crate) fn keccak256(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     call_mem_expand_checked(bctx, offset_i32, size_i32, "keccak256")?;
 
     // Reuse offset_ptr as the result buffer — the stack slot is free after pop.
-    bctx.builder.build_call(
+    let ret = bctx.builder.build_call(
         bctx.env.symbols().keccak256(),
         &[
             bctx.registers.exec_ctx.into(),
@@ -607,6 +607,31 @@ pub(crate) fn keccak256(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
         "keccak256",
     )?;
 
+    // Check return code from jet_ops_keccak256
+    let ret_i8 = unsafe { IntValue::new(ret.as_value_ref()) };
+    let zero = bctx.env.types().i8.const_int(0, false);
+    let is_ok = bctx.builder.build_int_compare(
+        inkwell::IntPredicate::EQ,
+        ret_i8,
+        zero,
+        "keccak256_ok",
+    )?;
+
+    let ok_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "keccak256_success");
+    let err_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "keccak256_error");
+    bctx.builder
+        .build_conditional_branch(is_ok, ok_block, err_block)?;
+
+    bctx.builder.position_at_end(err_block);
+    build_return(bctx, ReturnCode::Invalid)?;
+
+    bctx.builder.position_at_end(ok_block);
     call_stack_push_ptr(bctx, offset_ptr)?;
     Ok(())
 }
