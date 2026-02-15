@@ -349,7 +349,8 @@ pub extern "C" fn jet_ops_mulmod(
 /// # Safety
 ///
 /// `ctx` must be a valid pointer if non-null (null check is performed and handled).
-/// `result` must point to a valid, non-null 32-byte aligned output buffer.
+/// `result` must point to a valid, non-null 32-byte aligned output buffer. If `result`
+/// is null, this function will cause undefined behavior.
 pub unsafe extern "C" fn jet_ops_keccak256(
     ctx: *mut Context,
     offset: u32,

@@ -608,7 +608,9 @@ pub(crate) fn keccak256(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     )?;
 
     // Check return code from jet_ops_keccak256
-    // SAFETY: ret is a valid CallSiteValue from build_call
+    // SAFETY: IntValue::new requires a valid LLVM value reference.
+    // ret.as_value_ref() returns the underlying ValueRef from a CallSiteValue,
+    // which is guaranteed to be valid by inkwell's build_call.
     let ret_i8 = unsafe { IntValue::new(ret.as_value_ref()) };
     let zero = bctx.env.types().i8.const_int(0, false);
     let is_ok = bctx.builder.build_int_compare(
