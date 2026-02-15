@@ -6,7 +6,7 @@ use syntect::{
     util::{LinesWithEndings, as_24_bit_terminal_escaped},
 };
 
-use jet_runtime::exec;
+use jet_runtime::{Address, exec};
 
 use crate::builder::{Error, contract, env::Env};
 
@@ -23,8 +23,8 @@ impl<'ctx> Manager<'ctx> {
         &self.build_env
     }
 
-    pub fn add_contract_function(&self, addr: &str, rom: &[u8]) -> Result<(), Error> {
-        let fn_name = exec::mangle_contract_fn(addr);
+    pub fn add_contract_function(&self, addr: Address, rom: &[u8]) -> Result<(), Error> {
+        let fn_name = exec::mangle_contract_fn(&addr);
         info!("Building ROM into function {}", fn_name);
 
         contract::build(&self.build_env, &fn_name, rom)?;
@@ -42,8 +42,8 @@ impl<'ctx> Manager<'ctx> {
         Ok(())
     }
 
-    fn verify_contract(&self, addr: &str) -> bool {
-        let func_name = exec::mangle_contract_fn(addr);
+    fn verify_contract(&self, addr: Address) -> bool {
+        let func_name = exec::mangle_contract_fn(&addr);
         self.build_env
             .module()
             .get_function(&func_name)
