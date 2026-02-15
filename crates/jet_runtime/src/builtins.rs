@@ -358,7 +358,7 @@ pub unsafe extern "C" fn jet_ops_keccak256(
     result: *mut [u8; 32],
 ) -> i8 {
     use sha3::{Digest, Keccak256};
-    
+
     // Check for null context pointer
     if ctx.is_null() {
         return -1;
