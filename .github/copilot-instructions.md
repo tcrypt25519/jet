@@ -152,11 +152,6 @@ make test-all     # Runs both: nextest + doctests
   - No external EVM node required - pure LLVM JIT execution
 - `crates/jet/tests/invalid_opcode.rs` - Error handling tests
 
-**Known test issues (as of 2026-02-14):**
-- Some tests may segfault (SIGSEGV) - this is an active development area
-- Tests that work: basic arithmetic, stack ops, jumps, memory ops
-- If tests crash: check for null pointer dereferences in runtime functions
-
 ### Linting & formatting
 ```bash
 # Check formatting (CI enforced)
@@ -175,7 +170,7 @@ make clippy-fix   # cargo clippy --fix
 **Clippy notes:**
 - CI enforces `-D warnings` (zero-warning policy)
 - Common issues: unused variables, manual_div_ceil, needless borrows
-- Fix or use `#[allow(...)]` with justification comment
+- **CRITICAL:** Agents must NOT add `#[allow(...)]` pragmas without explicit permission. Fix the underlying issue or report why it should be allowed.
 
 ## CI/CD
 
@@ -230,13 +225,14 @@ RUSTFLAGS="-D warnings"    # Treat warnings as errors
 - `docs/process/new-opcode.md` - **CRITICAL: Step-by-step opcode implementation guide**
   - Includes common pitfalls (endianness, stack order, zero division)
   - Required reading before implementing EVM opcodes
+- `docs/process/segfault-troubleshooting.md` - Debugging and reporting segfaults (P0 priority)
 
 **ADRs (Architecture Decision Records):**
-- `docs/adrs/adr-001.md`, `adr-002.md` - Design decisions with rationale
+- `docs/adrs/adr-001.md`, `adr-002.md`, `adr-003.md`, `adr-004.md` - Design decisions with rationale
 
 **EVM spec references:**
-- `docs/ext/evm/*.mdx` - Per-opcode documentation with examples
-- Always read corresponding `.mdx` file before implementing/testing opcode
+- Use `evm-spec-lookup` skill if available for EVM opcode specifications
+- If skill not available, note it and continue with implementation based on existing patterns
 
 **Historical:**
 - `docs/plans/2026-01-27-restore-build-system.md` - Build system restoration notes
@@ -252,12 +248,12 @@ RUSTFLAGS="-D warnings"    # Treat warnings as errors
 ### Stack operations
 ```rust
 // Always use helper functions (never manipulate stack directly)
-let (a, b) = __stack_pop_2(bctx)?;     // Returns (top, second)
-__stack_push_int(bctx, result)?;       // Push integer
-__stack_push_ptr(bctx, ptr)?;          // Push pointer
+let (a, b) = stack_pop_2(bctx)?;     // Returns (top, second)
+stack_push_int(bctx, result)?;       // Push integer
+stack_push_ptr(bctx, ptr)?;          // Push pointer
 ```
 
-**CRITICAL:** `__stack_pop_2()` returns `(top, second)` where `top` is most recently pushed.
+**CRITICAL:** `stack_pop_2()` returns `(top, second)` where `top` is most recently pushed.
 For SUB: `PUSH 3; PUSH 10; SUB` → pops `(10, 3)` → computes `10 - 3 = 7` (NOT `3 - 10`).
 
 ### Division by zero (EVM semantics)
@@ -357,14 +353,17 @@ map_fn(sym.exp(), builtins::jet_ops_exp as *const () as usize);
 ```
 
 ### Opcode implementation checklist
-1. **Read spec first:** `docs/ext/evm/[HEX].mdx` - understand operand order, edge cases
-2. **Define instruction:** Add to `Instruction` enum in `instructions.rs`
-3. **Implement handler:** Add function to `builder/ops.rs`
-4. **Route opcode:** Add case to match in `builder/mod.rs`
-5. **Add builtin** (if complex): Follow pattern above
-6. **Write tests:** Cover basic case, edge cases, endianness, errors (in `tests/test_roms.rs`)
-7. **Test locally:** `make test` or `make test-cargo`
-8. **Pre-push check:** `make commit-check` (fmt, clippy, tests)
+
+For complete implementation guidance, see `docs/process/new-opcode.md`. Key steps:
+
+1. **Read EVM spec** - Use `evm-spec-lookup` skill if available; understand operand order and edge cases
+2. **Define instruction** - Add to `Instruction` enum in `instructions.rs`
+3. **Implement handler** - Add function to `builder/ops.rs`
+4. **Route opcode** - Add case to match in `builder/mod.rs`
+5. **Add builtin** (if complex) - Follow builtin function pattern above
+6. **Write tests** - Cover basic case, edge cases, endianness, errors
+7. **Test locally** - Run `make test` or `make test-cargo`
+8. **Pre-push check** - Run `make commit-check` (fmt, clippy, tests)
 
 ## Troubleshooting
 
@@ -398,19 +397,26 @@ make test-cargo
 ```
 
 ### Tests segfault (SIGSEGV)
+
+**CRITICAL:** Test segfaults are P0 priority issues that must be addressed immediately.
+
+For complete troubleshooting guidance, see `docs/process/segfault-troubleshooting.md`.
+
+**Quick reference:**
 ```bash
-# Symptom
-cargo test  # Process didn't exit successfully (signal: 11, SIGSEGV)
+# Run with debug output
+RUST_LOG=debug cargo test
 
-# Known issue: Some tests have segmentation faults (active development)
+# Run single test to isolate
+cargo test --test test_roms -- test_name --exact
 
-# Debugging steps:
-1. Run with debug output: RUST_LOG=debug cargo test
-2. Run single test: cargo test --test test_roms -- test_name --exact
-3. Use jetdbg binary: cargo run --bin jetdbg
-4. Check for null pointer dereferences in runtime functions
-5. Verify memory expansion called before memory access
+# Use jetdbg for interactive debugging
+cargo run --bin jetdbg
 ```
+
+**Required action:**
+- **You MUST either:** Submit a PR that fixes the segfault, OR create a new issue with detailed reproduction steps and analysis
+- Do not leave segfaults unaddressed or undocumented
 
 ### Incremental compilation cache issues
 ```bash
@@ -425,12 +431,12 @@ cargo test
 ```bash
 # Symptom: CI fails on clippy step with warnings
 
-# Solution 1: Fix locally
+# Solution: Fix locally
 make clippy         # See warnings
 make clippy-fix     # Auto-fix some issues
 
-# Solution 2: Allow specific lint (with justification comment)
-#[allow(clippy::manual_div_ceil)]  # Custom rounding logic for EVM spec
+# CRITICAL: Do NOT add #[allow(...)] pragmas without explicit permission
+# You must fix the underlying issue or report why it should be allowed
 ```
 
 ### Auto-formatted code not matching expectations
@@ -463,10 +469,8 @@ make fmt-check
 
 ## Known issues & limitations
 
-### Current known bugs (as of 2026-02-14)
-1. **Test segfaults:** Some integration tests crash with SIGSEGV - under investigation
-2. **SDIV overflow:** Missing overflow handling for MIN_INT / -1 edge case
-3. **KECCAK256:** Test commented out - implementation pops one value instead of two
+### Current known bugs (as of 2026-02-16)
+All previously known bugs have been resolved. Any new segfaults or bugs discovered must be reported immediately as P0 issues.
 
 ### EVM opcode implementation status
 - **Implemented:** Most arithmetic (ADD, MUL, SUB, DIV, MOD, ADDMOD, MULMOD, EXP, etc.)
@@ -474,7 +478,7 @@ make fmt-check
 - **Implemented:** Memory ops (MLOAD, MSTORE, MSTORE8)
 - **Implemented:** Control flow (JUMP, JUMPI, JUMPDEST)
 - **Implemented:** Bitwise (AND, OR, XOR, NOT, BYTE, SHL, SHR, SAR)
-- **Partial:** Crypto (KECCAK256 has known issues)
+- **Implemented:** Crypto (KECCAK256)
 - **Not implemented:** External calls, contract creation, SELFDESTRUCT, etc. (see `instructions.rs`)
 
 ### Architecture limitations
@@ -483,7 +487,8 @@ make fmt-check
 - No contract creation (CREATE, CREATE2)
 - No storage operations (SLOAD, SSTORE)
 - No logging (LOG0-LOG4)
-- Jump tables built at compile time (dynamic jumps via table lookup)
+- Memory-based stack (not register-based) - suboptimal performance
+- Jump tables built at compile time (dynamic jumps via table lookup) - suboptimal for dynamic contracts
 
 ## Additional resources
 
@@ -509,7 +514,7 @@ chore: update dependencies
 - Review `docs/process/new-opcode.md` for detailed implementation guidance
 - Check existing implementations in `builder/ops.rs` for patterns
 - Reference builtin implementations in `crates/jet_runtime/src/builtins.rs`
-- Read EVM spec files in `docs/ext/evm/*.mdx` before implementing opcodes
+- Use `evm-spec-lookup` skill if available for EVM opcode specifications
 
 ## Quick reference
 
@@ -539,7 +544,7 @@ crates/jet/src/instructions.rs         → Instruction enum
 crates/jet_runtime/src/builtins.rs     → Complex operations (Rust)
 crates/jet/tests/test_roms.rs          → Integration tests
 docs/process/new-opcode.md             → Implementation guide
-docs/ext/evm/*.mdx                     → EVM spec per opcode
+docs/process/segfault-troubleshooting.md → Segfault debugging (P0)
 .github/workflows/ci.yml               → CI pipeline
 ```
 
@@ -553,7 +558,7 @@ export CARGO_TARGET_DIR=/custom/path          # Override target directory
 
 ---
 
-**Last updated:** 2026-02-14  
+**Last updated:** 2026-02-16  
 **LLVM version:** 21  
 **Rust edition:** 2024 (jet, jet_runtime, jet_ir, jet_push_macros)  
 **Test runner:** cargo-nextest (recommended) or cargo test (fallback)
