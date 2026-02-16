@@ -13,4 +13,5 @@ pub enum RuntimeError {
     InvariantViolation(String),
 }
 
+/// A [`std::result::Result`] alias that fixes the error type to [`RuntimeError`].
 pub type Result<T> = std::result::Result<T, RuntimeError>;

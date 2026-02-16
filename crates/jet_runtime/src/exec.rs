@@ -8,12 +8,38 @@ use crate::{
     *,
 };
 
+/// A 256-bit EVM stack word, stored as 32 bytes in big-endian order.
 pub type Word = [u8; 32];
+
+/// A 256-bit Keccak-256 hash value.
 pub type Hash = [u8; 32];
+
+/// A ring buffer of the [`BLOCK_HASH_HISTORY_SIZE`] most recent block hashes.
 pub type HashHistory = [Hash; BLOCK_HASH_HISTORY_SIZE];
 
+/// The C ABI of a JIT-compiled EVM contract function.
+///
+/// Every compiled contract is exposed as a function with this signature.
+/// The `*const Context` argument points to the caller-allocated execution
+/// context; the function returns a [`ReturnCode`] indicating how it stopped.
 pub type ContractFunc = unsafe extern "C" fn(*const Context) -> ReturnCode;
 
+/// EVM execution context passed to every JIT-compiled contract function.
+///
+/// `Context` holds all mutable state that persists for the lifetime of a
+/// single contract invocation: the operand stack, memory, return-data
+/// registers, and an optional sub-call context for nested `CALL` operations.
+///
+/// The layout of this struct is `#[repr(C)]` and must exactly match the
+/// `exec_ctx` LLVM struct type defined in [`jet_ir::Types`].  The field order
+/// is documented there.
+///
+/// # Memory management
+///
+/// The EVM memory region is heap-allocated in [`Context::new`] and freed in
+/// the [`Drop`] implementation.  The capacity tracked by `memory_cap` is the
+/// true allocation size, while `memory_len` tracks the portion currently
+/// accessible to EVM instructions.
 #[repr(C)]
 pub struct Context {
     stack_ptr: u32,
@@ -33,6 +59,15 @@ pub struct Context {
 }
 
 impl Context {
+    /// Allocates and initialises a new execution context.
+    ///
+    /// Heap-allocates the EVM memory buffer (32-byte aligned) at an initial
+    /// capacity of `MEMORY_INITIAL_SIZE_WORDS * WORD_SIZE_BYTES` bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RuntimeError::MemoryLayout`] or [`RuntimeError::MemoryAllocation`]
+    /// if the memory buffer cannot be allocated.
     pub fn new() -> Result<Self> {
         // Allocate memory buffer on the heap
         let memory_size = (WORD_SIZE_BYTES * MEMORY_INITIAL_SIZE_WORDS) as usize;
@@ -59,18 +94,25 @@ impl Context {
         })
     }
 
+    /// Returns the current stack depth (number of items on the stack).
     pub fn stack_ptr(&self) -> u32 {
         self.stack_ptr
     }
 
+    /// Returns the index of the current jump destination block.
+    ///
+    /// This register is written by `JUMP`/`JUMPI` and read by the jump
+    /// dispatch table inserted by the compiler.
     pub fn jump_ptr(&self) -> u32 {
         self.jump_ptr
     }
 
+    /// Returns the byte offset of the return data within EVM memory.
     pub fn return_off(&self) -> u32 {
         self.return_off
     }
 
+    /// Returns the byte length of the return data within EVM memory.
     pub fn return_len(&self) -> u32 {
         self.return_len
     }
@@ -91,30 +133,43 @@ impl Context {
         unsafe { std::slice::from_raw_parts(self.memory_ptr.add(offset), len) }
     }
 
+    /// Returns the full stack array.
+    ///
+    /// Only entries at indices `0..stack_ptr()` contain live values.
     pub fn stack(&self) -> &[Word] {
         &self.stack
     }
 
+    /// Returns the currently accessible EVM memory as a byte slice.
     pub fn memory(&self) -> &[u8] {
         unsafe { std::slice::from_raw_parts(self.memory_ptr, self.memory_len as usize) }
     }
 
+    /// Returns the currently accessible EVM memory as a mutable byte slice.
     pub fn memory_mut(&mut self) -> &mut [u8] {
         unsafe { std::slice::from_raw_parts_mut(self.memory_ptr, self.memory_len as usize) }
     }
 
+    /// Returns the number of accessible bytes in EVM memory.
     pub fn memory_len(&self) -> u32 {
         self.memory_len
     }
 
+    /// Returns the capacity of the underlying EVM memory buffer in bytes.
     pub fn memory_cap(&self) -> u32 {
         self.memory_cap
     }
 
+    /// Returns a reference to the sub-call context, if one exists.
+    ///
+    /// A sub-call context is created when the contract executes a `CALL`-family
+    /// instruction.  The sub-call's return data is then available via
+    /// `RETURNDATASIZE` and `RETURNDATACOPY`.
     pub fn sub_ctx(&self) -> Option<&Context> {
         self.sub_call.as_ref().map(|ctx| ctx.as_ref())
     }
 
+    /// Returns a mutable reference to the sub-call context, if one exists.
     pub fn sub_ctx_mut(&mut self) -> Option<&mut Context> {
         self.sub_call.as_mut().map(|ctx| ctx.as_mut())
     }
@@ -209,14 +264,20 @@ pub struct ContractRun {
 }
 
 impl ContractRun {
+    /// Creates a new `ContractRun` from a return code and execution context.
     pub fn new(result: ReturnCode, ctx: Context) -> Self {
         ContractRun { result, ctx }
     }
 
+    /// Returns the [`ReturnCode`] produced by the contract.
     pub fn result(&self) -> ReturnCode {
         self.result.clone()
     }
 
+    /// Returns a reference to the execution context after the contract ran.
+    ///
+    /// The context contains the final stack state, EVM memory contents, and
+    /// the return data written by a `RETURN` or `REVERT` instruction.
     pub fn ctx(&self) -> &Context {
         &self.ctx
     }
@@ -238,6 +299,7 @@ pub struct BlockInfo {
 }
 
 impl BlockInfo {
+    /// Creates a new `BlockInfo` describing the current block.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         number: u64,
@@ -265,68 +327,99 @@ impl BlockInfo {
         }
     }
 
+    /// Returns the block number.
     pub fn number(&self) -> u64 {
         self.number
     }
 
+    /// Returns the block difficulty (or prevrandao after the Merge).
     pub fn difficulty(&self) -> u64 {
         self.difficulty
     }
 
+    /// Returns the block gas limit.
     pub fn gas_limit(&self) -> u64 {
         self.gas_limit
     }
 
+    /// Returns the block timestamp (Unix seconds).
     pub fn timestamp(&self) -> u64 {
         self.timestamp
     }
 
+    /// Returns the EIP-1559 base fee in wei.
     pub fn base_fee(&self) -> u64 {
         self.base_fee
     }
 
+    /// Returns the EIP-4844 blob base fee.
     pub fn blob_base_fee(&self) -> u64 {
         self.blob_base_fee
     }
 
+    /// Returns the chain ID.
     pub fn chain_id(&self) -> u64 {
         self.chain_id
     }
 
+    /// Returns the hash of this block.
     pub fn hash(&self) -> &Hash {
         &self.hash
     }
 
+    /// Returns the ring buffer of the [`BLOCK_HASH_HISTORY_SIZE`] most recent block hashes.
     pub fn hash_history(&self) -> &HashHistory {
         &self.hash_history
     }
 
+    /// Returns the beneficiary (miner/validator) address.
     pub fn coinbase(&self) -> &Address {
         &self.coinbase
     }
 }
 
-/// Return codes returned by contract function calls.
-/// - Negative values are Jet-level failures.
-/// - Positive values are successfully captured EVM-returns.
-/// - Positive values below 64 are EVM-level successes.
-/// - Positive values above 64 are EVM-level failures.
+/// Status code returned by a JIT-compiled contract function.
+///
+/// Negative values indicate a Jet-level (internal) failure. Non-negative
+/// values indicate that the EVM instruction stream was followed to a defined
+/// stopping point: values below 64 are EVM successes, values at or above 64
+/// are EVM failures.
+///
+/// # Examples
+///
+/// ```
+/// use jet_runtime::exec::ReturnCode;
+///
+/// let code = ReturnCode::default();
+/// assert_eq!(code, ReturnCode::ImplicitReturn);
+/// ```
 #[derive(Clone, Debug, PartialEq, Default)]
 #[repr(i8)]
 pub enum ReturnCode {
     // Jet-level failures
+
+    /// The jump-dispatch table was given a block index with no corresponding `JUMPDEST`.
     InvalidJumpBlock = -1,
+    /// A `POP`-style instruction was executed on an empty stack.
     StackUnderflow = -2,
 
     // EVM-level successes
+
+    /// The contract ran to the end of its bytecode without a `RETURN` or `STOP`.
     #[default]
     ImplicitReturn = 0,
+    /// The contract executed a `RETURN` instruction.
     ExplicitReturn = 1,
+    /// The contract executed a `STOP` instruction.
     Stop = 2,
 
     // EVM-level failures
+
+    /// The contract executed a `REVERT` instruction.
     Revert = 64,
+    /// The contract executed an `INVALID` instruction.
     Invalid = 65,
+    /// A `JUMP` or `JUMPI` targeted a byte that is not a `JUMPDEST`.
     JumpFailure = 66,
 }
 

@@ -16,31 +16,54 @@ const PACK_STRUCTS: bool = true;
 /// and contract code, ensuring consistent memory layouts.
 pub struct Types<'ctx> {
     // Primitives
+
+    /// 8-bit integer type (`i8`).
     pub i8: IntType<'ctx>,
+    /// 32-bit integer type (`i32`).
     pub i32: IntType<'ctx>,
+    /// 64-bit integer type (`i64`).
     pub i64: IntType<'ctx>,
+    /// 160-bit integer type used for EVM addresses (`i160`).
     pub i160: IntType<'ctx>,
+    /// 256-bit integer type used for EVM stack words (`i256`).
     pub i256: IntType<'ctx>,
+    /// Opaque pointer type (`ptr`).
     pub ptr: PointerType<'ctx>,
+    /// A 32-byte array type (`[32 x i8]`) representing one EVM word in memory.
     pub word_bytes: ArrayType<'ctx>,
 
     // Architecture
+
+    /// The EVM operand stack: an array of [`STACK_SIZE_WORDS`] 256-bit integers.
     pub stack: ArrayType<'ctx>,
 
     // Memory fields
+
+    /// Pointer type used for the EVM memory buffer.
     pub mem_ptr: PointerType<'ctx>,
+    /// `i32` type used for the accessible EVM memory length.
     pub mem_len: IntType<'ctx>,
+    /// `i32` type used for the EVM memory buffer capacity.
     pub mem_cap: IntType<'ctx>,
 
     // Runtime registers
+
+    /// `i32` type used for the stack depth register.
     pub stack_ptr: IntType<'ctx>,
+    /// `i32` type used for the jump-target register.
     pub jump_ptr: IntType<'ctx>,
+    /// `i32` type used for the return-data byte offset register.
     pub return_offset: IntType<'ctx>,
+    /// `i32` type used for the return-data byte length register.
     pub return_length: IntType<'ctx>,
 
     // Complex types
+
+    /// The LLVM struct type for [`jet_runtime::exec::Context`].
     pub exec_ctx: StructType<'ctx>,
+    /// The LLVM struct type for [`jet_runtime::exec::BlockInfo`].
     pub block_info: StructType<'ctx>,
+    /// The LLVM function type for a compiled contract: `fn(*const Context) -> i8`.
     pub contract_fn: FunctionType<'ctx>,
 }
 
