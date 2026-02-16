@@ -19,7 +19,7 @@
 |----------|------------|--------|--------|
 | **Arithmetic** | 11 | 10 | ✅ Well-tested |
 | **Comparison & Bitwise** | 14 | 14 | ✅ Well-tested |
-| **Cryptographic** | 1 | 0 | ❌ Broken (in-memory hashing not yet implemented) |
+| **Cryptographic** | 1 | 1 | ✅ Tested |
 | **Stack Operations** | 48 | 0 | ❌ Indirect only |
 | **Memory** | 3 | 3 | ✅ Good |
 | **Control Flow** | 4 | 3 | ⚠️ Partial (JUMPI has type mismatch) |
@@ -56,7 +56,7 @@
 | 0x1B | SHL | ✅ | |
 | 0x1C | SHR | ✅ | |
 | 0x1D | SAR | ✅ | |
-| 0x20 | KECCAK256 | ❌ | **BROKEN**: pops offset+size but hashes a stack slot, not memory bytes |
+| 0x20 | KECCAK256 | ✅ | |
 | 0x3D | RETURNDATASIZE | ⚠️ | Indirect only |
 | 0x3E | RETURNDATACOPY | ⚠️ | Indirect only |
 | 0x40 | BLOCKHASH | ❌ | Stub |

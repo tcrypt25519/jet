@@ -115,7 +115,7 @@ This binds the symbol name to the Rust function pointer at the time the JIT engi
 
 ```rust
 pub(crate) fn newop(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let arg = __stack_pop_1(bctx)?;
+    let arg = stack_pop_1(bctx)?;
 
     bctx.builder.build_call(
         bctx.env.symbols().new_func(),
