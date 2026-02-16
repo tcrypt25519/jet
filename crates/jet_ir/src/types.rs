@@ -16,7 +16,6 @@ const PACK_STRUCTS: bool = true;
 /// and contract code, ensuring consistent memory layouts.
 pub struct Types<'ctx> {
     // Primitives
-
     /// 8-bit integer type (`i8`).
     pub i8: IntType<'ctx>,
     /// 32-bit integer type (`i32`).
@@ -33,12 +32,10 @@ pub struct Types<'ctx> {
     pub word_bytes: ArrayType<'ctx>,
 
     // Architecture
-
     /// The EVM operand stack: an array of [`STACK_SIZE_WORDS`] 256-bit integers.
     pub stack: ArrayType<'ctx>,
 
     // Memory fields
-
     /// Pointer type used for the EVM memory buffer.
     pub mem_ptr: PointerType<'ctx>,
     /// `i32` type used for the accessible EVM memory length.
@@ -47,7 +44,6 @@ pub struct Types<'ctx> {
     pub mem_cap: IntType<'ctx>,
 
     // Runtime registers
-
     /// `i32` type used for the stack depth register.
     pub stack_ptr: IntType<'ctx>,
     /// `i32` type used for the jump-target register.
@@ -58,7 +54,6 @@ pub struct Types<'ctx> {
     pub return_length: IntType<'ctx>,
 
     // Complex types
-
     /// The LLVM struct type for [`jet_runtime::exec::Context`].
     pub exec_ctx: StructType<'ctx>,
     /// The LLVM struct type for [`jet_runtime::exec::BlockInfo`].

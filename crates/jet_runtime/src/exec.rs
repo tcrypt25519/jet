@@ -397,14 +397,12 @@ impl BlockInfo {
 #[repr(i8)]
 pub enum ReturnCode {
     // Jet-level failures
-
     /// The jump-dispatch table was given a block index with no corresponding `JUMPDEST`.
     InvalidJumpBlock = -1,
     /// A `POP`-style instruction was executed on an empty stack.
     StackUnderflow = -2,
 
     // EVM-level successes
-
     /// The contract ran to the end of its bytecode without a `RETURN` or `STOP`.
     #[default]
     ImplicitReturn = 0,
@@ -414,7 +412,6 @@ pub enum ReturnCode {
     Stop = 2,
 
     // EVM-level failures
-
     /// The contract executed a `REVERT` instruction.
     Revert = 64,
     /// The contract executed an `INVALID` instruction.
