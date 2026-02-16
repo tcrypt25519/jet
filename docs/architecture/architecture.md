@@ -40,7 +40,7 @@ The system compiles Ethereum Virtual Machine (EVM) bytecode into LLVM IR and the
 ### Technology Stack
 
 - **Language**: Rust (edition 2024)
-- **LLVM Version**: 18.0
+- **LLVM Version**: 21.0
 - **LLVM Bindings**: `inkwell` crate
 - **Target**: ORC (On-Request Compilation) JIT
 
