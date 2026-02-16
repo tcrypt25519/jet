@@ -1,5 +1,5 @@
 pub mod address;
-pub mod binding;
+mod binding;
 pub mod builtins;
 pub mod error;
 pub mod exec;
