@@ -1,4 +1,4 @@
-# Jet: Engineering Philosophy & Patterns Manifesto
+# Jet: Engineering Philosophy & Design Patterns
 
 ## 1. Context & Objective
 
@@ -333,4 +333,4 @@ jet.ops.keccak256       - Compute keccak256 hash
 
 ---
 
-*This manifesto is a living document. Update it as the codebase evolves.*
+*This is a living document. Update it as the codebase evolves.*

@@ -10,19 +10,37 @@ use jet_runtime::{Address, exec};
 
 use crate::builder::{Error, contract, env::Env};
 
+/// Manages compilation of EVM contracts into a shared LLVM module.
+///
+/// `Manager` wraps a [`Env`] and provides the top-level entry point for
+/// compiling one contract at a time.  Each contract is compiled into a
+/// distinct LLVM function whose name is derived from the contract address.
 pub struct Manager<'ctx> {
     build_env: Env<'ctx>,
 }
 
 impl<'ctx> Manager<'ctx> {
+    /// Creates a new manager that compiles contracts into `build_env`.
     pub fn new(build_env: Env<'ctx>) -> Self {
         Self { build_env }
     }
 
+    /// Returns the underlying build environment.
     pub fn env(&self) -> &Env<'ctx> {
         &self.build_env
     }
 
+    /// Compiles `rom` (EVM bytecode) for the contract at `addr` and adds the
+    /// resulting LLVM function to the module.
+    ///
+    /// When [`Options::emit_llvm`] is set the generated IR is printed to
+    /// stdout.  When [`Options::assert`] is set the function and module are
+    /// verified before returning.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`Error`] if compilation, IR verification, or any LLVM
+    /// operation fails.
     pub fn add_contract_function(&self, addr: Address, rom: &[u8]) -> Result<(), Error> {
         let fn_name = exec::mangle_contract_fn(&addr);
         info!("Building ROM into function {}", fn_name);

@@ -9,6 +9,10 @@ use inkwell::{
 use jet_ir::Types;
 use jet_runtime;
 
+/// Configuration options for the Jet compiler.
+///
+/// `Options` is passed when creating an [`Env`] and controls global compiler
+/// behaviour such as the optimisation level and diagnostic output.
 #[derive(serde::Serialize, Clone, Debug, Default)]
 pub struct Options {
     mode: Mode,
@@ -17,6 +21,15 @@ pub struct Options {
 }
 
 impl Options {
+    /// Creates a new `Options` value.
+    ///
+    /// # Parameters
+    ///
+    /// - `mode` — Compilation mode ([`Mode::Debug`] or [`Mode::Release`]).
+    /// - `emit_llvm` — When `true`, the generated LLVM IR is printed to stdout
+    ///   after each contract is compiled.
+    /// - `assert` — When `true`, the LLVM IR is verified after each contract
+    ///   is compiled, returning an error if verification fails.
     pub fn new(mode: Mode, emit_llvm: bool, assert: bool) -> Self {
         Self {
             mode,
@@ -25,23 +38,29 @@ impl Options {
         }
     }
 
+    /// Returns the compilation mode.
     pub fn mode(&self) -> Mode {
         self.mode.clone()
     }
 
+    /// Returns `true` if the generated LLVM IR should be printed to stdout.
     pub fn emit_llvm(&self) -> bool {
         self.emit_llvm
     }
 
+    /// Returns `true` if LLVM IR verification is enabled after compilation.
     pub fn assert(&self) -> bool {
         self.assert
     }
 }
 
+/// Compilation mode controlling optimisation and diagnostic behaviour.
 #[derive(clap::ValueEnum, serde::Serialize, Clone, Debug, Default, PartialEq, Eq)]
 pub enum Mode {
+    /// Debug mode: no optimisations, additional diagnostics.
     #[default]
     Debug = 0,
+    /// Release mode: standard optimisations enabled.
     Release = 1,
 }
 
@@ -196,6 +215,14 @@ impl<'ctx> Symbols<'ctx> {
     }
 }
 
+/// LLVM build environment for a single compilation unit.
+///
+/// `Env` bundles an LLVM [`Context`], the LLVM [`Module`] being compiled,
+/// the unified type registry, and resolved symbols for every runtime function
+/// that has been declared in the module.
+///
+/// An `Env` is constructed once per compilation session and shared across all
+/// contracts compiled into the same module.
 pub struct Env<'ctx> {
     opts: Options,
 
@@ -207,6 +234,11 @@ pub struct Env<'ctx> {
 }
 
 impl<'ctx> Env<'ctx> {
+    /// Creates a new build environment from an existing LLVM module.
+    ///
+    /// The `module` must already have all runtime function declarations present
+    /// (use [`jet_runtime::RuntimeBuilder`] to produce such a module). Returns
+    /// an error if any expected runtime symbol cannot be found in the module.
     pub fn new(
         context: &'ctx Context,
         module: Module<'ctx>,
@@ -226,14 +258,17 @@ impl<'ctx> Env<'ctx> {
         })
     }
 
+    /// Returns the LLVM context.
     pub fn context(&self) -> &'ctx Context {
         self.context
     }
 
+    /// Returns the LLVM module being compiled.
     pub fn module(&self) -> &Module<'ctx> {
         &self.module
     }
 
+    /// Returns the compiler options used to create this environment.
     pub fn opts(&self) -> &Options {
         &self.opts
     }

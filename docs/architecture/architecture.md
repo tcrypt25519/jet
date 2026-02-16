@@ -95,11 +95,12 @@ This extends to a broader architectural pattern: contracts could be lowered dire
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Three Cooperating Components
+### Four Cooperating Components
 
-1. **Compiler (crates/jet)**: Parses bytecode, identifies basic blocks, and builds LLVM IR for each opcode.
-2. **Runtime (crates/jet_runtime)**: Defines the execution context and provides builtin functions for stack, memory, and contract calls.
-3. **Runtime IR module (runtime-ir/jet.ll)**: Declares runtime symbols and provides a small amount of IR-implemented functionality.
+1. **Compiler (`crates/jet`)**: Parses bytecode, identifies basic blocks, and builds LLVM IR for each opcode.
+2. **Runtime (`crates/jet_runtime`)**: Defines the execution context and provides builtin functions for stack, memory, and contract calls. Also generates runtime IR via `RuntimeBuilder`.
+3. **Shared types (`crates/jet_ir`)**: Unified LLVM type registry (`jet_ir::Types`) and constants shared by both compiler and runtime to prevent layout drift.
+4. **Push macros (`crates/jet_push_macros`)**: Proc-macro crate generating `PUSH0`..`PUSH32` bytecode helper macros.
 
 ### Crate Structure
 
@@ -122,16 +123,25 @@ jet/
 │   │   │   └── jetdbg.rs       # Debug/testing utility
 │   │   └── tests/              # Integration tests
 │   │
+│   ├── jet_ir/                 # Shared IR types and constants
+│   │   └── src/
+│   │       ├── lib.rs          # Re-exports
+│   │       ├── constants.rs    # EVM + Jet runtime constants
+│   │       └── types.rs        # Unified LLVM type registry
+│   │
+│   ├── jet_push_macros/        # Proc-macro crate for PUSH opcodes
+│   │   └── src/
+│   │       └── lib.rs          # generate_push_macros! proc-macro
+│   │
 │   └── jet_runtime/            # Runtime support crate
 │       └── src/
-│           ├── lib.rs          # Constants and config
+│           ├── lib.rs          # Re-exports (including jet_ir::*)
+│           ├── address.rs      # Address newtype ([u8; 20])
 │           ├── exec.rs         # Execution context
-│           ├── builtins.rs     # Runtime functions
+│           ├── builtins.rs     # Extern "C" runtime functions
+│           ├── runtime_builder.rs  # Programmatic IR generation
 │           ├── symbols.rs      # Symbol name constants
 │           └── binding/        # Display implementations
-│
-└── runtime-ir/
-    └── jet.ll                  # LLVM IR runtime declarations
 ```
 
 ### Tiered Compilation Strategy
@@ -478,6 +488,8 @@ Gas accounting is designed but not yet implemented. The intended approach exploi
 
 ### Execution Context Layout
 
+The `Context` struct uses **pointer-based memory** (ADR-002) — memory is heap-allocated and referenced by pointer, not stored inline. This matches EVM semantics (unbounded growth) and eliminates layout drift between Rust and generated IR.
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                        Context (repr(C))                         │
@@ -494,11 +506,17 @@ Gas accounting is designed but not yet implemented. The intended approach exploi
 │  │ [32 bytes each, little-endian]                              ││
 │  └─────────────────────────────────────────────────────────────┘│
 ├─────────────────────────────────────────────────────────────────┤
-│  memory: [u8; 32768]  │ EVM memory (32KB default)               │
+│  memory_ptr: *mut u8  │ Pointer to heap-allocated memory buffer │
 │  memory_len: u32      │ Used memory length                       │
-│  memory_cap: u32      │ Memory capacity                          │
+│  memory_cap: u32      │ Allocated capacity                       │
 └─────────────────────────────────────────────────────────────────┘
+
+LLVM field indices (for GEP operations):
+  0: stack_ptr, 1: jump_ptr, 2: return_off, 3: return_len,
+  4: sub_call, 5: stack, 6: memory_ptr, 7: memory_len, 8: memory_cap
 ```
+
+Memory is initially allocated as `WORD_SIZE_BYTES * MEMORY_INITIAL_SIZE_WORDS` bytes (32 KB) with 32-byte alignment, and freed in `Context::drop`. The `jet_ir::Types` struct defines an identical layout in LLVM IR so that generated code and Rust agree on every field offset.
 
 ### Word Representation
 
@@ -613,15 +631,30 @@ Some operations are too complex for inline IR generation:
 - Hash computation (keccak256)
 - Cross-contract calls
 
-### Function Declaration Pattern
+### RuntimeBuilder: Programmatic IR Generation
 
-**In `runtime-ir/jet.ll`**:
+The static `runtime-ir/jet.ll` file has been replaced by `jet_runtime::RuntimeBuilder`, a Rust struct that generates the runtime LLVM module programmatically using `inkwell`. This eliminates the host target triple mismatch that the hand-written `.ll` file suffered from and lets the runtime IR evolve alongside Rust types without keeping two representations in sync.
 
-```llvm
-declare ptr @jet.stack.pop (ptr)
-declare i8 @jet.mem.store.word (ptr, ptr, ptr)
-declare i8 @jet.contract.call(ptr, ptr, ptr, ptr, ptr)
-```
+`RuntimeBuilder::build()` generates the following IR functions:
+
+| Function | Kind | Description |
+|---|---|---|
+| `jet.stack.push.i256` | IR-defined | Push i256 value onto stack |
+| `jet.stack.push.ptr` | IR-defined | Push word from pointer onto stack |
+| `jet.stack.pop` | IR-defined | Pop word pointer from stack (null on underflow) |
+| `jet.stack.peek` | IR-defined | Peek at word at index without popping |
+| `jet.stack.swap` | IR-defined | Swap top word with word at index |
+| `jet.mem.load` | IR-defined | Load i256 from memory (returns value, not pointer) |
+| `jet.mem.store.word` | IR-defined | Store 32-byte word to memory |
+| `jet.mem.store.byte` | IR-defined | Store single byte to memory |
+| `jet.contract.call` | Declared | Cross-contract call (implemented in `builtins.rs`) |
+| `jet.ops.keccak256` | Declared | Keccak256 hash (implemented in `builtins.rs`) |
+| `jet.ops.exp` | Declared | Modular exponentiation (implemented in `builtins.rs`) |
+| `jet.ops.addmod` | Declared | 512-bit ADDMOD (implemented in `builtins.rs`) |
+| `jet.ops.mulmod` | Declared | 512-bit MULMOD (implemented in `builtins.rs`) |
+| `jet.mem.expand` | Declared | Dynamic memory expansion (implemented in `builtins.rs`) |
+
+IR-defined functions are compiled by LLVM and benefit from standard optimization passes. Declared functions are `extern "C"` Rust functions linked via `add_global_mapping` at JIT startup.
 
 **In `symbols.rs`**:
 
@@ -647,31 +680,6 @@ fn link_in_runtime(&self, ee: &ExecutionEngine) {
     ee.add_global_mapping(&sym.stack_pop(), builtins::stack_pop as usize);
 }
 ```
-
-### Special Case: IR-Defined Runtime Function
-
-`jet.stack.push.i256` is defined directly in LLVM IR for efficiency:
-
-```llvm
-define i1 @jet.stack.push.i256 (%jet.types.exec_ctx*, i256) {
-entry:
-  ; Load stack pointer
-  %stack.ptr.addr = getelementptr inbounds %jet.types.exec_ctx, ptr %0, i32 0, i32 0
-  %stack.ptr = load i32, ptr %stack.ptr.addr
-  %stack.top.addr = getelementptr inbounds %jet.types.exec_ctx, ptr %0, i32 0, i32 5, i32 %stack.ptr
-
-  ; Store word directly (i256 to memory)
-  store i256 %1, ptr %stack.top.addr
-
-  ; Increment stack pointer
-  %stack.ptr.next = add i32 %stack.ptr, 1
-  store i32 %stack.ptr.next, ptr %stack.ptr.addr
-
-  ret i1 true
-}
-```
-
-This avoids a function call for the most common operation.
 
 ### Calls and Sub-contexts
 
@@ -779,40 +787,7 @@ Contract symbols are mangled with `jet.contracts.` prefix and the address string
 
 ### Adding a New Runtime Function
 
-1. **Define symbol** in `symbols.rs`:
-
-   ```rust
-   pub const FN_NEW_FUNC: &str = "jet.category.newfunc";
-   ```
-
-2. **Declare in LLVM IR** (`runtime-ir/jet.ll`):
-
-   ```llvm
-   declare i8 @jet.category.newfunc (ptr, ptr)
-   ```
-
-3. **Implement in Rust** (`builtins.rs`):
-
-   ```rust
-   pub unsafe extern "C" fn new_func(ctx: *mut Context, arg: *const Word) -> i8 {
-       // implementation
-   }
-   ```
-
-4. **Add to Symbols struct** (`env.rs`):
-
-   ```rust
-   struct Symbols {
-       // ...
-       new_func: FunctionValue<'ctx>,
-   }
-   ```
-
-5. **Link at runtime** (`engine/mod.rs`):
-
-   ```rust
-   map_fn(sym.new_func(), builtins::new_func as usize);
-   ```
+See [`docs/process/new-runtime-function.md`](../process/new-runtime-function.md) for the full checklist.
 
 ---
 
@@ -861,43 +836,68 @@ Contract symbols are mangled with `jet.contracts.` prefix and the address string
 
 ### `jet/src/engine/mod.rs`
 - **`Engine`**: Wraps Manager, handles compilation and execution
-- Loads runtime IR module from `runtime-ir/jet.ll`
+- Calls `RuntimeBuilder::build()` to generate the runtime LLVM module
 - Creates JIT execution engine
-- Links Rust runtime functions at JIT time via `add_global_mapping`
+- Links `extern "C"` builtins at JIT time via `add_global_mapping`
 - Executes contracts and returns `ContractRun`
 
+### `jet_ir/src/constants.rs`
+- Canonical constants: `WORD_SIZE_BYTES`, `STACK_SIZE_WORDS`, `ADDRESS_SIZE_BYTES`, `MEMORY_INITIAL_SIZE_WORDS`, etc.
+- Single source of truth for sizes shared by compiler and runtime
+
+### `jet_ir/src/types.rs`
+- **`Types<'ctx>`**: Unified LLVM type registry built from an inkwell `Context`
+- Defines all primitive types (`i8`, `i32`, `i64`, `i160`, `i256`, `ptr`)
+- Defines `exec_ctx` struct layout (9 fields, packed) — single authoritative definition
+- Defines `block_info` struct layout
+- Re-used by both `RuntimeBuilder` and compiler's `env.rs` to guarantee layout consistency
+
+### `jet_push_macros/src/lib.rs`
+- **`generate_push_macros!(0..=32)`** proc-macro
+- Generates `PUSH0!`, `PUSH1!(b)`, ..., `PUSH32!(b0, b1, ...)` bytecode helper macros
+- Each macro takes exactly N byte arguments and emits the correct opcode + data bytes
+
 ### `jet_runtime/src/lib.rs`
-- System constants (word size, stack size, memory size)
+- Module declarations; re-exports `jet_ir::*` (constants flow from `jet_ir`)
+- Public surface: `Address`, `Result`, `RuntimeError`, `RuntimeBuilder`
+
+### `jet_runtime/src/address.rs`
+- **`Address([u8; 20])`** newtype with `#[repr(transparent)]`
+- Derives `Clone`, `Copy`, `PartialEq`, `Eq`, `Hash`, `Default`
+- `Display`/`Debug` emit lowercase `0x`-prefixed hex
+- `FromStr`/`TryFrom<&str>` parse hex strings with optional `0x` prefix
+- `From<[u8; 20]>`, `Into<[u8; 20]>`, `AsRef<[u8]>` for zero-cost interop
 
 ### `jet_runtime/src/exec.rs`
 - **`Word`**: 32-byte array type alias (`[u8; 32]`)
-- **`Context`**: Execution context struct with stack, memory, registers
-- **`BlockInfo`**: EVM block metadata struct (hash, coinbase, etc)
-- **`ReturnCode`**: Enum for execution results (encodes EVM and Jet-level success/failure)
+- **`Context`**: Execution context with pointer-based memory (ADR-002)
+  - `memory_ptr: *mut u8` — heap-allocated buffer, freed in `Drop`
+  - `memory_len`/`memory_cap` track usage and allocated capacity
+- **`BlockInfo`**: EVM block metadata struct
+- **`ReturnCode`**: Enum for execution results (EVM and Jet-level success/failure)
 - **`ContractRun`**: Wraps result and context
 - **`ContractFunc`**: Function pointer type for compiled contracts
-- Stack operations: push Word, pop/peek/swap logic
 
 ### `jet_runtime/src/builtins.rs`
-- Unsafe `extern "C"` functions callable from LLVM IR
-- Stack operations, memory operations, contract calls
-- Keccak256 implementation using sha3 crate
-- `mem_store`, `mem_load`, `mem_store_byte` operate on Context memory slice
+- Unsafe `extern "C"` functions for complex operations that need Rust stdlib/deps
+- Contract calls, keccak256, EXP, ADDMOD, MULMOD, memory expansion
+- These are declared in the runtime IR module and linked via `add_global_mapping`
+
+### `jet_runtime/src/runtime_builder.rs`
+- **`RuntimeBuilder`**: Generates the runtime LLVM module programmatically
+- Replaces the old static `runtime-ir/jet.ll` file
+- `build()` returns a `Module<'ctx>` containing all IR-defined runtime functions
+- Uses `jet_ir::Types` for consistent struct layouts
+- IR-defined functions: all stack and basic memory operations
+- Declared-only functions: contract calls, crypto, arithmetic ops
 
 ### `jet_runtime/src/symbols.rs`
 - String constants for all symbol names
 - Used for consistent linking between Rust and LLVM
-- Contract symbols prefixed with "jet.contracts."
+- Contract symbols prefixed with `"jet.contracts."`
 
-### `jet_runtime/src/binding.rs`
+### `jet_runtime/src/binding/`
 - Display implementations for debugging
-
-### `runtime-ir/jet.ll`
-- LLVM IR file with type definitions and function declarations
-- Contains `@jet.stack.push.i256` implementation (IR-based)
-- Loaded at startup to provide runtime function signatures
-- Uses macOS x86_64 target triple and datalayout (portability issue; see Known Limitations)
-- Declares exec_ctx layout in LLVM IR
 
 ---
 
@@ -1019,15 +1019,16 @@ Several opcode families are stubbed:
 
 ### Known TODOs and Constraints
 
-1. **Memory bounds checking**: Incomplete in runtime functions (bounds checks are TODOs)
-2. **Gas accounting**: Not implemented
-3. **Code eviction**: No memory management for compiled contracts
-4. **Error handling**: Some panics need conversion to Results
-5. **Runtime IR target triple**: macOS x86_64; host mismatch is likely
-6. **Symbol naming inconsistencies**: `runtime-ir/jet.ll` declares `jet.stack.push.word`, but symbols expect `jet.stack.push.i256`
-7. **Struct layout alignment**: Runtime IR exec_ctx layout differs from Env::Types (memory struct vs inlined memory array) and from exec::Context (memory size). Requires investigation.
-8. **Address size**: Currently `ADDRESS_SIZE_BYTES = 2` in tests; EVM addresses are 20 bytes
-9. **JUMPI type mismatch**: Condition uses `load_i64` but compares with i256 zero
+1. **Gas accounting**: Not implemented. The intended approach amortizes cost per basic block.
+2. **Code eviction**: No memory management for compiled contracts; the JIT cache grows unbounded.
+3. **Stack overflow checking**: `stack_pop` returns null on underflow (handled); `stack_push` does not yet check for overflow at depth 1024.
+4. **Memory bounds checking**: `jet.mem.expand` is declared but bounds validation in memory read/write paths may be incomplete.
+
+**Previously resolved limitations** (no longer issues):
+- ~~Runtime IR target triple mismatch~~ — eliminated when `runtime-ir/jet.ll` was replaced by `RuntimeBuilder`
+- ~~Struct layout mismatches between Rust and LLVM IR~~ — resolved by `jet_ir::Types` as the single source of truth (ADR-002)
+- ~~Symbol naming inconsistency (`jet.stack.push.word` vs `.i256`)~~ — resolved in `RuntimeBuilder`
+- ~~`ADDRESS_SIZE_BYTES = 2` in tests~~ — corrected to 20 in `jet_ir::constants`
 
 ### Design Decisions and Trade-offs
 
@@ -1049,18 +1050,17 @@ Several opcode families are stubbed:
 
 ### Future Optimization Opportunities
 
-1. **Inline runtime functions**: Convert Rust builtins to LLVM IR
-2. **Gas amortization**: Compute gas per basic block, not per instruction
-3. **Profile-guided optimization**: Use ORC's profiling for hot path optimization
-4. **Shared library extraction**: Compile contracts to standalone `.so`/`.dll` files
-5. **Add memory length/capacity tracking**: And bounds checks
-6. **Expand opcode coverage**: With a test-first approach
-7. **Shared IR layer (`jet_ir` crate)**: A planned refactoring would extract a shared `jet_ir` crate providing unified LLVM types and constants used by both the builder and runtime, eliminating layout drift between the two.
+1. **Inline more builtins**: Convert remaining Rust builtins (e.g., ADDMOD/MULMOD) to IR-defined functions in `RuntimeBuilder` for better LLVM optimization.
+2. **Gas amortization**: Compute gas per basic block, not per instruction.
+3. **Stack overflow checking**: Add `stack_ptr >= 1024` guard to `stack_push` functions.
+4. **Profile-guided optimization**: Use ORC's profiling for hot path optimization.
+5. **Shared library extraction**: Compile contracts to standalone `.so`/`.dll` files.
+6. **Expand opcode coverage**: With a test-first approach (storage, environment, call data, logs).
 
 ### Suggested Next Steps
 
-1. Reconcile struct layouts and symbol names between `exec::Context`, `builder::env::Types`, and `runtime-ir/jet.ll`
-2. Add memory length/capacity tracking and bounds checks
+1. Add stack overflow guard in `RuntimeBuilder::build_stack_push_*`
+2. Implement full memory bounds checking in memory read/write paths
 3. Expand opcode coverage with a test-first approach
 
 ---
@@ -1072,8 +1072,10 @@ Several opcode families are stubbed:
 | Task | Primary Files |
 |------|---------------|
 | Add new opcode | `instructions.rs`, `ops.rs`, `contract.rs` |
-| Add runtime function | `symbols.rs`, `jet.ll`, `builtins.rs`, `env.rs`, `engine/mod.rs` |
-| Modify execution context | `exec.rs`, `jet.ll`, `env.rs` |
+| Add IR-defined runtime function | `runtime_builder.rs`, `symbols.rs`, `env.rs` |
+| Add extern "C" runtime function | `builtins.rs`, `runtime_builder.rs` (declare), `symbols.rs`, `engine/mod.rs` (link) |
+| Modify execution context layout | `exec.rs`, `jet_ir/types.rs` (must stay in sync) |
+| Modify shared constants | `jet_ir/constants.rs` |
 | Debug compilation | `jetdbg.rs`, enable `emit_llvm` option |
 | Add tests | `tests/test_roms.rs`, `tests/roms/mod.rs` |
 
