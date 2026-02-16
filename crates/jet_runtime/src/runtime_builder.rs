@@ -86,7 +86,15 @@ impl<'ctx> RuntimeBuilder<'ctx> {
         // Crypto operations
         self.module.add_function(
             "jet.ops.keccak256",
-            self.types.i8.fn_type(&[self.types.ptr.into()], false),
+            self.types.i8.fn_type(
+                &[
+                    self.types.ptr.into(), // ctx: *mut Context
+                    self.types.i32.into(), // offset: u32
+                    self.types.i32.into(), // size: u32
+                    self.types.ptr.into(), // result: *mut [u8; 32]
+                ],
+                false,
+            ),
             None,
         );
 
