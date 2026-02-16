@@ -586,18 +586,53 @@ pub(crate) fn sar(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     Ok(())
 }
 
-pub(crate) fn keccak256(ctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let data_ptr = stack_pop_1(ctx)?;
+pub(crate) fn keccak256(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
+    // EVM: KECCAK256 pops offset (TOS) then size, reads size bytes from memory
+    // at offset, hashes them, and pushes the 32-byte result.
+    let (offset_ptr, size_ptr) = stack_pop_2(bctx)?;
+    let offset_i32 = load_i32(bctx, offset_ptr)?;
+    let size_i32 = load_i32(bctx, size_ptr)?;
 
-    // TODO: Check return code
-    ctx.builder.build_call(
-        ctx.env.symbols().keccak256(),
-        &[data_ptr.into()],
+    call_mem_expand_checked(bctx, offset_i32, size_i32, "keccak256")?;
+
+    // Reuse offset_ptr as the result buffer — the stack slot is free after pop.
+    let ret = bctx.builder.build_call(
+        bctx.env.symbols().keccak256(),
+        &[
+            bctx.registers.exec_ctx.into(),
+            offset_i32.into(),
+            size_i32.into(),
+            offset_ptr.into(),
+        ],
         "keccak256",
     )?;
 
-    // TODO: We could instead simply increase the stack ptr
-    call_stack_push_ptr(ctx, data_ptr)?;
+    // Check return code from jet_ops_keccak256
+    // SAFETY: IntValue::new requires a valid LLVM value reference.
+    // ret.as_value_ref() returns the underlying ValueRef from a CallSiteValue,
+    // which is guaranteed to be valid by inkwell's build_call.
+    let ret_i8 = unsafe { IntValue::new(ret.as_value_ref()) };
+    let zero = bctx.env.types().i8.const_int(0, false);
+    let is_ok =
+        bctx.builder
+            .build_int_compare(inkwell::IntPredicate::EQ, ret_i8, zero, "keccak256_ok")?;
+
+    let ok_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "keccak256_success");
+    let err_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "keccak256_error");
+    bctx.builder
+        .build_conditional_branch(is_ok, ok_block, err_block)?;
+
+    bctx.builder.position_at_end(err_block);
+    build_return(bctx, ReturnCode::Invalid)?;
+
+    bctx.builder.position_at_end(ok_block);
+    call_stack_push_ptr(bctx, offset_ptr)?;
     Ok(())
 }
 
@@ -968,6 +1003,10 @@ fn load_i8<'a>(bctx: &BuildCtx<'a, '_>, ptr: PointerValue<'a>) -> Result<IntValu
     Ok(int)
 }
 
+/// Truncates an EVM word (i256) to i32.
+///
+/// This is safe for memory operations because EVM gas costs make >4GB memory
+/// economically impossible. See docs/adrs/adr-004.md for full analysis.
 fn load_i32<'a>(bctx: &BuildCtx<'a, '_>, ptr: PointerValue<'a>) -> Result<IntValue<'a>, Error> {
     let int = load_int(bctx, ptr, bctx.env.types().i32)?;
     Ok(int)
