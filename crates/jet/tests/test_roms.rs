@@ -52,7 +52,7 @@ define_ops!(
     SHL,
     SHR,
     SAR,
-    // KECCAK256, // Commented out - implementation doesn't match EVM spec
+    KECCAK256,
     JUMP,
     JUMPDEST,
     PC,
@@ -153,7 +153,7 @@ rom_tests! {
             PUSH1!(0x00),
             PUSH1!(0x00),
             PUSH1!(0x00),
-            PUSH2!(0x00, 0x01),
+            PUSH20!(0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
             PUSH1!(0x00),
             CALL!(),
             RETURNDATASIZE!(),
@@ -183,22 +183,8 @@ rom_tests! {
         },
     },
 
-    // FIXME(bug): KECCAK256 implementation is incorrect and doesn't match EVM spec.
-    // Per docs/ext/evm/20.mdx, KECCAK256 should:
-    //   1. Pop TWO values: offset and size
-    //   2. Read 'size' bytes from memory starting at 'offset'
-    //   3. Hash those bytes with Keccak-256
-    //   4. Push the 32-byte hash onto the stack
-    //
-    // Current implementation (crates/jet/src/builder/ops.rs:681):
-    //   1. Pops ONE value (data_ptr)
-    //   2. Hashes a 32-byte buffer at that pointer (not memory offset/size)
-    //   3. Expected hash doesn't match any standard (not Keccak-256 of empty string)
-    //
-    // This test cannot verify correct behavior until implementation is fixed.
-    // Correct hash of empty string should be:
-    //   c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470
-    /*
+    // keccak256("") = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470
+    // PUSH0 PUSH0 KECCAK256: offset=0, size=0 → hash of empty byte string.
     keccak256_empty_hash: Test {
         roms: vec![bytecode![
             PUSH0!(),
@@ -211,7 +197,6 @@ rom_tests! {
             ..Default::default()
         },
     },
-    */
 
     exp_two_cubed: Test {
         roms: vec![bytecode![

@@ -2,6 +2,7 @@ use inkwell::execution_engine::ExecutionEngine;
 use log::error;
 
 use crate::{
+    address::Address,
     error::{Result, RuntimeError},
     symbols::FN_CONTRACT_PREFIX,
     *,
@@ -9,7 +10,6 @@ use crate::{
 
 pub type Word = [u8; 32];
 pub type Hash = [u8; 32];
-type Address = [u8; ADDRESS_SIZE_BYTES];
 pub type HashHistory = [Hash; BLOCK_HASH_HISTORY_SIZE];
 
 pub type ContractFunc = unsafe extern "C" fn(*const Context) -> ReturnCode;
@@ -26,6 +26,7 @@ pub struct Context {
     stack: [Word; STACK_SIZE_WORDS as usize],
 
     // Pointer-based memory layout as per ADR-002
+    // u32 is safe for offsets/sizes, see ADR-004 (EVM gas costs prevent >4GB)
     pub(crate) memory_ptr: *mut u8,
     pub(crate) memory_len: u32,
     pub(crate) memory_cap: u32,
@@ -315,6 +316,7 @@ impl BlockInfo {
 pub enum ReturnCode {
     // Jet-level failures
     InvalidJumpBlock = -1,
+    StackUnderflow = -2,
 
     // EVM-level successes
     #[default]
@@ -329,19 +331,29 @@ pub enum ReturnCode {
 }
 
 /// Mangles the given address into a contract function name.
-pub fn mangle_contract_fn(address: &str) -> String {
+pub fn mangle_contract_fn(address: &Address) -> String {
     format!("{}{}", FN_CONTRACT_PREFIX, address)
 }
 
 /// Finds the pointer to the compiled contract function for the given address.
+///
+/// `addr_slice` contains the 20 address bytes in the little-endian order used
+/// by the JIT stack (least-significant byte first). They are reversed here to
+/// recover the canonical big-endian address before the function-name lookup.
 pub fn jet_contract_fn_lookup(jit_engine: &ExecutionEngine, addr_slice: &[u8]) -> usize {
-    // Convert the address to a function name
-    let reversed_addr = addr_slice.iter().rev().cloned().collect::<Vec<u8>>();
-    let mut addr_str = "0x".to_owned();
-    addr_str.push_str(&hex::encode(reversed_addr.as_slice()));
-    let fn_name = mangle_contract_fn(addr_str.as_str());
+    // The stack stores values little-endian; reverse to get the canonical
+    // big-endian address bytes.
+    // EVM stack words are 32 bytes but addresses are 20; take only the last
+    // ADDRESS_SIZE_BYTES bytes (the address occupies the low bytes of the word)
+    // after reversing from little-endian to big-endian order.
+    let mut bytes = [0u8; ADDRESS_SIZE_BYTES];
+    for (i, b) in addr_slice.iter().rev().take(ADDRESS_SIZE_BYTES).enumerate() {
+        bytes[i] = *b;
+    }
+    let address = Address::new(bytes);
+    let fn_name = mangle_contract_fn(&address);
 
-    // Look up the function pointer
+    // Look up the function pointer.
     match jit_engine.get_function_address(fn_name.as_str()) {
         Ok(ptr) => ptr,
         Err(e) => {

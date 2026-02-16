@@ -86,7 +86,15 @@ impl<'ctx> RuntimeBuilder<'ctx> {
         // Crypto operations
         self.module.add_function(
             "jet.ops.keccak256",
-            self.types.i8.fn_type(&[self.types.ptr.into()], false),
+            self.types.i8.fn_type(
+                &[
+                    self.types.ptr.into(), // ctx: *mut Context
+                    self.types.i32.into(), // offset: u32
+                    self.types.i32.into(), // size: u32
+                    self.types.ptr.into(), // result: *mut [u8; 32]
+                ],
+                false,
+            ),
             None,
         );
 
@@ -96,6 +104,34 @@ impl<'ctx> RuntimeBuilder<'ctx> {
             self.types
                 .i8
                 .fn_type(&[self.types.ptr.into(), self.types.ptr.into()], false),
+            None,
+        );
+
+        self.module.add_function(
+            "jet.ops.addmod",
+            self.types.i8.fn_type(
+                &[
+                    self.types.ptr.into(),
+                    self.types.ptr.into(),
+                    self.types.ptr.into(),
+                    self.types.ptr.into(),
+                ],
+                false,
+            ),
+            None,
+        );
+
+        self.module.add_function(
+            "jet.ops.mulmod",
+            self.types.i8.fn_type(
+                &[
+                    self.types.ptr.into(),
+                    self.types.ptr.into(),
+                    self.types.ptr.into(),
+                    self.types.ptr.into(),
+                ],
+                false,
+            ),
             None,
         );
 
@@ -300,6 +336,32 @@ impl<'ctx> RuntimeBuilder<'ctx> {
             .unwrap()
             .into_int_value();
 
+        // Bounds check: ensure stack_ptr > 0 before popping
+        let is_underflow = self
+            .builder
+            .build_int_compare(
+                inkwell::IntPredicate::EQ,
+                stack_ptr,
+                self.types.i32.const_zero(),
+                "is_underflow",
+            )
+            .unwrap();
+
+        let underflow_block = self.context.append_basic_block(function, "underflow");
+        let valid_block = self.context.append_basic_block(function, "valid");
+
+        self.builder
+            .build_conditional_branch(is_underflow, underflow_block, valid_block)
+            .unwrap();
+
+        // Underflow case: return null pointer
+        self.builder.position_at_end(underflow_block);
+        let null_ptr = self.types.ptr.const_null();
+        self.builder.build_return(Some(&null_ptr)).unwrap();
+
+        // Valid case: proceed with pop
+        self.builder.position_at_end(valid_block);
+
         // Decrement stack pointer
         let stack_ptr_prev = self
             .builder
@@ -498,9 +560,10 @@ impl<'ctx> RuntimeBuilder<'ctx> {
     }
 
     /// Build jet.mem.load function in IR.
-    /// Loads a word from memory at the given offset.
+    /// Loads a word from memory at the given offset and returns the value (not a pointer).
+    /// This prevents UAF issues when memory is reallocated.
     fn build_mem_load(&self) -> FunctionValue<'ctx> {
-        let fn_type = self.types.ptr.fn_type(
+        let fn_type = self.types.i256.fn_type(
             &[
                 self.context
                     .ptr_type(inkwell::AddressSpace::default())
@@ -542,8 +605,15 @@ impl<'ctx> RuntimeBuilder<'ctx> {
                 .unwrap()
         };
 
-        // Return pointer to the word at this location
-        self.builder.build_return(Some(&byte_ptr)).unwrap();
+        // Load the i256 value from memory and return it directly
+        // This prevents UAF by not returning a pointer that could become dangling
+        let value = self
+            .builder
+            .build_load(self.types.i256, byte_ptr, "mem.value")
+            .unwrap()
+            .into_int_value();
+
+        self.builder.build_return(Some(&value)).unwrap();
         function
     }
 

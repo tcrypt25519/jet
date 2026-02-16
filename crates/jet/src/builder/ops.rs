@@ -248,47 +248,33 @@ pub(crate) fn smod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
 }
 
 pub(crate) fn addmod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b, n) = stack_pop_3(bctx)?;
-    let a = load_i256(bctx, a)?;
-    let b = load_i256(bctx, b)?;
-    let n = load_i256(bctx, n)?;
+    let (a, b, c) = stack_pop_3(bctx)?;
 
-    let zero = bctx.env.types().i256.const_zero();
-    // EVM spec: if N == 0 the result is 0
-    let n_is_zero =
-        bctx.builder
-            .build_int_compare(inkwell::IntPredicate::EQ, n, zero, "addmod_n_is_zero")?;
-    build_zero_guard(bctx, n_is_zero, "addmod", |cont| {
-        let sum = bctx.builder.build_int_add(a, b, "addmod_sum")?;
-        let result = bctx
-            .builder
-            .build_int_unsigned_rem(sum, n, "addmod_result")?;
-        stack_push_int(bctx, result)?;
-        bctx.builder.build_unconditional_branch(cont)?;
-        Ok(())
-    })
+    // Call 512-bit addmod builtin, reusing `a` as the result buffer
+    bctx.builder.build_call(
+        bctx.env.symbols().addmod(),
+        &[a.into(), a.into(), b.into(), c.into()],
+        "addmod_call",
+    )?;
+
+    // Push result back onto stack (reusing the `a` buffer which now contains the result)
+    call_stack_push_ptr(bctx, a)?;
+    Ok(())
 }
 
 pub(crate) fn mulmod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b, n) = stack_pop_3(bctx)?;
-    let a = load_i256(bctx, a)?;
-    let b = load_i256(bctx, b)?;
-    let n = load_i256(bctx, n)?;
+    let (a, b, c) = stack_pop_3(bctx)?;
 
-    let zero = bctx.env.types().i256.const_zero();
-    // EVM spec: if N == 0 the result is 0
-    let n_is_zero =
-        bctx.builder
-            .build_int_compare(inkwell::IntPredicate::EQ, n, zero, "mulmod_n_is_zero")?;
-    build_zero_guard(bctx, n_is_zero, "mulmod", |cont| {
-        let product = bctx.builder.build_int_mul(a, b, "mulmod_product")?;
-        let result = bctx
-            .builder
-            .build_int_unsigned_rem(product, n, "mulmod_result")?;
-        stack_push_int(bctx, result)?;
-        bctx.builder.build_unconditional_branch(cont)?;
-        Ok(())
-    })
+    // Call 512-bit mulmod builtin, reusing `a` as the result buffer
+    bctx.builder.build_call(
+        bctx.env.symbols().mulmod(),
+        &[a.into(), a.into(), b.into(), c.into()],
+        "mulmod_call",
+    )?;
+
+    // Push result back onto stack (reusing the `a` buffer which now contains the result)
+    call_stack_push_ptr(bctx, a)?;
+    Ok(())
 }
 
 pub(crate) fn exp(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
@@ -600,18 +586,53 @@ pub(crate) fn sar(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     Ok(())
 }
 
-pub(crate) fn keccak256(ctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let data_ptr = stack_pop_1(ctx)?;
+pub(crate) fn keccak256(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
+    // EVM: KECCAK256 pops offset (TOS) then size, reads size bytes from memory
+    // at offset, hashes them, and pushes the 32-byte result.
+    let (offset_ptr, size_ptr) = stack_pop_2(bctx)?;
+    let offset_i32 = load_i32(bctx, offset_ptr)?;
+    let size_i32 = load_i32(bctx, size_ptr)?;
 
-    // TODO: Check return code
-    ctx.builder.build_call(
-        ctx.env.symbols().keccak256(),
-        &[data_ptr.into()],
+    call_mem_expand_checked(bctx, offset_i32, size_i32, "keccak256")?;
+
+    // Reuse offset_ptr as the result buffer — the stack slot is free after pop.
+    let ret = bctx.builder.build_call(
+        bctx.env.symbols().keccak256(),
+        &[
+            bctx.registers.exec_ctx.into(),
+            offset_i32.into(),
+            size_i32.into(),
+            offset_ptr.into(),
+        ],
         "keccak256",
     )?;
 
-    // TODO: We could instead simply increase the stack ptr
-    call_stack_push_ptr(ctx, data_ptr)?;
+    // Check return code from jet_ops_keccak256
+    // SAFETY: IntValue::new requires a valid LLVM value reference.
+    // ret.as_value_ref() returns the underlying ValueRef from a CallSiteValue,
+    // which is guaranteed to be valid by inkwell's build_call.
+    let ret_i8 = unsafe { IntValue::new(ret.as_value_ref()) };
+    let zero = bctx.env.types().i8.const_int(0, false);
+    let is_ok =
+        bctx.builder
+            .build_int_compare(inkwell::IntPredicate::EQ, ret_i8, zero, "keccak256_ok")?;
+
+    let ok_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "keccak256_success");
+    let err_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "keccak256_error");
+    bctx.builder
+        .build_conditional_branch(is_ok, ok_block, err_block)?;
+
+    bctx.builder.position_at_end(err_block);
+    build_return(bctx, ReturnCode::Invalid)?;
+
+    bctx.builder.position_at_end(ok_block);
+    call_stack_push_ptr(bctx, offset_ptr)?;
     Ok(())
 }
 
@@ -684,14 +705,25 @@ pub(crate) fn pop(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
 
 pub(crate) fn mload(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     let loc = stack_pop_1(bctx)?;
-    let mem_ptr = bctx.builder.build_call(
+
+    // Expand memory if needed (MLOAD reads 32 bytes).
+    // This must happen before jet.mem.load so that memory_ptr in the context
+    // is up-to-date; jet_mem_expand may reallocate the buffer and update the
+    // pointer, and jet.mem.load re-reads it from the context after the call.
+    let loc_i32 = load_i32(bctx, loc)?;
+    let size = bctx.env.types().i32.const_int(32, false);
+    call_mem_expand_checked(bctx, loc_i32, size, "mload")?;
+
+    let mem_value = bctx.builder.build_call(
         bctx.env.symbols().mem_load(),
         &[bctx.registers.exec_ctx.into(), loc.into()],
         "mload",
     )?;
 
-    let mem_ptr = unsafe { PointerValue::new(mem_ptr.as_value_ref()) };
-    stack_push_ptr(bctx, mem_ptr)?;
+    // mem_load returns the i256 value directly (not a pointer), preventing
+    // UAF when memory is reallocated.
+    let value = unsafe { IntValue::new(mem_value.as_value_ref()) };
+    call_stack_push_i256(bctx, value)?;
 
     Ok(())
 }
@@ -699,14 +731,9 @@ pub(crate) fn mload(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
 pub(crate) fn mstore(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     let (loc, val) = stack_pop_2(bctx)?;
 
-    // Expand memory if needed (MSTORE writes 32 bytes)
     let loc_i32 = load_i32(bctx, loc)?;
     let size = bctx.env.types().i32.const_int(32, false);
-    bctx.builder.build_call(
-        bctx.env.symbols().mem_expand(),
-        &[bctx.registers.exec_ctx.into(), loc_i32.into(), size.into()],
-        "mstore_expand",
-    )?;
+    call_mem_expand_checked(bctx, loc_i32, size, "mstore")?;
 
     bctx.builder.build_call(
         bctx.env.symbols().mem_store(),
@@ -719,14 +746,9 @@ pub(crate) fn mstore(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
 pub(crate) fn mstore8(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     let (loc, val) = stack_pop_2(bctx)?;
 
-    // Expand memory if needed (MSTORE8 writes 1 byte)
     let loc_i32 = load_i32(bctx, loc)?;
     let size = bctx.env.types().i32.const_int(1, false);
-    bctx.builder.build_call(
-        bctx.env.symbols().mem_expand(),
-        &[bctx.registers.exec_ctx.into(), loc_i32.into(), size.into()],
-        "mstore8_expand",
-    )?;
+    call_mem_expand_checked(bctx, loc_i32, size, "mstore8")?;
 
     bctx.builder.build_call(
         bctx.env.symbols().mem_store_byte(),
@@ -924,7 +946,32 @@ fn call_stack_pop<'ctx>(bctx: &BuildCtx<'ctx, '_>) -> Result<PointerValue<'ctx>,
         &[bctx.registers.exec_ctx.into()],
         "word_ptr",
     )?;
-    Ok(call_return_to_ptr(ret))
+    let ptr = call_return_to_ptr(ret);
+
+    // Check if stack underflow occurred (null pointer returned)
+    let is_null = bctx.builder.build_is_null(ptr, "is_stack_underflow")?;
+
+    // Create basic blocks for handling null/non-null cases
+    let underflow_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "stack_underflow");
+    let valid_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "stack_valid");
+
+    bctx.builder
+        .build_conditional_branch(is_null, underflow_block, valid_block)?;
+
+    // In underflow block, return with StackUnderflow error
+    bctx.builder.position_at_end(underflow_block);
+    build_return(bctx, ReturnCode::StackUnderflow)?;
+
+    // Continue in valid block
+    bctx.builder.position_at_end(valid_block);
+
+    Ok(ptr)
 }
 
 fn call_stack_peek<'ctx>(
@@ -956,6 +1003,10 @@ fn load_i8<'a>(bctx: &BuildCtx<'a, '_>, ptr: PointerValue<'a>) -> Result<IntValu
     Ok(int)
 }
 
+/// Truncates an EVM word (i256) to i32.
+///
+/// This is safe for memory operations because EVM gas costs make >4GB memory
+/// economically impossible. See docs/adrs/adr-004.md for full analysis.
 fn load_i32<'a>(bctx: &BuildCtx<'a, '_>, ptr: PointerValue<'a>) -> Result<IntValue<'a>, Error> {
     let int = load_int(bctx, ptr, bctx.env.types().i32)?;
     Ok(int)
@@ -985,6 +1036,51 @@ fn load_int<'a>(
 fn call_return_to_ptr(ret: CallSiteValue) -> PointerValue {
     let value_ref = ret.as_value_ref();
     unsafe { PointerValue::new(value_ref) }
+}
+
+/// Emit jet.mem.expand and check its return value.
+///
+/// On success (return == 0) the builder is positioned at a new continuation block
+/// and this function returns `Ok(())`.  On failure the emitted IR returns
+/// `ReturnCode::Invalid` from the contract function directly, so the caller never
+/// sees a non-zero result.
+fn call_mem_expand_checked(
+    bctx: &BuildCtx<'_, '_>,
+    loc_i32: IntValue<'_>,
+    size: IntValue<'_>,
+    label: &str,
+) -> Result<(), Error> {
+    let ret = bctx.builder.build_call(
+        bctx.env.symbols().mem_expand(),
+        &[bctx.registers.exec_ctx.into(), loc_i32.into(), size.into()],
+        &format!("{label}_expand"),
+    )?;
+
+    let ret_i8 = unsafe { IntValue::new(ret.as_value_ref()) };
+    let zero = bctx.env.types().i8.const_int(0, false);
+    let is_ok = bctx.builder.build_int_compare(
+        inkwell::IntPredicate::EQ,
+        ret_i8,
+        zero,
+        &format!("{label}_expand_ok"),
+    )?;
+
+    let ok_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, &format!("{label}_mem_ok"));
+    let err_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, &format!("{label}_mem_err"));
+    bctx.builder
+        .build_conditional_branch(is_ok, ok_block, err_block)?;
+
+    bctx.builder.position_at_end(err_block);
+    build_return(bctx, ReturnCode::Invalid)?;
+
+    bctx.builder.position_at_end(ok_block);
+    Ok(())
 }
 
 /// Emit a guarded branch for operations whose denominator/modulus must not be zero.
