@@ -8,7 +8,7 @@ use crate::{
     *,
 };
 
-/// A 256-bit EVM stack word, stored as 32 bytes in big-endian order.
+/// A 256-bit EVM stack word, stored as 32 bytes in little-endian order.
 pub type Word = [u8; 32];
 
 /// A 256-bit Keccak-256 hash value.
