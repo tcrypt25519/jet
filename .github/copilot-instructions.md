@@ -180,22 +180,23 @@ make clippy-fix   # cargo clippy --fix
 - **Runner:** `ubuntu-latest` (single sequential job)
 - **Permissions:** `contents: write` (for auto-commit formatting fixes)
 
-### CI pipeline steps (15 total)
+### CI pipeline steps (16 total)
 1. Checkout code
 2. **Cache LLVM 21** (keyed on Cargo.lock + install scripts)
 3. **Restore LLVM from cache** (conditional: cache hit)
 4. **Install LLVM 21** (conditional: cache miss, ~5 minutes)
-5. **Set LLVM env vars** (`LLVM_SYS_211_PREFIX`, include paths)
-6. **Cache Rust artifacts** (Swatinem/rust-cache)
-7. **Install Rust stable** (with rustfmt, clippy)
-8. **Apply formatting fixes** (`cargo fmt --all`)
-9. **Commit formatting fixes** (conditional: push or same-repo PR)
-10. **Run clippy** (with `-D warnings`)
-11. **Install cargo-nextest**
-12. **Check all targets** (`cargo check`)
-13. **Build** (`cargo build --verbose --all-features`)
-14. **Run tests with nextest** (`--no-fail-fast`)
-15. **Run doctests** (`cargo test --doc`)
+5. **Log LLVM shared libraries** (verification step)
+6. **Set LLVM env vars** (`LLVM_SYS_211_PREFIX`, include paths)
+7. **Cache Rust artifacts** (Swatinem/rust-cache)
+8. **Install Rust stable** (with rustfmt, clippy)
+9. **Apply formatting fixes** (`cargo fmt --all`)
+10. **Commit formatting fixes** (conditional: push or same-repo PR)
+11. **Run clippy** (with `-D warnings`)
+12. **Install cargo-nextest**
+13. **Check all targets** (`cargo check`)
+14. **Build** (`cargo build --verbose --all-features`)
+15. **Run tests with nextest** (`--no-fail-fast`)
+16. **Run doctests** (`cargo test --doc`)
 
 ### CI features
 - **Smart caching:** LLVM binary (cached), Rust artifacts (swatinem)
@@ -263,12 +264,14 @@ For SUB: `PUSH 3; PUSH 10; SUB` → pops `(10, 3)` → computes `10 - 3 = 7` (NO
 // WRONG - LLVM poison value on zero divisor
 let result = bctx.builder.build_int_unsigned_div(a, b, "div")?;
 
-// CORRECT - explicit zero check before operation
+// ALSO WRONG - select still evaluates both arms, causing poison
 let zero = bctx.env.types().i256.const_zero();
 let b_is_zero = bctx.builder.build_int_compare(IntPredicate::EQ, b, zero, "b_is_zero")?;
 let div_result = bctx.builder.build_int_unsigned_div(a, b, "div")?;
 let result = bctx.builder.build_select(b_is_zero, zero, div_result, "final")?;
 ```
+
+**CORRECT approach:** Use explicit branching (see below).
 
 Applies to: DIV, MOD, SDIV, SMOD, and any division-like operations.
 
@@ -276,25 +279,35 @@ Applies to: DIV, MOD, SDIV, SMOD, and any division-like operations.
 - **Branching pattern:** Use explicit `conditional_branch` for zero checks (not `select`)
 - **Reason:** LLVM eagerly evaluates both arms of `select`, causing poison on div-by-zero
 - **Example:** See DIV/SDIV/MOD/SMOD implementations in `builder/ops.rs`
+- **Helper function:** Use `build_zero_guard()` helper for division-by-zero handling
 
 ```rust
-// Create blocks for explicit branching
-let zero_block = bctx.func.append_basic_block("zero");
-let nonzero_block = bctx.func.append_basic_block("nonzero");
-let cont = bctx.func.append_basic_block("cont");
+// CORRECT: Create blocks for explicit branching
+let zero_block = bctx
+    .env
+    .context()
+    .append_basic_block(bctx.func, "zero");
+let nonzero_block = bctx
+    .env
+    .context()
+    .append_basic_block(bctx.func, "nonzero");
+let cont = bctx
+    .env
+    .context()
+    .append_basic_block(bctx.func, "cont");
 
 // Conditional branch based on divisor
 bctx.builder.build_conditional_branch(b_is_zero, zero_block, nonzero_block)?;
 
 // In zero_block: push zero and jump to cont
 bctx.builder.position_at_end(zero_block);
-__stack_push_int(bctx, zero)?;
+stack_push_int(bctx, zero)?;
 bctx.builder.build_unconditional_branch(cont)?;
 
 // In nonzero_block: compute and push result, jump to cont
 bctx.builder.position_at_end(nonzero_block);
 let result = bctx.builder.build_int_unsigned_div(a, b, "div")?;
-__stack_push_int(bctx, result)?;
+stack_push_int(bctx, result)?;
 bctx.builder.build_unconditional_branch(cont)?;
 
 // Continue from cont
