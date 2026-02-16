@@ -18,19 +18,44 @@ use crate::{
     builder::{env, env::Env, manager::Manager},
 };
 
+/// Errors that can occur during contract compilation or execution.
 #[derive(Error, Debug)]
 #[error(transparent)]
 pub enum Error {
+    /// A compilation error occurred while translating EVM bytecode to LLVM IR.
     Build(#[from] builder::Error),
+    /// A compiled contract function could not be found in the JIT engine.
     FunctionLookup(#[from] FunctionLookupError),
+    /// A raw LLVM error string was returned by the LLVM C API.
     LLVM(#[from] LLVMString),
 }
 
+/// High-level JIT engine that compiles and executes EVM contracts.
+///
+/// `Engine` is the primary entry point for running EVM bytecode.  It manages
+/// a single LLVM module and a LLVM JIT execution engine.  Contracts are added
+/// with [`build_contract`][Engine::build_contract] and executed with
+/// [`run_contract`][Engine::run_contract].
+///
+/// # Lifetime
+///
+/// The `'ctx` lifetime is tied to an inkwell [`Context`] that must outlive the
+/// engine.  A typical usage pattern is to create the context on the stack and
+/// pass a reference to [`Engine::new`].
 pub struct Engine<'ctx> {
     build_manager: Manager<'ctx>,
 }
 
 impl<'ctx> Engine<'ctx> {
+    /// Creates a new engine.
+    ///
+    /// Initialises the LLVM module with all runtime function declarations, then
+    /// wraps it in a [`Manager`] that is ready to accept contracts.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error`] if the runtime module cannot be built or if any
+    /// required runtime symbol is missing.
     pub fn new(context: &'ctx Context, build_opts: env::Options) -> Result<Self, Error> {
         let runtime_module = load_runtime_module(context)?;
         let build_env = Env::new(context, runtime_module, build_opts)?;
@@ -39,11 +64,30 @@ impl<'ctx> Engine<'ctx> {
         Ok(Engine { build_manager })
     }
 
+    /// Compiles the EVM bytecode `rom` for the contract at `addr`.
+    ///
+    /// After a successful call the compiled function is available in the LLVM
+    /// module and can be executed with [`run_contract`][Engine::run_contract].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Build`] if compilation of the bytecode fails.
     pub fn build_contract(&mut self, addr: Address, rom: &[u8]) -> Result<(), Error> {
         self.build_manager.add_contract_function(addr, rom)?;
         Ok(())
     }
 
+    /// Executes the previously compiled contract at `addr`.
+    ///
+    /// Creates a fresh JIT execution engine, links in all runtime builtins,
+    /// allocates a new [`exec::Context`], and invokes the compiled contract
+    /// function.  Returns a [`ContractRun`] containing the return code and the
+    /// execution context (stack, memory, return data).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::FunctionLookup`] if no contract was compiled for
+    /// `addr`, or [`Error::LLVM`] if the JIT engine cannot be created.
     pub fn run_contract(
         &self,
         addr: Address,

@@ -1,5 +1,20 @@
 macro_rules! instructions {
     ($($name:ident = $value:expr),* $(,)?) => {
+        /// A single EVM opcode.
+        ///
+        /// Each variant is named after the corresponding mnemonic defined in the
+        /// Ethereum Yellow Paper and carries its opcode byte as its discriminant.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// use jet::instructions::Instruction;
+        ///
+        /// assert_eq!(Instruction::ADD.opcode(), 0x01);
+        /// assert_eq!(Instruction::PUSH1.opcode(), 0x60);
+        /// assert!(Instruction::PUSH32.is_push());
+        /// assert!(!Instruction::ADD.is_push());
+        /// ```
         #[derive(Copy, Clone, Debug, PartialEq, PartialOrd, Eq, Ord)]
         #[repr(u8)]
         pub enum Instruction {
@@ -26,17 +41,53 @@ macro_rules! instructions {
         }
 
         impl Instruction {
+            /// Returns the opcode byte for this instruction.
+            ///
+            /// # Examples
+            ///
+            /// ```
+            /// use jet::instructions::Instruction;
+            ///
+            /// assert_eq!(Instruction::STOP.opcode(), 0x00);
+            /// assert_eq!(Instruction::ADD.opcode(),  0x01);
+            /// ```
             #[inline]
             pub const fn opcode(self) -> u8 {
                 self as u8
             }
 
+            /// Returns `true` if this instruction is a `PUSH` variant (`PUSH0`–`PUSH32`).
+            ///
+            /// # Examples
+            ///
+            /// ```
+            /// use jet::instructions::Instruction;
+            ///
+            /// assert!(Instruction::PUSH0.is_push());
+            /// assert!(Instruction::PUSH32.is_push());
+            /// assert!(!Instruction::ADD.is_push());
+            /// ```
             #[inline]
             pub const fn is_push(self) -> bool {
                 let op = self.opcode();
                 op >= 0x5f && op <= 0x7f // PUSH0..PUSH32
             }
 
+            /// Returns the number of immediate data bytes that follow a `PUSH` instruction.
+            ///
+            /// Returns `0` for all non-`PUSH` instructions. For `PUSH0` this is also
+            /// `0` because `PUSH0` has no immediate operand.
+            ///
+            /// # Examples
+            ///
+            /// ```
+            /// use jet::instructions::Instruction;
+            ///
+            /// assert_eq!(Instruction::PUSH0.push_len(),  0);
+            /// assert_eq!(Instruction::PUSH1.push_len(),  1);
+            /// assert_eq!(Instruction::PUSH32.push_len(), 32);
+            /// assert_eq!(Instruction::ADD.push_len(),    0);
+            /// ```
             #[inline]
             pub const fn push_len(self) -> usize {
                 if self.is_push() {
@@ -206,20 +257,58 @@ instructions! {
     SELFDESTRUCT = 0xFF,
 }
 
+/// A forward-only iterator over an EVM bytecode sequence.
+///
+/// `Iter` scans a raw byte slice and yields one [`IterItem`] per logical
+/// instruction, automatically skipping over `PUSH` immediate data so that the
+/// program counter always advances to the next opcode.
+///
+/// # Examples
+///
+/// ```
+/// use jet::instructions::{Instruction, Iter, IterItem};
+///
+/// // PUSH1 0x42  STOP
+/// let rom: &[u8] = &[0x60, 0x42, 0x00];
+/// let items: Vec<_> = Iter::new(rom).collect();
+///
+/// assert!(matches!(items[0], IterItem::PushData(0, Instruction::PUSH1, data) if data == &[0x42]));
+/// assert!(matches!(items[1], IterItem::Instr(2, Instruction::STOP)));
+/// ```
 pub struct Iter<'a> {
     pc: usize,
     rom: &'a [u8],
 }
 
 impl<'a> Iter<'a> {
+    /// Creates a new iterator over the given EVM bytecode slice.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use jet::instructions::Iter;
+    ///
+    /// let iter = Iter::new(&[0x00]); // STOP
+    /// assert_eq!(iter.count(), 1);
+    /// ```
     pub const fn new(rom: &'a [u8]) -> Self {
         Self { pc: 0, rom }
     }
 }
 
+/// An item yielded by [`Iter`] when iterating over EVM bytecode.
+///
+/// Each variant carries the program counter (`pc`) of the first byte of the
+/// instruction as its first field.
 pub enum IterItem<'a> {
+    /// A normal (non-`PUSH`) instruction at the given `pc`.
     Instr(usize, Instruction),
+    /// A `PUSH` instruction at the given `pc`, along with its immediate data.
+    ///
+    /// The data slice may be shorter than expected when the bytecode is
+    /// truncated (e.g. the last instruction in the ROM).
     PushData(usize, Instruction, &'a [u8]),
+    /// An unrecognised opcode byte at the given `pc`.
     Invalid(usize),
 }
 
