@@ -1003,6 +1003,10 @@ fn load_i8<'a>(bctx: &BuildCtx<'a, '_>, ptr: PointerValue<'a>) -> Result<IntValu
     Ok(int)
 }
 
+/// Truncates an EVM word (i256) to i32.
+///
+/// This is safe for memory operations because EVM gas costs make >4GB memory
+/// economically impossible. See docs/adrs/adr-004.md for full analysis.
 fn load_i32<'a>(bctx: &BuildCtx<'a, '_>, ptr: PointerValue<'a>) -> Result<IntValue<'a>, Error> {
     let int = load_int(bctx, ptr, bctx.env.types().i32)?;
     Ok(int)

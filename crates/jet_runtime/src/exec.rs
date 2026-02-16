@@ -26,6 +26,7 @@ pub struct Context {
     stack: [Word; STACK_SIZE_WORDS as usize],
 
     // Pointer-based memory layout as per ADR-002
+    // u32 is safe for offsets/sizes, see ADR-004 (EVM gas costs prevent >4GB)
     pub(crate) memory_ptr: *mut u8,
     pub(crate) memory_len: u32,
     pub(crate) memory_cap: u32,
