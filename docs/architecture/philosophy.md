@@ -1,4 +1,4 @@
-# Jet: Engineering Philosophy & Patterns Manifesto
+# Jet: Engineering Philosophy & Design Patterns
 
 ## 1. Context & Objective
 
@@ -175,7 +175,7 @@ A guide to the naming conventions and domain language used throughout the codeba
 | `__*` | Internal helpers (not public) | `__stack_pop_2` |
 | `jet_*` | External API (FFI) | `jet_contract_call` |
 
-#### Types
+#### Types you
 
 | Pattern | Usage | Example |
 |---------|-------|---------|
