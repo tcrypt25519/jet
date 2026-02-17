@@ -57,31 +57,33 @@ fn build_cmd(args: BuildArgs) -> Result<(), Error> {
         args.assert.unwrap_or(true),
     );
 
+    // Alice calls Bob and copies the return data.
+    // CALL stack (top-to-bottom at call time): gas, addr, value, argsOffset, argsLen, retOffset, retLen
     let alice_rom = [
-        Instruction::PUSH1.opcode(), // Output len
+        Instruction::PUSH1.opcode(), // retLen: output len = 10 bytes
         0x0A,
-        Instruction::PUSH1.opcode(), // Output offset
+        Instruction::PUSH1.opcode(), // retOffset: output offset = 0
         0x00,
-        Instruction::PUSH1.opcode(), // Input len
+        Instruction::PUSH1.opcode(), // argsLen: input len = 0
         0x00,
-        Instruction::PUSH1.opcode(), // Input offset
+        Instruction::PUSH1.opcode(), // argsOffset: input offset = 0
         0x00,
-        Instruction::PUSH1.opcode(), // Value
+        Instruction::PUSH1.opcode(), // value = 0
         0x00,
-        Instruction::PUSH2.opcode(), // Address
+        Instruction::PUSH20.opcode(), // addr: Bob's 20-byte address
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+        Instruction::PUSH1.opcode(), // gas = 0
         0x00,
-        0x01,
-        Instruction::PUSH1.opcode(), // Gas
-        0x00,
-        Instruction::CALL.opcode(), // Mem: 0x00FF
+        Instruction::CALL.opcode(),
         Instruction::RETURNDATASIZE.opcode(),
-        Instruction::PUSH1.opcode(), // Len
+        Instruction::PUSH1.opcode(), // len = 2
         0x02,
-        Instruction::PUSH1.opcode(), // Src offset
+        Instruction::PUSH1.opcode(), // src offset = 0
         0x00,
-        Instruction::PUSH1.opcode(), // Dest offset
+        Instruction::PUSH1.opcode(), // dest offset = 2
         0x02,
-        Instruction::RETURNDATACOPY.opcode(), // Mem: 0x00FF00FF0000000000000000
+        Instruction::RETURNDATACOPY.opcode(),
     ];
 
     let bob_rom = [
@@ -89,30 +91,32 @@ fn build_cmd(args: BuildArgs) -> Result<(), Error> {
         0xFF,
         Instruction::PUSH1.opcode(),
         0x01,
-        Instruction::MSTORE.opcode(), // Mem: 0x00FF
+        Instruction::MSTORE.opcode(), // Mem[0x01] = 0xFF
         Instruction::PUSH1.opcode(),
         0xFF,
         Instruction::PUSH1.opcode(),
         0x0A,
-        Instruction::MSTORE.opcode(), // Mem: 0x00FF0000000000000000FF
+        Instruction::MSTORE.opcode(), // Mem[0x0A] = 0xFF
         Instruction::PUSH1.opcode(),
         0x0A,
         Instruction::PUSH1.opcode(),
         0x00,
-        Instruction::RETURN.opcode(), // Return 0x00FF0000000000000000
+        Instruction::RETURN.opcode(), // return mem[0x00..0x0A]
     ];
 
     // Create the LLVM JIT engine
     let context = Context::create();
     let mut engine = jet::engine::Engine::new(&context, build_opts)?;
 
-    // Build the contract
+    // Build the contracts
     let alice_addr: Address = "0x1234".parse().expect("valid address");
-    let bob_addr: Address = "0x0001".parse().expect("valid address");
+    let bob_addr: Address = "0x0000000000000000000000000000000000000001"
+        .parse()
+        .expect("valid address");
     engine.build_contract(alice_addr, alice_rom.as_slice())?;
     engine.build_contract(bob_addr, bob_rom.as_slice())?;
 
-    // Run the contract with a test block
+    // Run Alice's contract with a test block
     let block_info = new_test_block_info();
     let run = engine.run_contract(alice_addr, &block_info)?;
     info!("{}", run);
@@ -135,10 +139,14 @@ fn main() -> Result<(), Error> {
     };
     logger.init()?;
 
-    // Dispatch command
+    // Dispatch command, forwarding top-level flags when no subcommand is given.
     match cli.cmd {
         Some(Commands::Build(args)) => build_cmd(args),
-        None => build_cmd(BuildArgs::default()),
+        None => build_cmd(BuildArgs {
+            mode: cli.mode,
+            emit_llvm: cli.emit_llvm,
+            assert: cli.assert,
+        }),
     }?;
 
     Ok(())
@@ -169,13 +177,9 @@ fn new_test_block_info() -> exec::BlockInfo {
 fn new_test_block_info_hash_history() -> exec::HashHistory {
     let mut hash_history = [[0; 32]; jet_runtime::BLOCK_HASH_HISTORY_SIZE];
 
-    hash_history
-        .iter_mut()
-        .enumerate()
-        .take(jet_runtime::BLOCK_HASH_HISTORY_SIZE)
-        .for_each(|(i, hash)| {
-            hash[31] = i as u8;
-        });
+    for (i, hash) in hash_history.iter_mut().enumerate() {
+        hash[31] = i as u8;
+    }
 
     hash_history
 }

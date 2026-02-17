@@ -1,20 +1,19 @@
 [package]
-name = "jet_runtime"
+name = "jetdbg"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
+description = "Debug CLI for compiling and running test EVM contracts with Jet."
 
-[lib]
-crate-type = ["dylib", "lib"]
+[[bin]]
+name = "jetdbg"
 
 [dependencies]
-bnum.workspace = true
-colored.workspace = true
-hex.workspace = true
+clap.workspace = true
 inkwell.workspace = true
-jet_ir.workspace = true
+jet.workspace = true
+jet_runtime.workspace = true
 log.workspace = true
-sha3.workspace = true
 simple_logger.workspace = true
 thiserror.workspace = true
