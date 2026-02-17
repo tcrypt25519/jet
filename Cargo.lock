@@ -343,7 +343,6 @@ dependencies = [
  "log",
  "paste",
  "serde",
- "simple_logger",
  "syntect",
  "thiserror 1.0.69",
 ]
@@ -375,6 +374,19 @@ dependencies = [
  "jet_ir",
  "log",
  "sha3",
+ "simple_logger",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "jetdbg"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "inkwell",
+ "jet",
+ "jet_runtime",
+ "log",
  "simple_logger",
  "thiserror 1.0.69",
 ]

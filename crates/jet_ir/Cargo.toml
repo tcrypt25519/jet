@@ -1,10 +1,10 @@
 [package]
 name = "jet_ir"
-version = "0.1.0"
-edition = "2024"
-license = "MIT"
-authors = ["Tyler Smith"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
 description = "Shared LLVM IR types and function registry for Jet EVM JIT compiler."
 
 [dependencies]
-inkwell = { git = "https://github.com/TheDan64/inkwell.git", features = ["llvm21-1-prefer-dynamic"] }
+inkwell.workspace = true

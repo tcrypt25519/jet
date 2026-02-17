@@ -1,32 +1,27 @@
 [package]
 name = "jet"
-edition = "2024"
-license = "MIT"
-authors = ["Tyler Smith"]
-version = "0.1.0"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
 description = "An LLVM environment for EVM contracts."
 
 [lib]
 name = "jet"
 crate-type = ["lib"]
 
-[[bin]]
-name = "jetdbg"
-
 [dependencies]
-log = "0.4"
-simple_logger = "5.0.0"
-inkwell = { git = "https://github.com/TheDan64/inkwell.git", features = ["llvm21-1-prefer-dynamic"] }
-clap = { version = "4.5.4", features = ["derive"] }
-serde = { version = "1.0.201", features = ["derive"] }
-syntect = "5.2.0"
-libc = "0.2.154"
-paste = "1.0.15"
-thiserror = "1.0.61"
-jet_runtime = { path = "../jet_runtime" }
-jet_ir = { path = "../jet_ir" }
-hex = "0.4.3"
+clap.workspace = true
+hex.workspace = true
+inkwell.workspace = true
+jet_ir.workspace = true
+jet_runtime.workspace = true
+libc.workspace = true
+log.workspace = true
+paste.workspace = true
+serde.workspace = true
+syntect.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
-jet_push_macros = { path = "../jet_push_macros" }
-
+jet_push_macros.workspace = true
