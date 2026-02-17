@@ -3,8 +3,39 @@ members = [
     "crates/jet",
     "crates/jet_runtime",
     "crates/jet_ir",
-    "crates/jet_push_macros"
+    "crates/jet_push_macros",
+    "crates/jetdbg",
 ]
 
 resolver = "3"
 
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["Tyler Smith"]
+
+[workspace.dependencies]
+# External
+bnum = "0.13"
+clap = { version = "4.5.4", features = ["derive"] }
+colored = "2.1.0"
+hex = "0.4.3"
+inkwell = { git = "https://github.com/TheDan64/inkwell.git", features = ["llvm21-1-prefer-dynamic"] }
+libc = "0.2.154"
+log = "0.4"
+paste = "1.0.15"
+proc-macro2 = "1.0"
+quote = "1.0"
+serde = { version = "1.0.201", features = ["derive"] }
+sha3 = "0.10.8"
+simple_logger = "5.0.0"
+syn = { version = "2.0", features = ["full"] }
+syntect = "5.2.0"
+thiserror = "1.0.61"
+
+# Internal
+jet = { path = "crates/jet" }
+jet_ir = { path = "crates/jet_ir" }
+jet_push_macros = { path = "crates/jet_push_macros" }
+jet_runtime = { path = "crates/jet_runtime" }
