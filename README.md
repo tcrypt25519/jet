@@ -1,7 +1,7 @@
 # Jet: LLVM JIT Compiler for EVM
 
 [![Rust](https://img.shields.io/badge/Rust-stable-CE422B?logo=rust)](https://www.rust-lang.org/)
-[![LLVM](https://img.shields.io/badge/LLVM-21-262D3A?logo=llvm)](https://llvm.org/)
+[![LLVM](https://img.shields.io/badge/LLVM-22-262D3A?logo=llvm)](https://llvm.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![CI](https://github.com/tcrypt25519/jet/actions/workflows/ci.yml/badge.svg)](https://github.com/tcrypt25519/jet/actions/workflows/ci.yml)
 
@@ -36,13 +36,13 @@ For a detailed walkthrough see [`docs/architecture/architecture.md`](docs/archit
 ### Prerequisites
 
 - Rust (stable) — managed via `rust-toolchain.toml`
-- LLVM 21
+- LLVM 22
 - `cargo-nextest` (optional, used by `make test`)
 
 ### Install LLVM and build
 
 ```shell
-# Install LLVM 21 (handles Linux, macOS, and Termux)
+# Install LLVM 22 (handles Linux, macOS, and Termux)
 make install-llvm
 
 # Build all crates

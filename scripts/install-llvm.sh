@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-LLVM_VERSION=21
+LLVM_VERSION=22
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLATFORM=$(bash "$SCRIPT_DIR/detect-platform.sh")
 
@@ -11,7 +11,11 @@ case "$PLATFORM" in
       echo "ERROR: Homebrew required"
       exit 1
     }
-    brew install llvm
+    if brew list --versions llvm > /dev/null 2>&1; then
+      HOMEBREW_NO_AUTO_UPDATE=1 brew upgrade llvm || true
+    else
+      HOMEBREW_NO_AUTO_UPDATE=1 brew install llvm
+    fi
     LLVM_PREFIX=$(brew --prefix llvm)
     ;;
 
@@ -31,8 +35,7 @@ case "$PLATFORM" in
     sudo apt-get install -y \
       llvm-${LLVM_VERSION} \
       llvm-${LLVM_VERSION}-dev \
-      libclang-common-${LLVM_VERSION}-dev \
-      libpolly-${LLVM_VERSION}-dev 
+      libclang-common-${LLVM_VERSION}-dev
     LLVM_CONFIG="llvm-config-${LLVM_VERSION}"
     if command -v $LLVM_CONFIG > /dev/null; then
       LLVM_PREFIX=$($LLVM_CONFIG --prefix)
@@ -50,5 +53,17 @@ case "$PLATFORM" in
     exit 1
     ;;
 esac
+
+LLVM_CONFIG="$LLVM_PREFIX/bin/llvm-config"
+if [ -x "$LLVM_CONFIG" ]; then
+  INSTALLED_VERSION=$("$LLVM_CONFIG" --version)
+  case "$INSTALLED_VERSION" in
+    ${LLVM_VERSION}.*) ;;
+    *)
+      echo "ERROR: Expected LLVM ${LLVM_VERSION}, found ${INSTALLED_VERSION} at ${LLVM_CONFIG}"
+      exit 1
+      ;;
+  esac
+fi
 
 echo "LLVM installed at: $LLVM_PREFIX"

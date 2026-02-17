@@ -20,7 +20,7 @@ usage() {
     exit 1;
 }
 
-CURRENT_LLVM_STABLE=20
+CURRENT_LLVM_STABLE=22
 BASE_URL="http://apt.llvm.org"
 
 NEW_DEBIAN_DISTROS=("trixie" "forky" "unstable")
@@ -158,7 +158,7 @@ LLVM_VERSION_PATTERNS[18]="-18"
 LLVM_VERSION_PATTERNS[19]="-19"
 LLVM_VERSION_PATTERNS[20]="-20"
 LLVM_VERSION_PATTERNS[21]="-21"
-LLVM_VERSION_PATTERNS[22]=""
+LLVM_VERSION_PATTERNS[22]="-22"
 
 if [ ! ${LLVM_VERSION_PATTERNS[$LLVM_VERSION]+_} ]; then
     echo "This script does not support LLVM version $LLVM_VERSION"

@@ -6,5 +6,10 @@ license.workspace = true
 authors.workspace = true
 description = "Shared LLVM IR types and function registry for Jet EVM JIT compiler."
 
+[lib]
+name = "jet_ir"
+crate-type = ["lib"]
+
+
 [dependencies]
 inkwell.workspace = true

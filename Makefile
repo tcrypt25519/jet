@@ -1,4 +1,4 @@
-LLVM_VERSION := 21
+LLVM_VERSION := 22
 LLVM_PREFIX := $(shell bash scripts/detect-llvm.sh)
 
 export LLVM_SYS_$(LLVM_VERSION)1_PREFIX=$(LLVM_PREFIX)
@@ -12,7 +12,7 @@ export CARGO_TARGET_DIR := /data/data/com.termux/files/home/.cargo/jet-target
 endif
 
 .PHONY: install-llvm
-install-llvm: ## Install LLVM 21 for your platform
+install-llvm: ## Install LLVM 22 for your platform
 	@bash scripts/install-llvm.sh
 
 .PHONY: build
