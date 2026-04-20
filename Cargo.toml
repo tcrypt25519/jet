@@ -21,7 +21,8 @@ bnum = "0.13"
 clap = { version = "4.5.4", features = ["derive"] }
 colored = "2.1.0"
 hex = "0.4.3"
-inkwell = { git = "https://github.com/TheDan64/inkwell.git", features = ["llvm21-1-prefer-dynamic"] }
+#inkwell = { git = "https://github.com/TheDan64/inkwell.git", features = ["llvm21-1-prefer-dynamic"] }
+inkwell = "0.8.0"
 libc = "0.2.154"
 log = "0.4"
 paste = "1.0.15"
@@ -32,7 +33,7 @@ sha3 = "0.10.8"
 simple_logger = "5.0.0"
 syn = { version = "2.0", features = ["full"] }
 syntect = "5.2.0"
-thiserror = "1.0.61"
+thiserror = "1.0.60"
 
 # Internal
 jet = { path = "crates/jet" }
