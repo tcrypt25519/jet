@@ -204,56 +204,45 @@ unsafe fn return_data_copy_impl(
 pub extern "C" fn jet_ops_exp(base: &mut [u8; 32], exp: &[u8; 32]) -> i8 {
     // Stack words are stored little-endian (PUSH immediates are reversed on load).
     use bnum::types::U256;
-    let read = |b: &[u8; 32]| {
-        U256::from_digits([
-            u64::from_le_bytes(b[0..8].try_into().unwrap()),
-            u64::from_le_bytes(b[8..16].try_into().unwrap()),
-            u64::from_le_bytes(b[16..24].try_into().unwrap()),
-            u64::from_le_bytes(b[24..32].try_into().unwrap()),
-        ])
-    };
 
-    let mut b = read(base);
-    let mut e = read(exp);
-    let mut result = U256::ONE;
+    let mut b = read_u256(base);
+    let mut e = read_u256(exp);
+    let zero = U256::from_le_bytes([0; 32]);
+    let mut one_bytes = [0; 32];
+    one_bytes[0] = 1;
+    let one = U256::from_le_bytes(one_bytes);
+    let mut result = one;
 
-    while e != U256::ZERO {
-        if e & U256::ONE != U256::ZERO {
+    while e != zero {
+        if e & one != zero {
             result = result.wrapping_mul(b);
         }
         b = b.wrapping_mul(b);
         e >>= 1u32;
     }
 
-    let d = result.digits();
-    base[0..8].copy_from_slice(&d[0].to_le_bytes());
-    base[8..16].copy_from_slice(&d[1].to_le_bytes());
-    base[16..24].copy_from_slice(&d[2].to_le_bytes());
-    base[24..32].copy_from_slice(&d[3].to_le_bytes());
+    write_u256(base, result);
     0
 }
 
 // Helper functions for U256/U512 conversions shared by ADDMOD and MULMOD
 fn read_u256(bytes: &[u8; 32]) -> bnum::types::U256 {
-    bnum::types::U256::from_digits([
-        u64::from_le_bytes(bytes[0..8].try_into().unwrap()),
-        u64::from_le_bytes(bytes[8..16].try_into().unwrap()),
-        u64::from_le_bytes(bytes[16..24].try_into().unwrap()),
-        u64::from_le_bytes(bytes[24..32].try_into().unwrap()),
-    ])
+    bnum::types::U256::from_le_bytes(*bytes)
 }
 
 fn write_u256(bytes: &mut [u8; 32], val: bnum::types::U256) {
-    let d = val.digits();
-    bytes[0..8].copy_from_slice(&d[0].to_le_bytes());
-    bytes[8..16].copy_from_slice(&d[1].to_le_bytes());
-    bytes[16..24].copy_from_slice(&d[2].to_le_bytes());
-    bytes[24..32].copy_from_slice(&d[3].to_le_bytes());
+    *bytes = val.to_le_bytes();
 }
 
 fn u256_to_u512(val: bnum::types::U256) -> bnum::types::U512 {
-    let d = val.digits();
-    bnum::types::U512::from_digits([d[0], d[1], d[2], d[3], 0, 0, 0, 0])
+    let mut bytes = [0; 64];
+    bytes[..32].copy_from_slice(&val.to_le_bytes());
+    bnum::types::U512::from_le_bytes(bytes)
+}
+
+fn u512_to_u256_low(val: bnum::types::U512) -> bnum::types::U256 {
+    let bytes = val.to_le_bytes();
+    bnum::types::U256::from_le_bytes(bytes[..32].try_into().expect("slice length is 32"))
 }
 
 /// ADDMOD with 512-bit precision as required by EVM spec.
@@ -272,8 +261,8 @@ pub extern "C" fn jet_ops_addmod(
     let n_u256 = read_u256(n);
 
     // EVM spec: if n == 0, return 0
-    if n_u256 == bnum::types::U256::ZERO {
-        write_u256(result, bnum::types::U256::ZERO);
+    if n_u256 == bnum::types::U256::from_le_bytes([0; 32]) {
+        write_u256(result, bnum::types::U256::from_le_bytes([0; 32]));
         return 0;
     }
 
@@ -290,9 +279,7 @@ pub extern "C" fn jet_ops_addmod(
 
     // Convert back to 256-bit by taking lower 256 bits
     // This is safe because mod_result < n < 2^256
-    let digits = mod_result.digits();
-    let result_u256 = bnum::types::U256::from_digits([digits[0], digits[1], digits[2], digits[3]]);
-    write_u256(result, result_u256);
+    write_u256(result, u512_to_u256_low(mod_result));
 
     0
 }
@@ -313,8 +300,8 @@ pub extern "C" fn jet_ops_mulmod(
     let n_u256 = read_u256(n);
 
     // EVM spec: if n == 0, return 0
-    if n_u256 == bnum::types::U256::ZERO {
-        write_u256(result, bnum::types::U256::ZERO);
+    if n_u256 == bnum::types::U256::from_le_bytes([0; 32]) {
+        write_u256(result, bnum::types::U256::from_le_bytes([0; 32]));
         return 0;
     }
 
@@ -331,9 +318,7 @@ pub extern "C" fn jet_ops_mulmod(
 
     // Convert back to 256-bit by taking lower 256 bits
     // This is safe because mod_result < n < 2^256
-    let digits = mod_result.digits();
-    let result_u256 = bnum::types::U256::from_digits([digits[0], digits[1], digits[2], digits[3]]);
-    write_u256(result, result_u256);
+    write_u256(result, u512_to_u256_low(mod_result));
 
     0
 }

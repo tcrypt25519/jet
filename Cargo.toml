@@ -17,22 +17,22 @@ authors = ["Tyler Smith"]
 
 [workspace.dependencies]
 # External
-bnum = "0.13"
-clap = { version = "4.5.4", features = ["derive"] }
-colored = "2.1.0"
+bnum = "0.14"
+clap = { version = "4.6.1", features = ["derive"] }
+colored = "3.1.1"
 hex = "0.4.3"
-inkwell = { git = "https://github.com/TheDan64/inkwell.git", features = ["llvm21-1-prefer-dynamic"] }
-libc = "0.2.154"
+inkwell = { version = "0.9.0", features = ["llvm22-1-prefer-dynamic"] }
+libc = "0.2.186"
 log = "0.4"
 paste = "1.0.15"
 proc-macro2 = "1.0"
 quote = "1.0"
-serde = { version = "1.0.201", features = ["derive"] }
-sha3 = "0.10.8"
-simple_logger = "5.0.0"
+serde = { version = "1.0.228", features = ["derive"] }
+sha3 = "0.11.0"
+simple_logger = "5.2.0"
 syn = { version = "2.0", features = ["full"] }
-syntect = "5.2.0"
-thiserror = "1.0.61"
+syntect = "5.3.0"
+thiserror = "2.0.18"
 
 # Internal
 jet = { path = "crates/jet" }

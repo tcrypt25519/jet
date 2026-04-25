@@ -1,6 +1,8 @@
 /// Unified LLVM type system.
 /// Defines all LLVM types used by both runtime and contract builders
 /// to ensure consistent memory layouts.
+use std::num::NonZeroU32;
+
 use inkwell::{
     AddressSpace,
     context::Context,
@@ -70,8 +72,12 @@ impl<'ctx> Types<'ctx> {
         let i8 = context.i8_type();
         let i32 = context.i32_type();
         let i64 = context.i64_type();
-        let i160 = context.custom_width_int_type(160);
-        let i256 = context.custom_width_int_type(256);
+        let i160 = context
+            .custom_width_int_type(NonZeroU32::new(160).expect("160 is non-zero"))
+            .expect("i160 is a valid LLVM integer width");
+        let i256 = context
+            .custom_width_int_type(NonZeroU32::new(256).expect("256 is non-zero"))
+            .expect("i256 is a valid LLVM integer width");
         let ptr = context.ptr_type(AddressSpace::default());
         let word_bytes = i8.array_type(32);
 

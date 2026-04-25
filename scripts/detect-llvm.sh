@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-LLVM_VERSION=21
+LLVM_VERSION=22
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLATFORM=$(bash "$SCRIPT_DIR/detect-platform.sh")
 

@@ -22,39 +22,39 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache LLVM 21
+      - name: Cache LLVM 22
         id: cache-llvm
         uses: actions/cache@v4
         with:
-          path: ${{ runner.temp }}/llvm-21-install.tar.gz
-          key: v8-llvm-21-${{ runner.os }}-${{ runner.arch }}-${{ env.ImageOS }}-${{ hashFiles('Cargo.lock', 'scripts/install-llvm.sh', 'scripts/llvm.sh') }}
+          path: ${{ runner.temp }}/llvm-22-install.tar.gz
+          key: v1-llvm-22-${{ runner.os }}-${{ runner.arch }}-${{ env.ImageOS }}-${{ hashFiles('Cargo.lock', 'scripts/install-llvm.sh', 'scripts/llvm.sh') }}
 
       - name: Restore LLVM from cache
         if: steps.cache-llvm.outputs.cache-hit == 'true'
         run: |
-          sudo tar -xzf ${{ runner.temp }}/llvm-21-install.tar.gz -C /
+          sudo tar -xzf ${{ runner.temp }}/llvm-22-install.tar.gz -C /
 
-      - name: Install LLVM 21
+      - name: Install LLVM 22
         if: steps.cache-llvm.outputs.cache-hit != 'true'
         run: |
           bash scripts/install-llvm.sh
-          sudo tar -czf ${{ runner.temp }}/llvm-21-install.tar.gz -C / \
-            usr/lib/llvm-21 \
-            usr/include/llvm-21 \
-            usr/include/llvm-c-21 \
-            usr/bin/llvm-config-21 \
-            usr/lib/x86_64-linux-gnu/libLLVM.so.21.1
+          sudo tar -czf ${{ runner.temp }}/llvm-22-install.tar.gz -C / \
+            usr/lib/llvm-22 \
+            usr/include/llvm-22 \
+            usr/include/llvm-c-22 \
+            usr/bin/llvm-config-22 \
+            usr/lib/x86_64-linux-gnu/libLLVM.so.22.1
 
       - name: Log LLVM shared libraries
         run: ls /usr/lib/x86_64-linux-gnu/libLLVM* || true
 
       - name: Set LLVM environment variables
         run: |
-          echo "LLVM_SYS_211_PREFIX=$(bash scripts/detect-llvm.sh)" >> $GITHUB_ENV
-          # Debian/Ubuntu installs LLVM headers at /usr/include/llvm-21
+          echo "LLVM_SYS_221_PREFIX=$(bash scripts/detect-llvm.sh)" >> $GITHUB_ENV
+          # Debian/Ubuntu installs LLVM headers at /usr/include/llvm-22
           # Set C_INCLUDE_PATH and CPLUS_INCLUDE_PATH so cc-rs can find them
-          echo "C_INCLUDE_PATH=/usr/include/llvm-21" >> $GITHUB_ENV
-          echo "CPLUS_INCLUDE_PATH=/usr/include/llvm-21" >> $GITHUB_ENV
+          echo "C_INCLUDE_PATH=/usr/include/llvm-22" >> $GITHUB_ENV
+          echo "CPLUS_INCLUDE_PATH=/usr/include/llvm-22" >> $GITHUB_ENV
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
