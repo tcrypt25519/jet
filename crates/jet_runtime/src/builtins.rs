@@ -47,17 +47,54 @@ pub unsafe extern "C" fn jet_contract_call(
     ret_dest: *const u32,
     ret_len: *const u32,
 ) -> i8 {
-    // Validate all input pointers
-    let jit_engine = match unsafe { jit_engine.as_ref() } {
-        Some(engine) => engine,
-        None => return ContractCallError::InvalidJitEngine as i8,
-    };
-
     if addr.is_null() || ret_dest.is_null() || ret_len.is_null() {
         return ContractCallError::InvalidPointer as i8;
     }
 
     let addr_slice = unsafe { std::slice::from_raw_parts(addr, ADDRESS_SIZE_BYTES) };
+    let ret_dest = unsafe { *ret_dest };
+    let ret_len = unsafe { *ret_len };
+    unsafe { jet_contract_call_impl(ctx, jit_engine, addr_slice, ret_dest, ret_len) }
+}
+
+/// Calls a contract using value arguments instead of stack-word pointers.
+///
+/// The address limbs are the low 160 bits of the EVM stack word in little-endian
+/// order, split as low 64 bits, next 64 bits, then high 32 bits.
+///
+/// # Safety
+///
+/// This function is unsafe because it dereferences the context and JIT engine
+/// pointers. The caller must ensure both pointers are valid.
+pub unsafe extern "C" fn jet_contract_call_values(
+    ctx: *mut Context,
+    jit_engine: *const ExecutionEngine,
+    addr_lo: u64,
+    addr_mid: u64,
+    addr_hi: u32,
+    ret_dest: u32,
+    ret_len: u32,
+) -> i8 {
+    let mut addr = [0u8; ADDRESS_SIZE_BYTES];
+    addr[0..8].copy_from_slice(&addr_lo.to_le_bytes());
+    addr[8..16].copy_from_slice(&addr_mid.to_le_bytes());
+    addr[16..20].copy_from_slice(&addr_hi.to_le_bytes());
+
+    unsafe { jet_contract_call_impl(ctx, jit_engine, &addr, ret_dest, ret_len) }
+}
+
+unsafe fn jet_contract_call_impl(
+    ctx: *mut Context,
+    jit_engine: *const ExecutionEngine,
+    addr_slice: &[u8],
+    ret_dest: u32,
+    ret_len: u32,
+) -> i8 {
+    let jit_engine = match unsafe { jit_engine.as_ref() } {
+        Some(engine) => engine,
+        None => return ContractCallError::InvalidJitEngine as i8,
+    };
+
     let fn_ptr = jet_contract_fn_lookup(jit_engine, addr_slice);
     if fn_ptr == 0 {
         return ContractCallError::LookupFailed as i8;
@@ -89,8 +126,6 @@ pub unsafe extern "C" fn jet_contract_call(
         return ContractCallError::Success as i8;
     }
 
-    let ret_dest = unsafe { *ret_dest };
-    let ret_len = unsafe { *ret_len };
     let copy_result = unsafe { return_data_copy_impl(ctx, callee_ctx, ret_dest, 0, ret_len) };
 
     match copy_result {
