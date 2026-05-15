@@ -133,6 +133,10 @@ impl<'ctx> Engine<'ctx> {
             builtins::jet_contract_call as *const () as usize,
         );
         map_fn(
+            sym.contract_call_values(),
+            builtins::jet_contract_call_values as *const () as usize,
+        );
+        map_fn(
             sym.contract_call_return_data_copy(),
             builtins::jet_contract_call_return_data_copy as *const () as usize,
         );

@@ -11,20 +11,14 @@
 //! * [`SymbolicStackBackend`] – tracks values as LLVM [`IntValue`]s at
 //!   compile time, eliminating all runtime stack traffic for supported ops.
 //!
-//! Neither implementation is wired into [`BuildCtx`] yet; that migration is a
-//! separate step.
-//!
 //! [`BuildCtx`]: crate::builder::contract::BuildCtx
 
 use std::cell::RefCell;
 
-use inkwell::{
-    builder::Builder,
-    values::{AsValueRef, FunctionValue, IntValue, PointerValue},
-};
+use inkwell::values::{AsValueRef, IntValue, PointerValue};
 use jet_runtime::exec::ReturnCode;
 
-use crate::builder::{Error, env::Env, symbolic::SymbolicStack};
+use crate::builder::{Error, contract::BuildCtx, symbolic::SymbolicStack};
 
 // ---------------------------------------------------------------------------
 // Trait
@@ -39,39 +33,78 @@ use crate::builder::{Error, env::Env, symbolic::SymbolicStack};
 /// # Index convention
 /// `dup` and `swap` take a 1-based index matching the EVM opcode family:
 /// `DUP1`/`SWAP1` pass `1`, `DUP16`/`SWAP16` pass `16`.
-pub(crate) trait StackBackend<'ctx> {
+pub(crate) trait StackBackend<'ctx>: Sized {
     /// Push a 256-bit word onto the stack.
     ///
     /// Values narrower than 256 bits must be zero-extended by the
     /// implementation before being stored.
-    fn push_word(&self, value: IntValue<'ctx>) -> Result<(), Error>;
+    fn push_word<'b>(
+        &self,
+        bctx: &BuildCtx<'ctx, 'b, Self>,
+        value: IntValue<'ctx>,
+    ) -> Result<(), Error>;
 
     /// Pop and return the top 256-bit word.
     ///
     /// Returns an error (or emits a terminal IR path) on underflow.
-    fn pop_word(&self) -> Result<IntValue<'ctx>, Error>;
+    fn pop_word<'b>(&self, bctx: &BuildCtx<'ctx, 'b, Self>) -> Result<IntValue<'ctx>, Error>;
 
     /// Duplicate the word at depth `index` (1 = top) and push the copy.
-    fn dup(&self, index: u8) -> Result<(), Error>;
+    fn dup<'b>(&self, bctx: &BuildCtx<'ctx, 'b, Self>, index: u8) -> Result<(), Error>;
 
     /// Swap the top word with the word at depth `index + 1` (1 = second from top).
-    fn swap(&self, index: u8) -> Result<(), Error>;
+    fn swap<'b>(&self, bctx: &BuildCtx<'ctx, 'b, Self>, index: u8) -> Result<(), Error>;
+
+    /// Export any backend-local final stack state into the runtime context.
+    fn materialize_for_return<'b>(&self, _bctx: &BuildCtx<'ctx, 'b, Self>) -> Result<(), Error> {
+        Ok(())
+    }
 
     /// Pop two words. Returns `(top, second)` matching EVM stack order.
-    fn pop_2(&self) -> Result<(IntValue<'ctx>, IntValue<'ctx>), Error> {
-        let a = self.pop_word()?;
-        let b = self.pop_word()?;
+    fn pop_2<'b>(
+        &self,
+        bctx: &BuildCtx<'ctx, 'b, Self>,
+    ) -> Result<(IntValue<'ctx>, IntValue<'ctx>), Error> {
+        let a = self.pop_word(bctx)?;
+        let b = self.pop_word(bctx)?;
         Ok((a, b))
     }
 
     /// Pop three words. Returns `(top, second, third)` matching EVM stack order.
-    fn pop_3(
+    fn pop_3<'b>(
         &self,
+        bctx: &BuildCtx<'ctx, 'b, Self>,
     ) -> Result<(IntValue<'ctx>, IntValue<'ctx>, IntValue<'ctx>), Error> {
-        let a = self.pop_word()?;
-        let b = self.pop_word()?;
-        let c = self.pop_word()?;
+        let a = self.pop_word(bctx)?;
+        let b = self.pop_word(bctx)?;
+        let c = self.pop_word(bctx)?;
         Ok((a, b, c))
+    }
+
+    /// Pop seven words. Returns `(top, second, ..., seventh)` matching EVM stack order.
+    fn pop_7<'b>(
+        &self,
+        bctx: &BuildCtx<'ctx, 'b, Self>,
+    ) -> Result<
+        (
+            IntValue<'ctx>,
+            IntValue<'ctx>,
+            IntValue<'ctx>,
+            IntValue<'ctx>,
+            IntValue<'ctx>,
+            IntValue<'ctx>,
+            IntValue<'ctx>,
+        ),
+        Error,
+    > {
+        let a = self.pop_word(bctx)?;
+        let b = self.pop_word(bctx)?;
+        let c = self.pop_word(bctx)?;
+        let d = self.pop_word(bctx)?;
+        let e = self.pop_word(bctx)?;
+        let f = self.pop_word(bctx)?;
+        let g = self.pop_word(bctx)?;
+        Ok((a, b, c, d, e, f, g))
     }
 }
 
@@ -85,113 +118,101 @@ pub(crate) trait StackBackend<'ctx> {
 /// null-pointer check and branches to a `StackUnderflow` return block on
 /// failure, preserving the existing IR contract from `call_stack_pop` in
 /// `ops.rs`.
-pub(crate) struct RuntimeStackBackend<'ctx, 'b> {
-    builder: &'b Builder<'ctx>,
-    env: &'b Env<'ctx>,
-    func: FunctionValue<'ctx>,
-    exec_ctx: PointerValue<'ctx>,
-}
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct RuntimeStackBackend;
 
-impl<'ctx, 'b> RuntimeStackBackend<'ctx, 'b> {
-    pub(crate) fn new(
-        builder: &'b Builder<'ctx>,
-        env: &'b Env<'ctx>,
-        func: FunctionValue<'ctx>,
-        exec_ctx: PointerValue<'ctx>,
-    ) -> Self {
-        Self {
-            builder,
-            env,
-            func,
-            exec_ctx,
-        }
-    }
-
+impl RuntimeStackBackend {
     /// Zero-extend a value narrower than 256 bits to i256.
-    fn normalize(&self, value: IntValue<'ctx>) -> Result<IntValue<'ctx>, Error> {
+    fn normalize<'ctx, 'b>(
+        &self,
+        bctx: &BuildCtx<'ctx, 'b, Self>,
+        value: IntValue<'ctx>,
+    ) -> Result<IntValue<'ctx>, Error> {
         let bit_width = value.get_type().get_bit_width();
         match bit_width {
-            1 | 8 | 32 => Ok(self.builder.build_int_z_extend(
-                value,
-                self.env.types().i256,
-                "int_to_word",
-            )?),
+            1 | 8 | 32 => {
+                Ok(bctx
+                    .builder
+                    .build_int_z_extend(value, bctx.env.types().i256, "int_to_word")?)
+            }
             256 => Ok(value),
             _ => Err(Error::InvalidBitWidth(bit_width)),
         }
     }
 }
 
-impl<'ctx, 'b> StackBackend<'ctx> for RuntimeStackBackend<'ctx, 'b> {
-    fn push_word(&self, value: IntValue<'ctx>) -> Result<(), Error> {
-        let value = self.normalize(value)?;
-        self.builder.build_call(
-            self.env.symbols().stack_push_word(),
-            &[self.exec_ctx.into(), value.into()],
+impl<'ctx> StackBackend<'ctx> for RuntimeStackBackend {
+    fn push_word<'b>(
+        &self,
+        bctx: &BuildCtx<'ctx, 'b, Self>,
+        value: IntValue<'ctx>,
+    ) -> Result<(), Error> {
+        let value = self.normalize(bctx, value)?;
+        bctx.builder.build_call(
+            bctx.env.symbols().stack_push_word(),
+            &[bctx.registers.exec_ctx.into(), value.into()],
             "stack_push_i256",
         )?;
         Ok(())
     }
 
-    fn pop_word(&self) -> Result<IntValue<'ctx>, Error> {
-        let ret = self.builder.build_call(
-            self.env.symbols().stack_pop(),
-            &[self.exec_ctx.into()],
+    fn pop_word<'b>(&self, bctx: &BuildCtx<'ctx, 'b, Self>) -> Result<IntValue<'ctx>, Error> {
+        let ret = bctx.builder.build_call(
+            bctx.env.symbols().stack_pop(),
+            &[bctx.registers.exec_ctx.into()],
             "word_ptr",
         )?;
         let ptr = unsafe { PointerValue::new(ret.as_value_ref()) };
 
-        // Null pointer signals stack underflow; branch to a terminal block.
-        let is_null = self.builder.build_is_null(ptr, "is_stack_underflow")?;
-        let underflow_block = self
+        let is_null = bctx.builder.build_is_null(ptr, "is_stack_underflow")?;
+        let underflow_block = bctx
             .env
             .context()
-            .append_basic_block(self.func, "stack_underflow");
-        let valid_block = self
+            .append_basic_block(bctx.func, "stack_underflow");
+        let valid_block = bctx
             .env
             .context()
-            .append_basic_block(self.func, "stack_valid");
-        self.builder
+            .append_basic_block(bctx.func, "stack_valid");
+        bctx.builder
             .build_conditional_branch(is_null, underflow_block, valid_block)?;
 
-        self.builder.position_at_end(underflow_block);
-        let underflow_code = self
+        bctx.builder.position_at_end(underflow_block);
+        let underflow_code = bctx
             .env
             .types()
             .i8
             .const_int(ReturnCode::StackUnderflow as u64, false);
-        self.builder.build_return(Some(&underflow_code))?;
+        bctx.builder.build_return(Some(&underflow_code))?;
 
-        self.builder.position_at_end(valid_block);
-        // Load the i256 word from the pointer returned by the runtime.
-        let loaded = self
+        bctx.builder.position_at_end(valid_block);
+        let loaded = bctx
             .builder
-            .build_load(self.env.types().i256, ptr, "load_int")?;
+            .build_load(bctx.env.types().i256, ptr, "load_int")?;
         let word = unsafe { IntValue::new(loaded.as_value_ref()) };
         Ok(word)
     }
 
-    fn dup(&self, index: u8) -> Result<(), Error> {
-        let index_value = self.env.types().i8.const_int(index as u64, false);
-        let ret = self.builder.build_call(
-            self.env.symbols().stack_peek(),
-            &[self.exec_ctx.into(), index_value.into()],
+    fn dup<'b>(&self, bctx: &BuildCtx<'ctx, 'b, Self>, index: u8) -> Result<(), Error> {
+        let index_value = bctx.env.types().i8.const_int(index as u64, false);
+        let ret = bctx.builder.build_call(
+            bctx.env.symbols().stack_peek(),
+            &[bctx.registers.exec_ctx.into(), index_value.into()],
             "stack_peek_word_result",
         )?;
         let ptr = unsafe { PointerValue::new(ret.as_value_ref()) };
-        self.builder.build_call(
-            self.env.symbols().stack_push_ptr(),
-            &[self.exec_ctx.into(), ptr.into()],
+        bctx.builder.build_call(
+            bctx.env.symbols().stack_push_ptr(),
+            &[bctx.registers.exec_ctx.into(), ptr.into()],
             "stack_push_ptr",
         )?;
         Ok(())
     }
 
-    fn swap(&self, index: u8) -> Result<(), Error> {
-        let index_value = self.env.types().i8.const_int(index as u64, false);
-        self.builder.build_call(
-            self.env.symbols().stack_swap(),
-            &[self.exec_ctx.into(), index_value.into()],
+    fn swap<'b>(&self, bctx: &BuildCtx<'ctx, 'b, Self>, index: u8) -> Result<(), Error> {
+        let index_value = bctx.env.types().i8.const_int(index as u64, false);
+        bctx.builder.build_call(
+            bctx.env.symbols().stack_swap(),
+            &[bctx.registers.exec_ctx.into(), index_value.into()],
             "stack_swap_ret",
         )?;
         Ok(())
@@ -208,52 +229,71 @@ impl<'ctx, 'b> StackBackend<'ctx> for RuntimeStackBackend<'ctx, 'b> {
 /// manipulate an in-memory [`SymbolicStack`] that exists only during
 /// compilation.  Values narrower than 256 bits are zero-extended on push,
 /// exactly matching the [`RuntimeStackBackend`] contract.
-pub(crate) struct SymbolicStackBackend<'ctx, 'b> {
-    builder: &'b Builder<'ctx>,
-    env: &'b Env<'ctx>,
+pub(crate) struct SymbolicStackBackend<'ctx> {
     stack: RefCell<SymbolicStack<'ctx>>,
 }
 
-impl<'ctx, 'b> SymbolicStackBackend<'ctx, 'b> {
-    pub(crate) fn new(builder: &'b Builder<'ctx>, env: &'b Env<'ctx>) -> Self {
+impl<'ctx> SymbolicStackBackend<'ctx> {
+    pub(crate) fn new() -> Self {
         Self {
-            builder,
-            env,
             stack: RefCell::new(SymbolicStack::new()),
         }
     }
 
     /// Zero-extend a value narrower than 256 bits to i256.
-    fn normalize(&self, value: IntValue<'ctx>) -> Result<IntValue<'ctx>, Error> {
+    fn normalize<'b>(
+        &self,
+        bctx: &BuildCtx<'ctx, 'b, Self>,
+        value: IntValue<'ctx>,
+    ) -> Result<IntValue<'ctx>, Error> {
         let bit_width = value.get_type().get_bit_width();
         match bit_width {
-            1 | 8 | 32 => Ok(self.builder.build_int_z_extend(
-                value,
-                self.env.types().i256,
-                "int_to_word",
-            )?),
+            1 | 8 | 32 => {
+                Ok(bctx
+                    .builder
+                    .build_int_z_extend(value, bctx.env.types().i256, "int_to_word")?)
+            }
             256 => Ok(value),
             _ => Err(Error::InvalidBitWidth(bit_width)),
         }
     }
 }
 
-impl<'ctx, 'b> StackBackend<'ctx> for SymbolicStackBackend<'ctx, 'b> {
-    fn push_word(&self, value: IntValue<'ctx>) -> Result<(), Error> {
-        let value = self.normalize(value)?;
+impl<'ctx> StackBackend<'ctx> for SymbolicStackBackend<'ctx> {
+    fn push_word<'b>(
+        &self,
+        bctx: &BuildCtx<'ctx, 'b, Self>,
+        value: IntValue<'ctx>,
+    ) -> Result<(), Error> {
+        let value = self.normalize(bctx, value)?;
         self.stack.borrow_mut().push_word(value);
         Ok(())
     }
 
-    fn pop_word(&self) -> Result<IntValue<'ctx>, Error> {
+    fn pop_word<'b>(&self, _bctx: &BuildCtx<'ctx, 'b, Self>) -> Result<IntValue<'ctx>, Error> {
         self.stack.borrow_mut().pop_word()
     }
 
-    fn dup(&self, index: u8) -> Result<(), Error> {
+    fn dup<'b>(&self, _bctx: &BuildCtx<'ctx, 'b, Self>, index: u8) -> Result<(), Error> {
         self.stack.borrow_mut().dup(index)
     }
 
-    fn swap(&self, index: u8) -> Result<(), Error> {
+    fn swap<'b>(&self, _bctx: &BuildCtx<'ctx, 'b, Self>, index: u8) -> Result<(), Error> {
         self.stack.borrow_mut().swap(index)
+    }
+
+    fn materialize_for_return<'b>(&self, bctx: &BuildCtx<'ctx, 'b, Self>) -> Result<(), Error> {
+        let slots = self.stack.borrow().clone_slots();
+        for slot in slots {
+            let value = match slot {
+                crate::builder::symbolic::StackValue::Word(value) => value,
+            };
+            bctx.builder.build_call(
+                bctx.env.symbols().stack_push_word(),
+                &[bctx.registers.exec_ctx.into(), value.into()],
+                "stack_push_i256",
+            )?;
+        }
+        Ok(())
     }
 }
