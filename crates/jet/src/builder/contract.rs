@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use inkwell::{
     basic_block::BasicBlock,
     values::{FunctionValue, IntValue},
@@ -7,7 +9,7 @@ use log::{info, trace};
 use jet_runtime::exec::ReturnCode;
 
 use crate::{
-    builder::{Error, InvalidOpcode, env::Env, ops},
+    builder::{Error, InvalidOpcode, env::Env, ops, symbolic::SymbolicStack},
     instructions,
     instructions::{Instruction, IterItem},
 };
@@ -59,11 +61,34 @@ impl<'ctx> Registers<'ctx> {
     }
 }
 
+pub(crate) enum StackMode {
+    RuntimeOnly,
+    SymbolicPreferred,
+}
+
+impl StackMode {
+    fn from_env() -> Self {
+        match std::env::var("JET_SYMBOLIC_STACK") {
+            Ok(value) => {
+                let enabled = matches!(value.as_str(), "1" | "true" | "TRUE" | "True");
+                if enabled {
+                    StackMode::SymbolicPreferred
+                } else {
+                    StackMode::RuntimeOnly
+                }
+            }
+            Err(_) => StackMode::RuntimeOnly,
+        }
+    }
+}
+
 pub(crate) struct BuildCtx<'ctx, 'b> {
     pub(crate) env: &'b Env<'ctx>,
     pub(crate) builder: &'b inkwell::builder::Builder<'ctx>,
     pub(crate) registers: Registers<'ctx>,
     pub(crate) func: FunctionValue<'ctx>,
+    pub(crate) stack_mode: StackMode,
+    pub(crate) symbolic_stack: RefCell<SymbolicStack<'ctx>>,
 }
 
 impl<'ctx, 'b> BuildCtx<'ctx, 'b> {
@@ -71,12 +96,15 @@ impl<'ctx, 'b> BuildCtx<'ctx, 'b> {
         env: &'b Env<'ctx>,
         builder: &'b inkwell::builder::Builder<'ctx>,
         func: FunctionValue<'ctx>,
+        stack_mode: StackMode,
     ) -> Self {
         Self {
             env,
             builder,
             func,
             registers: Registers::new(env, builder, func),
+            stack_mode,
+            symbolic_stack: RefCell::new(SymbolicStack::new()),
         }
     }
 }
@@ -172,7 +200,8 @@ pub fn build(env: &'_ Env<'_>, name: &str, rom: &[u8]) -> Result<(), Error> {
     builder.position_at_end(preamble_block);
 
     // Build ROM into IR
-    let bctx = BuildCtx::new(env, &builder, func);
+    let stack_mode = StackMode::from_env();
+    let bctx = BuildCtx::new(env, &builder, func, stack_mode);
     let code_blocks = find_code_blocks(env, func, rom)?;
     build_contract_body(&bctx, &code_blocks)?;
 

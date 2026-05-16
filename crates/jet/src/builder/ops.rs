@@ -8,7 +8,10 @@ use inkwell::{
 use jet_runtime::exec::ReturnCode;
 
 use crate::{
-    builder::{Error, contract::BuildCtx},
+    builder::{
+        Error,
+        contract::{BuildCtx, StackMode},
+    },
     instructions::Instruction,
 };
 
@@ -35,31 +38,61 @@ pub(crate) fn build_return(bctx: &BuildCtx<'_, '_>, return_value: ReturnCode) ->
 }
 
 pub(crate) fn push(bctx: &BuildCtx<'_, '_>, bytes: [u8; 32]) -> Result<(), Error> {
-    let t = bctx.env.types();
+    match bctx.stack_mode {
+        StackMode::RuntimeOnly => {
+            let t = bctx.env.types();
 
-    let values = bytes
-        .iter()
-        .map(|byte| t.i8.const_int(*byte as u64, false))
-        .collect::<Vec<_>>();
+            let values = bytes
+                .iter()
+                .map(|byte| t.i8.const_int(*byte as u64, false))
+                .collect::<Vec<_>>();
 
-    let values = t.i8.const_array(&values);
-    let values_ptr = bctx.builder.build_alloca(t.word_bytes, "push_bytes.ptr")?;
-    bctx.builder.build_store(values_ptr, values)?;
+            let values = t.i8.const_array(&values);
+            let values_ptr = bctx.builder.build_alloca(t.word_bytes, "push_bytes.ptr")?;
+            bctx.builder.build_store(values_ptr, values)?;
 
-    stack_push_ptr(bctx, values_ptr)?;
-
-    Ok(())
+            stack_push_ptr(bctx, values_ptr)?;
+            Ok(())
+        }
+        StackMode::SymbolicPreferred => {
+            let mut limbs = [0u64; 4];
+            for (i, chunk) in bytes.chunks_exact(8).enumerate() {
+                let chunk: [u8; 8] = chunk
+                    .try_into()
+                    .map_err(|_| Error::invariant_violation("invalid PUSH limb width"))?;
+                limbs[i] = u64::from_le_bytes(chunk);
+            }
+            let value = bctx.env.types().i256.const_int_arbitrary_precision(&limbs);
+            sym_push_word(bctx, value)
+        }
+    }
 }
 
 pub(crate) fn dup(bctx: &BuildCtx<'_, '_>, index: u8) -> Result<(), Error> {
-    let peeked_value_ptr = call_stack_peek(bctx, index)?;
-    call_stack_push_ptr(bctx, peeked_value_ptr)?;
-    Ok(())
+    match bctx.stack_mode {
+        StackMode::RuntimeOnly => {
+            let peeked_value_ptr = call_stack_peek(bctx, index)?;
+            call_stack_push_ptr(bctx, peeked_value_ptr)?;
+            Ok(())
+        }
+        StackMode::SymbolicPreferred => {
+            bctx.symbolic_stack.borrow_mut().dup(index)?;
+            Ok(())
+        }
+    }
 }
 
 pub(crate) fn swap(bctx: &BuildCtx<'_, '_>, index: u8) -> Result<(), Error> {
-    call_stack_swap(bctx, index)?;
-    Ok(())
+    match bctx.stack_mode {
+        StackMode::RuntimeOnly => {
+            call_stack_swap(bctx, index)?;
+            Ok(())
+        }
+        StackMode::SymbolicPreferred => {
+            bctx.symbolic_stack.borrow_mut().swap(index)?;
+            Ok(())
+        }
+    }
 }
 
 pub(crate) fn stop(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
@@ -67,30 +100,57 @@ pub(crate) fn stop(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
 }
 
 pub(crate) fn add(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = stack_pop_2(bctx)?;
-    let a = load_i256(bctx, a)?;
-    let b = load_i256(bctx, b)?;
-    let result = bctx.builder.build_int_add(a, b, "add_result")?;
-    call_stack_push_i256(bctx, result)?;
-    Ok(())
+    match bctx.stack_mode {
+        StackMode::RuntimeOnly => {
+            let (a, b) = stack_pop_2(bctx)?;
+            let a = load_i256(bctx, a)?;
+            let b = load_i256(bctx, b)?;
+            let result = bctx.builder.build_int_add(a, b, "add_result")?;
+            call_stack_push_i256(bctx, result)?;
+            Ok(())
+        }
+        StackMode::SymbolicPreferred => {
+            let (a, b) = sym_pop_2_word(bctx)?;
+            let result = bctx.builder.build_int_add(a, b, "add_result")?;
+            sym_push_word(bctx, result)
+        }
+    }
 }
 
 pub(crate) fn mul(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = stack_pop_2(bctx)?;
-    let a = load_i256(bctx, a)?;
-    let b = load_i256(bctx, b)?;
-    let result = bctx.builder.build_int_mul(a, b, "mul_result")?;
-    call_stack_push_i256(bctx, result)?;
-    Ok(())
+    match bctx.stack_mode {
+        StackMode::RuntimeOnly => {
+            let (a, b) = stack_pop_2(bctx)?;
+            let a = load_i256(bctx, a)?;
+            let b = load_i256(bctx, b)?;
+            let result = bctx.builder.build_int_mul(a, b, "mul_result")?;
+            call_stack_push_i256(bctx, result)?;
+            Ok(())
+        }
+        StackMode::SymbolicPreferred => {
+            let (a, b) = sym_pop_2_word(bctx)?;
+            let result = bctx.builder.build_int_mul(a, b, "mul_result")?;
+            sym_push_word(bctx, result)
+        }
+    }
 }
 
 pub(crate) fn sub(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = stack_pop_2(bctx)?;
-    let a = load_i256(bctx, a)?;
-    let b = load_i256(bctx, b)?;
-    let result = bctx.builder.build_int_sub(a, b, "sub_result")?;
-    stack_push_int(bctx, result)?;
-    Ok(())
+    match bctx.stack_mode {
+        StackMode::RuntimeOnly => {
+            let (a, b) = stack_pop_2(bctx)?;
+            let a = load_i256(bctx, a)?;
+            let b = load_i256(bctx, b)?;
+            let result = bctx.builder.build_int_sub(a, b, "sub_result")?;
+            stack_push_int(bctx, result)?;
+            Ok(())
+        }
+        StackMode::SymbolicPreferred => {
+            let (a, b) = sym_pop_2_word(bctx)?;
+            let result = bctx.builder.build_int_sub(a, b, "sub_result")?;
+            sym_push_word(bctx, result)
+        }
+    }
 }
 
 pub(crate) fn div(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
@@ -381,62 +441,123 @@ pub(crate) fn sgt(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
 }
 
 pub(crate) fn eq(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = stack_pop_2(bctx)?;
-    let a = load_i256(bctx, a)?;
-    let b = load_i256(bctx, b)?;
-    let result = bctx
-        .builder
-        .build_int_compare(inkwell::IntPredicate::EQ, a, b, "eq_result")?;
-    stack_push_int(bctx, result)?;
-    Ok(())
+    match bctx.stack_mode {
+        StackMode::RuntimeOnly => {
+            let (a, b) = stack_pop_2(bctx)?;
+            let a = load_i256(bctx, a)?;
+            let b = load_i256(bctx, b)?;
+            let result = bctx
+                .builder
+                .build_int_compare(inkwell::IntPredicate::EQ, a, b, "eq_result")?;
+            stack_push_int(bctx, result)?;
+            Ok(())
+        }
+        StackMode::SymbolicPreferred => {
+            let (a, b) = sym_pop_2_word(bctx)?;
+            let result = bctx
+                .builder
+                .build_int_compare(inkwell::IntPredicate::EQ, a, b, "eq_result")?;
+            sym_push_word(bctx, result)
+        }
+    }
 }
 
 pub(crate) fn iszero(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let a = stack_pop_1(bctx)?;
-    let a = load_i256(bctx, a)?;
-    let result = bctx.builder.build_int_compare(
-        inkwell::IntPredicate::EQ,
-        a,
-        bctx.env.types().i256.const_zero(),
-        "iszero_result",
-    )?;
-    stack_push_int(bctx, result)?;
-    Ok(())
+    match bctx.stack_mode {
+        StackMode::RuntimeOnly => {
+            let a = stack_pop_1(bctx)?;
+            let a = load_i256(bctx, a)?;
+            let result = bctx.builder.build_int_compare(
+                inkwell::IntPredicate::EQ,
+                a,
+                bctx.env.types().i256.const_zero(),
+                "iszero_result",
+            )?;
+            stack_push_int(bctx, result)?;
+            Ok(())
+        }
+        StackMode::SymbolicPreferred => {
+            let a = sym_pop_word(bctx)?;
+            let result = bctx.builder.build_int_compare(
+                inkwell::IntPredicate::EQ,
+                a,
+                bctx.env.types().i256.const_zero(),
+                "iszero_result",
+            )?;
+            sym_push_word(bctx, result)
+        }
+    }
 }
 
 pub(crate) fn and(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = stack_pop_2(bctx)?;
-    let a = load_i256(bctx, a)?;
-    let b = load_i256(bctx, b)?;
-    let result = bctx.builder.build_and(a, b, "and_result")?;
-    stack_push_int(bctx, result)?;
-    Ok(())
+    match bctx.stack_mode {
+        StackMode::RuntimeOnly => {
+            let (a, b) = stack_pop_2(bctx)?;
+            let a = load_i256(bctx, a)?;
+            let b = load_i256(bctx, b)?;
+            let result = bctx.builder.build_and(a, b, "and_result")?;
+            stack_push_int(bctx, result)?;
+            Ok(())
+        }
+        StackMode::SymbolicPreferred => {
+            let (a, b) = sym_pop_2_word(bctx)?;
+            let result = bctx.builder.build_and(a, b, "and_result")?;
+            sym_push_word(bctx, result)
+        }
+    }
 }
 
 pub(crate) fn or(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = stack_pop_2(bctx)?;
-    let a = load_i256(bctx, a)?;
-    let b = load_i256(bctx, b)?;
-    let result = bctx.builder.build_or(a, b, "or_result")?;
-    stack_push_int(bctx, result)?;
-    Ok(())
+    match bctx.stack_mode {
+        StackMode::RuntimeOnly => {
+            let (a, b) = stack_pop_2(bctx)?;
+            let a = load_i256(bctx, a)?;
+            let b = load_i256(bctx, b)?;
+            let result = bctx.builder.build_or(a, b, "or_result")?;
+            stack_push_int(bctx, result)?;
+            Ok(())
+        }
+        StackMode::SymbolicPreferred => {
+            let (a, b) = sym_pop_2_word(bctx)?;
+            let result = bctx.builder.build_or(a, b, "or_result")?;
+            sym_push_word(bctx, result)
+        }
+    }
 }
 
 pub(crate) fn xor(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = stack_pop_2(bctx)?;
-    let a = load_i256(bctx, a)?;
-    let b = load_i256(bctx, b)?;
-    let result = bctx.builder.build_xor(a, b, "xor_result")?;
-    stack_push_int(bctx, result)?;
-    Ok(())
+    match bctx.stack_mode {
+        StackMode::RuntimeOnly => {
+            let (a, b) = stack_pop_2(bctx)?;
+            let a = load_i256(bctx, a)?;
+            let b = load_i256(bctx, b)?;
+            let result = bctx.builder.build_xor(a, b, "xor_result")?;
+            stack_push_int(bctx, result)?;
+            Ok(())
+        }
+        StackMode::SymbolicPreferred => {
+            let (a, b) = sym_pop_2_word(bctx)?;
+            let result = bctx.builder.build_xor(a, b, "xor_result")?;
+            sym_push_word(bctx, result)
+        }
+    }
 }
 
 pub(crate) fn not(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let a = stack_pop_1(bctx)?;
-    let a = load_i256(bctx, a)?;
-    let result = bctx.builder.build_not(a, "not_result")?;
-    stack_push_int(bctx, result)?;
-    Ok(())
+    match bctx.stack_mode {
+        StackMode::RuntimeOnly => {
+            let a = stack_pop_1(bctx)?;
+            let a = load_i256(bctx, a)?;
+            let result = bctx.builder.build_not(a, "not_result")?;
+            stack_push_int(bctx, result)?;
+            Ok(())
+        }
+        StackMode::SymbolicPreferred => {
+            let a = sym_pop_word(bctx)?;
+            let result = bctx.builder.build_not(a, "not_result")?;
+            sym_push_word(bctx, result)
+        }
+    }
 }
 
 pub(crate) fn byte(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
@@ -698,9 +819,17 @@ pub(crate) fn blockhash(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
 }
 
 pub(crate) fn pop(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    // TODO: We could simply decrement stack ptr
-    stack_pop_1(bctx)?;
-    Ok(())
+    match bctx.stack_mode {
+        StackMode::RuntimeOnly => {
+            // TODO: We could simply decrement stack ptr
+            stack_pop_1(bctx)?;
+            Ok(())
+        }
+        StackMode::SymbolicPreferred => {
+            let _ = sym_pop_word(bctx)?;
+            Ok(())
+        }
+    }
 }
 
 pub(crate) fn mload(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
@@ -850,6 +979,36 @@ pub(crate) fn selfdestruct(_bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
 
 // Private helpers
 //
+
+fn normalize_to_i256<'ctx>(
+    bctx: &BuildCtx<'ctx, '_>,
+    value: IntValue<'ctx>,
+) -> Result<IntValue<'ctx>, Error> {
+    let bit_width = value.get_type().get_bit_width();
+    match bit_width {
+        1 | 8 | 32 => Ok(bctx
+            .builder
+            .build_int_z_extend(value, bctx.env.types().i256, "int_to_word")?),
+        256 => Ok(value),
+        _ => Err(Error::InvalidBitWidth(bit_width)),
+    }
+}
+
+fn sym_push_word<'ctx>(bctx: &BuildCtx<'ctx, '_>, value: IntValue<'ctx>) -> Result<(), Error> {
+    let value = normalize_to_i256(bctx, value)?;
+    bctx.symbolic_stack.borrow_mut().push_word(value);
+    Ok(())
+}
+
+fn sym_pop_word<'ctx>(bctx: &BuildCtx<'ctx, '_>) -> Result<IntValue<'ctx>, Error> {
+    bctx.symbolic_stack.borrow_mut().pop_word()
+}
+
+fn sym_pop_2_word<'ctx>(bctx: &BuildCtx<'ctx, '_>) -> Result<(IntValue<'ctx>, IntValue<'ctx>), Error> {
+    let a = sym_pop_word(bctx)?;
+    let b = sym_pop_word(bctx)?;
+    Ok((a, b))
+}
 
 fn block_info_hash(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     let hash_ptr = bctx.builder.build_struct_gep(
