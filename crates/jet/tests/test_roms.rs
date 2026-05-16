@@ -27,6 +27,7 @@ macro_rules! define_ops {
 generate_push_macros!(0..=32);
 
 define_ops!(
+    STOP,
     ADD,
     MUL,
     SUB,
@@ -173,6 +174,71 @@ rom_tests! {
             stack_ptr: 1,
             jump_ptr: 13,
             stack: vec![stack_word(&[0x05])],
+            ..Default::default()
+        },
+    },
+
+    dynamic_jump_preserves_symbolic_stack: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x2A),
+            PUSH1!(0x07),
+            PUSH1!(0x01),
+            ADD!(),
+            JUMP!(),
+            JUMPDEST!(),
+            PUSH1!(0x03),
+            ADD!(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            jump_ptr: 8,
+            stack: vec![stack_word(&[0x2D])],
+            ..Default::default()
+        },
+    },
+
+    dynamic_jumpi_true_preserves_symbolic_stack: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x2A),
+            PUSH1!(0x01),
+            PUSH1!(0x0C),
+            PUSH1!(0x01),
+            ADD!(),
+            JUMPI!(),
+            PUSH1!(0xFF),
+            STOP!(),
+            JUMPDEST!(),
+            PUSH1!(0x03),
+            ADD!(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            jump_ptr: 13,
+            stack: vec![stack_word(&[0x2D])],
+            ..Default::default()
+        },
+    },
+
+    dynamic_jumpi_false_uses_fallthrough_stack: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x2A),
+            PUSH1!(0x00),
+            PUSH1!(0x0D),
+            PUSH1!(0x01),
+            ADD!(),
+            JUMPI!(),
+            PUSH1!(0x03),
+            ADD!(),
+            STOP!(),
+            JUMPDEST!(),
+            PUSH1!(0xFF),
+            STOP!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::Stop,
+            stack_ptr: 1,
+            jump_ptr: 14,
+            stack: vec![stack_word(&[0x2D])],
             ..Default::default()
         },
     },
