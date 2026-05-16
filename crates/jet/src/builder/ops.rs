@@ -35,7 +35,8 @@ pub(crate) fn push<'ctx, S: StackBackend<'ctx>>(
         limbs[i] = u64::from_le_bytes(chunk);
     }
     let value = bctx.env.types().i256.const_int_arbitrary_precision(&limbs);
-    bctx.stack.push_word(bctx, value)
+    let known_u64 = limbs[1..].iter().all(|limb| *limb == 0).then_some(limbs[0]);
+    bctx.stack.push_word_with_known_u64(bctx, value, known_u64)
 }
 
 pub(crate) fn dup<'ctx, S: StackBackend<'ctx>>(
@@ -438,8 +439,9 @@ pub(crate) fn pc<'ctx, S: StackBackend<'ctx>>(
     bctx: &BuildCtx<'ctx, '_, S>,
     pc: usize,
 ) -> Result<(), Error> {
-    let pc = bctx.env.types().i256.const_int(pc as u64, false);
-    bctx.stack.push_word(bctx, pc)
+    let pc_value = bctx.env.types().i256.const_int(pc as u64, false);
+    bctx.stack
+        .push_word_with_known_u64(bctx, pc_value, Some(pc as u64))
 }
 
 pub(crate) fn call<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
@@ -901,8 +903,14 @@ fn memory_gep_index<'ctx, S: StackBackend<'ctx>>(
 ) -> Result<IntValue<'ctx>, Error> {
     match value.get_type().get_bit_width() {
         64 => Ok(value),
-        width if width < 64 => Ok(bctx.builder.build_int_z_extend(value, bctx.env.types().i64, name)?),
-        _ => Ok(bctx.builder.build_int_truncate(value, bctx.env.types().i64, name)?),
+        width if width < 64 => {
+            Ok(bctx
+                .builder
+                .build_int_z_extend(value, bctx.env.types().i64, name)?)
+        }
+        _ => Ok(bctx
+            .builder
+            .build_int_truncate(value, bctx.env.types().i64, name)?),
     }
 }
 
