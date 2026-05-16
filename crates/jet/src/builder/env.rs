@@ -86,12 +86,10 @@ pub(crate) struct Symbols<'ctx> {
     stack_peek: FunctionValue<'ctx>,
     stack_swap: FunctionValue<'ctx>,
 
-    mem_store: FunctionValue<'ctx>,
-    mem_store_byte: FunctionValue<'ctx>,
-    mem_load: FunctionValue<'ctx>,
     mem_expand: FunctionValue<'ctx>,
 
     contract_call: FunctionValue<'ctx>,
+    contract_call_values: FunctionValue<'ctx>,
     contract_call_return_data_copy: FunctionValue<'ctx>,
 
     keccak256: FunctionValue<'ctx>,
@@ -111,12 +109,11 @@ impl<'ctx> Symbols<'ctx> {
         let stack_peek = module.get_function(jet_runtime::symbols::FN_STACK_PEEK)?;
         let stack_swap = module.get_function(jet_runtime::symbols::FN_STACK_SWAP)?;
 
-        let mem_store = module.get_function(jet_runtime::symbols::FN_MEM_STORE_WORD)?;
-        let mem_store_byte = module.get_function(jet_runtime::symbols::FN_MEM_STORE_BYTE)?;
-        let mem_load = module.get_function(jet_runtime::symbols::FN_MEM_LOAD)?;
         let mem_expand = module.get_function(jet_runtime::symbols::FN_MEM_EXPAND)?;
 
         let contract_call = module.get_function(jet_runtime::symbols::FN_CONTRACT_CALL)?;
+        let contract_call_values =
+            module.get_function(jet_runtime::symbols::FN_CONTRACT_CALL_VALUES)?;
         let contract_call_return_data_copy =
             module.get_function(jet_runtime::symbols::FN_CONTRACT_CALL_RETURN_DATA_COPY)?;
 
@@ -135,12 +132,10 @@ impl<'ctx> Symbols<'ctx> {
             stack_peek,
             stack_swap,
 
-            mem_store,
-            mem_store_byte,
-            mem_load,
             mem_expand,
 
             contract_call,
+            contract_call_values,
             contract_call_return_data_copy,
 
             keccak256,
@@ -174,24 +169,16 @@ impl<'ctx> Symbols<'ctx> {
         self.stack_swap
     }
 
-    pub(crate) fn mem_store(&self) -> FunctionValue<'ctx> {
-        self.mem_store
-    }
-
-    pub(crate) fn mem_store_byte(&self) -> FunctionValue<'ctx> {
-        self.mem_store_byte
-    }
-
-    pub(crate) fn mem_load(&self) -> FunctionValue<'ctx> {
-        self.mem_load
-    }
-
     pub(crate) fn mem_expand(&self) -> FunctionValue<'ctx> {
         self.mem_expand
     }
 
     pub(crate) fn contract_call(&self) -> FunctionValue<'ctx> {
         self.contract_call
+    }
+
+    pub(crate) fn contract_call_values(&self) -> FunctionValue<'ctx> {
+        self.contract_call_values
     }
 
     pub(crate) fn contract_call_return_data_copy(&self) -> FunctionValue<'ctx> {

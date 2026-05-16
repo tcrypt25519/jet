@@ -7,7 +7,12 @@ use log::{info, trace};
 use jet_runtime::exec::ReturnCode;
 
 use crate::{
-    builder::{Error, InvalidOpcode, env::Env, ops},
+    builder::{
+        Error, InvalidOpcode,
+        env::Env,
+        ops,
+        stack::{RuntimeStackBackend, StackBackend, SymbolicStackBackend},
+    },
     instructions,
     instructions::{Instruction, IterItem},
 };
@@ -59,24 +64,48 @@ impl<'ctx> Registers<'ctx> {
     }
 }
 
-pub(crate) struct BuildCtx<'ctx, 'b> {
+pub(crate) enum StackMode {
+    RuntimeOnly,
+    SymbolicPreferred,
+}
+
+impl StackMode {
+    fn from_env() -> Self {
+        match std::env::var("JET_SYMBOLIC_STACK") {
+            Ok(value) => {
+                let enabled = matches!(value.as_str(), "1" | "true" | "TRUE" | "True");
+                if enabled {
+                    StackMode::SymbolicPreferred
+                } else {
+                    StackMode::RuntimeOnly
+                }
+            }
+            Err(_) => StackMode::RuntimeOnly,
+        }
+    }
+}
+
+pub(crate) struct BuildCtx<'ctx, 'b, S: StackBackend<'ctx>> {
     pub(crate) env: &'b Env<'ctx>,
     pub(crate) builder: &'b inkwell::builder::Builder<'ctx>,
     pub(crate) registers: Registers<'ctx>,
     pub(crate) func: FunctionValue<'ctx>,
+    pub(crate) stack: S,
 }
 
-impl<'ctx, 'b> BuildCtx<'ctx, 'b> {
+impl<'ctx, 'b, S: StackBackend<'ctx>> BuildCtx<'ctx, 'b, S> {
     fn new(
         env: &'b Env<'ctx>,
         builder: &'b inkwell::builder::Builder<'ctx>,
         func: FunctionValue<'ctx>,
+        stack: S,
     ) -> Self {
         Self {
             env,
             builder,
             func,
             registers: Registers::new(env, builder, func),
+            stack,
         }
     }
 }
@@ -153,6 +182,20 @@ impl<'ctx, 'b> CodeBlocks<'ctx, 'b> {
 }
 
 pub fn build(env: &'_ Env<'_>, name: &str, rom: &[u8]) -> Result<(), Error> {
+    match StackMode::from_env() {
+        StackMode::RuntimeOnly => build_with_stack(env, name, rom, RuntimeStackBackend),
+        StackMode::SymbolicPreferred => {
+            build_with_stack(env, name, rom, SymbolicStackBackend::new())
+        }
+    }
+}
+
+fn build_with_stack<'ctx, S: StackBackend<'ctx>>(
+    env: &'_ Env<'ctx>,
+    name: &str,
+    rom: &[u8],
+    stack: S,
+) -> Result<(), Error> {
     let builder = env.context().create_builder();
 
     // Declare the function in the module
@@ -172,7 +215,7 @@ pub fn build(env: &'_ Env<'_>, name: &str, rom: &[u8]) -> Result<(), Error> {
     builder.position_at_end(preamble_block);
 
     // Build ROM into IR
-    let bctx = BuildCtx::new(env, &builder, func);
+    let bctx = BuildCtx::new(env, &builder, func, stack);
     let code_blocks = find_code_blocks(env, func, rom)?;
     build_contract_body(&bctx, &code_blocks)?;
 
@@ -276,8 +319,8 @@ fn find_code_blocks<'ctx, 'b>(
     Ok(blocks)
 }
 
-fn build_contract_body<'ctx, 'b>(
-    bctx: &'b BuildCtx<'ctx, 'b>,
+fn build_contract_body<'ctx, 'b, S: StackBackend<'ctx>>(
+    bctx: &'b BuildCtx<'ctx, 'b, S>,
     code_blocks: &CodeBlocks<'ctx, 'b>,
 ) -> Result<(), Error> {
     let t = bctx.env.types();
@@ -339,11 +382,11 @@ fn build_contract_body<'ctx, 'b>(
     Ok(())
 }
 
-fn build_code_block(
-    bctx: &BuildCtx<'_, '_>,
-    code_block: &CodeBlock,
-    jump_block: Option<BasicBlock>,
-    following_block: Option<&&CodeBlock>,
+fn build_code_block<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+    code_block: &CodeBlock<'ctx, '_>,
+    jump_block: Option<BasicBlock<'ctx>>,
+    following_block: Option<&&CodeBlock<'ctx, '_>>,
 ) -> Result<(), Error> {
     trace!("loop: Building code");
     trace!("loop: Offset: {}", code_block.offset);
@@ -649,10 +692,10 @@ fn build_code_block(
     Ok(())
 }
 
-fn build_jump_table(
-    bctx: &BuildCtx,
-    jump_block: BasicBlock,
-    jump_cases: &[(IntValue, BasicBlock)],
+fn build_jump_table<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+    jump_block: BasicBlock<'ctx>,
+    jump_cases: &[(IntValue<'ctx>, BasicBlock<'ctx>)],
 ) -> Result<(), Error> {
     let t = bctx.env.types();
 
