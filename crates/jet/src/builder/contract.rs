@@ -455,42 +455,19 @@ fn build_symbolic_contract_body<'ctx, 'b>(
     bctx: &'b BuildCtx<'ctx, 'b, SymbolicStackBackend<'ctx>>,
     code_blocks: &CodeBlocks<'ctx, 'b>,
 ) -> Result<(), Error> {
-    let t = bctx.env.types();
-    let mut jump_cases = Vec::new();
     let mut incoming: HashMap<usize, Vec<SymbolicIncoming<'ctx>>> = HashMap::new();
-    let mut dynamic_jump_used = false;
-
-    let jump_block = match code_blocks.has_jumpdest() {
-        true => Some(
-            bctx.env
-                .context()
-                .append_basic_block(bctx.func, "jump_block"),
-        ),
-        false => None,
-    };
 
     let mut code_blocks_iter = code_blocks.iter().peekable();
     while let Some(code_block) = code_blocks_iter.next() {
-        if code_block.is_jumpdest() {
-            let mut offset = code_block.offset as u64;
-            if offset == 0 {
-                return Err(Error::invariant_violation("Jump destination at offset 0"));
-            }
-            offset -= 1;
-            jump_cases.push((t.i32.const_int(offset, false), code_block.entry_block));
-        }
-
         restore_symbolic_entry_stack(bctx, code_block, incoming.remove(&code_block.offset))?;
 
         let following_block = code_blocks_iter.peek();
         build_symbolic_code_block(
             bctx,
             code_block,
-            jump_block,
             following_block,
             code_blocks,
             &mut incoming,
-            &mut dynamic_jump_used,
         )?;
 
         if code_block.terminates() {
@@ -504,19 +481,6 @@ fn build_symbolic_contract_body<'ctx, 'b>(
                     .build_unconditional_branch(next_block.entry_block)?;
             }
             None => ops::build_return(bctx, ReturnCode::ImplicitReturn)?,
-        }
-    }
-
-    if let Some(jump_block) = jump_block {
-        if dynamic_jump_used {
-            build_jump_table(bctx, jump_block, jump_cases.as_slice())?;
-        } else {
-            // Static symbolic jumps branch directly to their targets. Leaving the
-            // shared jump table unterminated would fail LLVM verification, while
-            // wiring its switch edges would add false predecessors to phi blocks.
-            bctx.builder.position_at_end(jump_block);
-            let return_value = t.i8.const_int(ReturnCode::JumpFailure as u64, false);
-            bctx.builder.build_return(Some(&return_value))?;
         }
     }
 
@@ -585,24 +549,28 @@ fn record_symbolic_incoming<'ctx>(
         .builder
         .get_insert_block()
         .ok_or_else(|| Error::invariant_violation("missing current block for symbolic edge"))?;
+    record_symbolic_incoming_from(incoming, target_offset, pred, bctx.stack.snapshot());
+    Ok(())
+}
+
+fn record_symbolic_incoming_from<'ctx>(
+    incoming: &mut HashMap<usize, Vec<SymbolicIncoming<'ctx>>>,
+    target_offset: usize,
+    pred: BasicBlock<'ctx>,
+    stack: SymbolicStack<'ctx>,
+) {
     incoming
         .entry(target_offset)
         .or_default()
-        .push(SymbolicIncoming {
-            pred,
-            stack: bctx.stack.snapshot(),
-        });
-    Ok(())
+        .push(SymbolicIncoming { pred, stack });
 }
 
 fn build_symbolic_code_block<'ctx>(
     bctx: &BuildCtx<'ctx, '_, SymbolicStackBackend<'ctx>>,
     code_block: &CodeBlock<'ctx, '_>,
-    jump_block: Option<BasicBlock<'ctx>>,
     following_block: Option<&&CodeBlock<'ctx, '_>>,
     code_blocks: &CodeBlocks<'ctx, '_>,
     incoming: &mut HashMap<usize, Vec<SymbolicIncoming<'ctx>>>,
-    dynamic_jump_used: &mut bool,
 ) -> Result<(), Error> {
     trace!("symbolic: Building code");
     trace!("symbolic: Offset: {}", code_block.offset);
@@ -619,27 +587,12 @@ fn build_symbolic_code_block<'ctx>(
                 ops::push(bctx, new_data)?;
             }
             IterItem::Instr(pc, instr) => match instr {
-                Instruction::JUMP => {
-                    build_symbolic_jump(
-                        bctx,
-                        jump_block,
-                        code_blocks,
-                        incoming,
-                        dynamic_jump_used,
-                    )?;
-                }
+                Instruction::JUMP => build_symbolic_jump(bctx, code_blocks, incoming)?,
                 Instruction::JUMPI => {
                     let following_block = following_block.ok_or_else(|| {
                         Error::invariant_violation("JUMPI without following block")
                     })?;
-                    build_symbolic_jumpi(
-                        bctx,
-                        jump_block,
-                        following_block,
-                        code_blocks,
-                        incoming,
-                        dynamic_jump_used,
-                    )?;
+                    build_symbolic_jumpi(bctx, following_block, code_blocks, incoming)?;
                 }
                 _ => build_non_jump_instruction(bctx, code_block, pc, instr)?,
             },
@@ -658,10 +611,8 @@ fn build_symbolic_code_block<'ctx>(
 
 fn build_symbolic_jump<'ctx>(
     bctx: &BuildCtx<'ctx, '_, SymbolicStackBackend<'ctx>>,
-    jump_block: Option<BasicBlock<'ctx>>,
     code_blocks: &CodeBlocks<'ctx, '_>,
     incoming: &mut HashMap<usize, Vec<SymbolicIncoming<'ctx>>>,
-    dynamic_jump_used: &mut bool,
 ) -> Result<(), Error> {
     let target = bctx
         .stack
@@ -669,10 +620,8 @@ fn build_symbolic_jump<'ctx>(
         .and_then(|pc| code_blocks.jumpdest_target(pc));
 
     let Some(target) = target else {
-        *dynamic_jump_used = true;
-        let jump_block =
-            jump_block.ok_or_else(|| Error::invariant_violation("JUMP without jump block"))?;
-        return ops::jump(bctx, jump_block);
+        let pc = bctx.stack.pop_word(bctx)?;
+        return build_symbolic_dynamic_jump_switch(bctx, pc, code_blocks, incoming);
     };
 
     let pc = bctx.stack.pop_word(bctx)?;
@@ -686,11 +635,9 @@ fn build_symbolic_jump<'ctx>(
 
 fn build_symbolic_jumpi<'ctx>(
     bctx: &BuildCtx<'ctx, '_, SymbolicStackBackend<'ctx>>,
-    jump_block: Option<BasicBlock<'ctx>>,
     following_block: &CodeBlock<'ctx, '_>,
     code_blocks: &CodeBlocks<'ctx, '_>,
     incoming: &mut HashMap<usize, Vec<SymbolicIncoming<'ctx>>>,
-    dynamic_jump_used: &mut bool,
 ) -> Result<(), Error> {
     let target = bctx
         .stack
@@ -698,10 +645,15 @@ fn build_symbolic_jumpi<'ctx>(
         .and_then(|pc| code_blocks.jumpdest_target(pc));
 
     let Some(target) = target else {
-        *dynamic_jump_used = true;
-        let jump_block =
-            jump_block.ok_or_else(|| Error::invariant_violation("JUMPI without jump block"))?;
-        return ops::jumpi(bctx, jump_block, following_block.entry_block);
+        let (pc, cond) = bctx.stack.pop_2(bctx)?;
+        return build_symbolic_dynamic_jumpi_switch(
+            bctx,
+            pc,
+            cond,
+            following_block,
+            code_blocks,
+            incoming,
+        );
     };
 
     let (pc, cond) = bctx.stack.pop_2(bctx)?;
@@ -719,6 +671,119 @@ fn build_symbolic_jumpi<'ctx>(
     bctx.builder
         .build_conditional_branch(cmp, following_block.entry_block, target.entry_block)?;
     Ok(())
+}
+
+fn build_symbolic_dynamic_jumpi_switch<'ctx>(
+    bctx: &BuildCtx<'ctx, '_, SymbolicStackBackend<'ctx>>,
+    pc: IntValue<'ctx>,
+    cond: IntValue<'ctx>,
+    following_block: &CodeBlock<'ctx, '_>,
+    code_blocks: &CodeBlocks<'ctx, '_>,
+    incoming: &mut HashMap<usize, Vec<SymbolicIncoming<'ctx>>>,
+) -> Result<(), Error> {
+    let pc = truncate_jump_pc(bctx, pc, "jumpi_pc")?;
+    bctx.builder.build_store(bctx.registers.jump_ptr, pc)?;
+    let cmp = bctx.builder.build_int_compare(
+        inkwell::IntPredicate::EQ,
+        cond,
+        bctx.env.types().i256.const_zero(),
+        "jumpi_cmp",
+    )?;
+
+    let branch_block = bctx
+        .builder
+        .get_insert_block()
+        .ok_or_else(|| Error::invariant_violation("missing current block for dynamic JUMPI"))?;
+    let target_switch_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "jumpi_dynamic_targets");
+    record_symbolic_incoming_from(
+        incoming,
+        following_block.offset,
+        branch_block,
+        bctx.stack.snapshot(),
+    );
+    bctx.builder
+        .build_conditional_branch(cmp, following_block.entry_block, target_switch_block)?;
+
+    bctx.builder.position_at_end(target_switch_block);
+    build_symbolic_dynamic_jump_switch_from_current_block(bctx, pc, code_blocks, incoming)
+}
+
+fn build_symbolic_dynamic_jump_switch<'ctx>(
+    bctx: &BuildCtx<'ctx, '_, SymbolicStackBackend<'ctx>>,
+    pc: IntValue<'ctx>,
+    code_blocks: &CodeBlocks<'ctx, '_>,
+    incoming: &mut HashMap<usize, Vec<SymbolicIncoming<'ctx>>>,
+) -> Result<(), Error> {
+    let pc = truncate_jump_pc(bctx, pc, "jump_pc")?;
+    bctx.builder.build_store(bctx.registers.jump_ptr, pc)?;
+    build_symbolic_dynamic_jump_switch_from_current_block(bctx, pc, code_blocks, incoming)
+}
+
+fn build_symbolic_dynamic_jump_switch_from_current_block<'ctx>(
+    bctx: &BuildCtx<'ctx, '_, SymbolicStackBackend<'ctx>>,
+    pc: IntValue<'ctx>,
+    code_blocks: &CodeBlocks<'ctx, '_>,
+    incoming: &mut HashMap<usize, Vec<SymbolicIncoming<'ctx>>>,
+) -> Result<(), Error> {
+    let switch_block = bctx
+        .builder
+        .get_insert_block()
+        .ok_or_else(|| Error::invariant_violation("missing current block for dynamic jump"))?;
+    let jump_failure_block = build_jump_failure_block(bctx)?;
+    bctx.builder.position_at_end(switch_block);
+    let stack = bctx.stack.snapshot();
+    let jump_cases = symbolic_jump_cases(bctx, code_blocks, incoming, switch_block, stack)?;
+
+    if jump_cases.is_empty() {
+        bctx.builder
+            .build_unconditional_branch(jump_failure_block)?;
+    } else {
+        bctx.builder
+            .build_switch(pc, jump_failure_block, jump_cases.as_slice())?;
+    }
+    Ok(())
+}
+
+fn symbolic_jump_cases<'ctx>(
+    bctx: &BuildCtx<'ctx, '_, SymbolicStackBackend<'ctx>>,
+    code_blocks: &CodeBlocks<'ctx, '_>,
+    incoming: &mut HashMap<usize, Vec<SymbolicIncoming<'ctx>>>,
+    pred: BasicBlock<'ctx>,
+    stack: SymbolicStack<'ctx>,
+) -> Result<Vec<(IntValue<'ctx>, BasicBlock<'ctx>)>, Error> {
+    let mut jump_cases = Vec::new();
+    for code_block in code_blocks.iter().filter(|block| block.is_jumpdest()) {
+        let jumpdest_pc = code_block
+            .offset
+            .checked_sub(1)
+            .ok_or_else(|| Error::invariant_violation("Jump destination at offset 0"))?;
+        record_symbolic_incoming_from(incoming, code_block.offset, pred, stack.clone());
+        jump_cases.push((
+            bctx.env.types().i32.const_int(jumpdest_pc as u64, false),
+            code_block.entry_block,
+        ));
+    }
+    Ok(jump_cases)
+}
+
+fn build_jump_failure_block<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<BasicBlock<'ctx>, Error> {
+    let jump_failure_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "jump_failure");
+    bctx.builder.position_at_end(jump_failure_block);
+    let return_value = bctx
+        .env
+        .types()
+        .i8
+        .const_int(ReturnCode::JumpFailure as u64, false);
+    bctx.builder.build_return(Some(&return_value))?;
+    Ok(jump_failure_block)
 }
 
 fn truncate_jump_pc<'ctx>(

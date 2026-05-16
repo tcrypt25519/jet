@@ -65,7 +65,10 @@ For each block:
 3. For non-jump opcodes, call the shared generic opcode dispatcher.
 4. For static `JUMP` or `JUMPI`, pop the target/condition, record the outgoing
    symbolic stack for each successor, and emit a direct LLVM branch.
-5. When a later block has multiple incoming stack states with the same height,
+5. For dynamic `JUMP` or taken `JUMPI`, emit a site-local LLVM `switch` over
+   all known `JUMPDEST` blocks and record the outgoing stack for each possible
+   target.
+6. When a later block has multiple incoming stack states with the same height,
    build one LLVM phi per stack slot and use those phi values as that block's
    entry stack.
 
@@ -75,15 +78,16 @@ separate implemented-opcode lists.
 
 ## Current Limits
 
-This is not full EVM symbolic correctness yet. Dynamic jump targets still need a
-proper symbolic CFG treatment: they should create conservative successor edges
-with stack states, and eventually block specialization where one bytecode
-location is reached with incompatible stack shapes.
+This is not full EVM symbolic correctness yet. Dynamic jump targets now create
+conservative successor edges to all `JUMPDEST` blocks with the post-pop stack
+state, but the symbolic builder still processes blocks in bytecode order. That
+means loop/backedge handling and block specialization are still outstanding.
 
-The current implementation is the first static-control-flow slice:
+The current implementation covers:
 
 - static `JUMP` targets;
 - static `JUMPI` targets;
+- dynamic forward `JUMP` and `JUMPI` targets through conservative switches;
 - same-height joins through LLVM phi nodes;
 - runtime stack mode preserved as its own backend.
 
