@@ -1,12 +1,13 @@
-use std::collections::HashMap;
-
-use inkwell::{basic_block::BasicBlock, values::IntValue};
+use inkwell::values::IntValue;
 
 use crate::builder::Error;
 
 #[derive(Clone, Debug)]
 pub(crate) enum StackValue<'ctx> {
-    Word(IntValue<'ctx>),
+    Word {
+        value: IntValue<'ctx>,
+        known_u64: Option<u64>,
+    },
 }
 
 #[derive(Clone, Debug, Default)]
@@ -19,16 +20,23 @@ impl<'ctx> SymbolicStack<'ctx> {
         Self { slots: Vec::new() }
     }
 
+    pub(crate) fn from_slots(slots: Vec<StackValue<'ctx>>) -> Self {
+        Self { slots }
+    }
+
     pub(crate) fn len(&self) -> usize {
         self.slots.len()
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
-        self.slots.is_empty()
+    pub(crate) fn push_word(&mut self, v: IntValue<'ctx>) {
+        self.push_word_with_known_u64(v, None);
     }
 
-    pub(crate) fn push_word(&mut self, v: IntValue<'ctx>) {
-        self.slots.push(StackValue::Word(v));
+    pub(crate) fn push_word_with_known_u64(&mut self, v: IntValue<'ctx>, known_u64: Option<u64>) {
+        self.slots.push(StackValue::Word {
+            value: v,
+            known_u64,
+        });
     }
 
     pub(crate) fn pop_word(&mut self) -> Result<IntValue<'ctx>, Error> {
@@ -37,18 +45,33 @@ impl<'ctx> SymbolicStack<'ctx> {
             .pop()
             .ok_or_else(|| Error::invariant_violation("symbolic stack underflow"))?;
         match value {
-            StackValue::Word(v) => Ok(v),
+            StackValue::Word { value, .. } => Ok(value),
         }
     }
 
     pub(crate) fn peek_word(&self, depth_from_top: usize) -> Result<IntValue<'ctx>, Error> {
         if depth_from_top >= self.slots.len() {
-            return Err(Error::invariant_violation("symbolic stack peek out of bounds"));
+            return Err(Error::invariant_violation(
+                "symbolic stack peek out of bounds",
+            ));
         }
 
         let idx = self.slots.len() - 1 - depth_from_top;
         match self.slots[idx] {
-            StackValue::Word(v) => Ok(v),
+            StackValue::Word { value, .. } => Ok(value),
+        }
+    }
+
+    pub(crate) fn peek_word_known_u64(&self, depth_from_top: usize) -> Result<Option<u64>, Error> {
+        if depth_from_top >= self.slots.len() {
+            return Err(Error::invariant_violation(
+                "symbolic stack peek out of bounds",
+            ));
+        }
+
+        let idx = self.slots.len() - 1 - depth_from_top;
+        match self.slots[idx] {
+            StackValue::Word { known_u64, .. } => Ok(known_u64),
         }
     }
 
@@ -81,32 +104,4 @@ impl<'ctx> SymbolicStack<'ctx> {
     pub(crate) fn clone_slots(&self) -> Vec<StackValue<'ctx>> {
         self.slots.clone()
     }
-
-    pub(crate) fn from_slots(slots: Vec<StackValue<'ctx>>) -> Self {
-        Self { slots }
-    }
-}
-
-#[derive(Clone, Debug, Default)]
-pub(crate) struct BlockInState<'ctx> {
-    pub(crate) stack: Option<SymbolicStack<'ctx>>,
-}
-
-#[derive(Clone, Debug, Default)]
-pub(crate) struct BlockOutState<'ctx> {
-    pub(crate) stack: Option<SymbolicStack<'ctx>>,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct CfgNode<'ctx> {
-    pub(crate) offset: usize,
-    pub(crate) entry: BasicBlock<'ctx>,
-    pub(crate) succ_offsets: Vec<usize>,
-}
-
-#[derive(Default)]
-pub(crate) struct SymbolicGraph<'ctx> {
-    pub(crate) nodes: HashMap<usize, CfgNode<'ctx>>,
-    pub(crate) in_states: HashMap<usize, BlockInState<'ctx>>,
-    pub(crate) out_states: HashMap<usize, BlockOutState<'ctx>>,
 }

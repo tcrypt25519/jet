@@ -54,6 +54,7 @@ define_ops!(
     SAR,
     KECCAK256,
     JUMP,
+    JUMPI,
     JUMPDEST,
     PC,
     MLOAD,
@@ -128,6 +129,50 @@ rom_tests! {
             stack_ptr: 2,
             jump_ptr: 7,
             stack: vec![stack_word(&[0x03]), stack_word(&[0x2A])],
+            ..Default::default()
+        },
+    },
+
+    jumpi_true_join_merges_symbolic_stack: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x01),
+            PUSH1!(0x0A),
+            JUMPI!(),
+            PUSH1!(0x02),
+            PUSH1!(0x0D),
+            JUMP!(),
+            JUMPDEST!(),
+            PUSH1!(0x05),
+            JUMPDEST!(),
+            PUSH1!(0x03),
+            ADD!(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            jump_ptr: 10,
+            stack: vec![stack_word(&[0x08])],
+            ..Default::default()
+        },
+    },
+
+    jumpi_false_join_merges_symbolic_stack: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x00),
+            PUSH1!(0x0A),
+            JUMPI!(),
+            PUSH1!(0x02),
+            PUSH1!(0x0D),
+            JUMP!(),
+            JUMPDEST!(),
+            PUSH1!(0x05),
+            JUMPDEST!(),
+            PUSH1!(0x03),
+            ADD!(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            jump_ptr: 13,
+            stack: vec![stack_word(&[0x05])],
             ..Default::default()
         },
     },

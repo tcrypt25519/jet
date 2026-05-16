@@ -20,6 +20,16 @@ use jet_runtime::exec::ReturnCode;
 
 use crate::builder::{Error, contract::BuildCtx, symbolic::SymbolicStack};
 
+type SevenWords<'ctx> = (
+    IntValue<'ctx>,
+    IntValue<'ctx>,
+    IntValue<'ctx>,
+    IntValue<'ctx>,
+    IntValue<'ctx>,
+    IntValue<'ctx>,
+    IntValue<'ctx>,
+);
+
 // ---------------------------------------------------------------------------
 // Trait
 // ---------------------------------------------------------------------------
@@ -43,6 +53,16 @@ pub(crate) trait StackBackend<'ctx>: Sized {
         bctx: &BuildCtx<'ctx, 'b, Self>,
         value: IntValue<'ctx>,
     ) -> Result<(), Error>;
+
+    /// Push a word with optional compile-time known-u64 metadata.
+    fn push_word_with_known_u64<'b>(
+        &self,
+        bctx: &BuildCtx<'ctx, 'b, Self>,
+        value: IntValue<'ctx>,
+        _known_u64: Option<u64>,
+    ) -> Result<(), Error> {
+        self.push_word(bctx, value)
+    }
 
     /// Pop and return the top 256-bit word.
     ///
@@ -82,21 +102,7 @@ pub(crate) trait StackBackend<'ctx>: Sized {
     }
 
     /// Pop seven words. Returns `(top, second, ..., seventh)` matching EVM stack order.
-    fn pop_7<'b>(
-        &self,
-        bctx: &BuildCtx<'ctx, 'b, Self>,
-    ) -> Result<
-        (
-            IntValue<'ctx>,
-            IntValue<'ctx>,
-            IntValue<'ctx>,
-            IntValue<'ctx>,
-            IntValue<'ctx>,
-            IntValue<'ctx>,
-            IntValue<'ctx>,
-        ),
-        Error,
-    > {
+    fn pop_7<'b>(&self, bctx: &BuildCtx<'ctx, 'b, Self>) -> Result<SevenWords<'ctx>, Error> {
         let a = self.pop_word(bctx)?;
         let b = self.pop_word(bctx)?;
         let c = self.pop_word(bctx)?;
@@ -240,6 +246,18 @@ impl<'ctx> SymbolicStackBackend<'ctx> {
         }
     }
 
+    pub(crate) fn snapshot(&self) -> SymbolicStack<'ctx> {
+        self.stack.borrow().clone()
+    }
+
+    pub(crate) fn restore(&self, stack: SymbolicStack<'ctx>) {
+        *self.stack.borrow_mut() = stack;
+    }
+
+    pub(crate) fn peek_word_known_u64(&self, depth_from_top: usize) -> Result<Option<u64>, Error> {
+        self.stack.borrow().peek_word_known_u64(depth_from_top)
+    }
+
     /// Zero-extend a value narrower than 256 bits to i256.
     fn normalize<'b>(
         &self,
@@ -270,6 +288,19 @@ impl<'ctx> StackBackend<'ctx> for SymbolicStackBackend<'ctx> {
         Ok(())
     }
 
+    fn push_word_with_known_u64<'b>(
+        &self,
+        bctx: &BuildCtx<'ctx, 'b, Self>,
+        value: IntValue<'ctx>,
+        known_u64: Option<u64>,
+    ) -> Result<(), Error> {
+        let value = self.normalize(bctx, value)?;
+        self.stack
+            .borrow_mut()
+            .push_word_with_known_u64(value, known_u64);
+        Ok(())
+    }
+
     fn pop_word<'b>(&self, _bctx: &BuildCtx<'ctx, 'b, Self>) -> Result<IntValue<'ctx>, Error> {
         self.stack.borrow_mut().pop_word()
     }
@@ -286,7 +317,7 @@ impl<'ctx> StackBackend<'ctx> for SymbolicStackBackend<'ctx> {
         let slots = self.stack.borrow().clone_slots();
         for slot in slots {
             let value = match slot {
-                crate::builder::symbolic::StackValue::Word(value) => value,
+                crate::builder::symbolic::StackValue::Word { value, .. } => value,
             };
             bctx.builder.build_call(
                 bctx.env.symbols().stack_push_word(),
