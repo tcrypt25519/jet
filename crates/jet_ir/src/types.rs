@@ -2,7 +2,6 @@
 /// Defines all LLVM types used by both runtime and contract builders
 /// to ensure consistent memory layouts.
 use std::num::NonZeroU32;
-
 use inkwell::{
     AddressSpace,
     context::Context,
