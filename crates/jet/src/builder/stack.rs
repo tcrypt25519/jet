@@ -15,7 +15,7 @@
 
 use std::cell::RefCell;
 
-use inkwell::values::{AsValueRef, IntValue, PointerValue};
+use inkwell::values::IntValue;
 use jet_runtime::exec::ReturnCode;
 
 use crate::builder::{Error, contract::BuildCtx, symbolic::SymbolicStack};
@@ -168,7 +168,7 @@ impl<'ctx> StackBackend<'ctx> for RuntimeStackBackend {
             &[bctx.registers.exec_ctx.into()],
             "word_ptr",
         )?;
-        let ptr = unsafe { PointerValue::new(ret.as_value_ref()) };
+        let ptr = ret.try_as_basic_value().unwrap_basic().into_pointer_value();
 
         let is_null = bctx.builder.build_is_null(ptr, "is_stack_underflow")?;
         let underflow_block = bctx
@@ -194,7 +194,7 @@ impl<'ctx> StackBackend<'ctx> for RuntimeStackBackend {
         let loaded = bctx
             .builder
             .build_load(bctx.env.types().i256, ptr, "load_int")?;
-        let word = unsafe { IntValue::new(loaded.as_value_ref()) };
+        let word = loaded.into_int_value();
         Ok(word)
     }
 
@@ -205,7 +205,7 @@ impl<'ctx> StackBackend<'ctx> for RuntimeStackBackend {
             &[bctx.registers.exec_ctx.into(), index_value.into()],
             "stack_peek_word_result",
         )?;
-        let ptr = unsafe { PointerValue::new(ret.as_value_ref()) };
+        let ptr = ret.try_as_basic_value().unwrap_basic().into_pointer_value();
         bctx.builder.build_call(
             bctx.env.symbols().stack_push_ptr(),
             &[bctx.registers.exec_ctx.into(), ptr.into()],
