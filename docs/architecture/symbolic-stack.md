@@ -71,6 +71,10 @@ For each block:
 6. When a later block has multiple incoming stack states with the same height,
    build one LLVM phi per stack slot and use those phi values as that block's
    entry stack.
+7. Because `JUMPDEST` blocks can receive backedges after their bytecode has
+   already been emitted, symbolic mode gives them phi-backed entry slots once
+   their first incoming stack is known. Later incoming edges add operands to
+   those existing phis.
 
 Only `JUMP` and `JUMPI` are mode-specific in this path. The normal
 opcode-to-emitter match is shared so runtime and symbolic modes do not maintain
@@ -80,8 +84,8 @@ separate implemented-opcode lists.
 
 This is not full EVM symbolic correctness yet. Dynamic jump targets now create
 conservative successor edges to all `JUMPDEST` blocks with the post-pop stack
-state, but the symbolic builder still processes blocks in bytecode order. That
-means loop/backedge handling and block specialization are still outstanding.
+state, and simple loop-carried stack values are represented with entry phis.
+Block specialization and more precise CFG handling are still outstanding.
 
 The current implementation covers:
 
@@ -89,6 +93,7 @@ The current implementation covers:
 - static `JUMPI` targets;
 - dynamic forward `JUMP` and `JUMPI` targets through conservative switches;
 - same-height joins through LLVM phi nodes;
+- simple loop/backedge stack values through `JUMPDEST` entry phis;
 - runtime stack mode preserved as its own backend.
 
 The runtime backend remains useful as an oracle during development. It is not
