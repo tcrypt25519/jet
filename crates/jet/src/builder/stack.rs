@@ -199,7 +199,10 @@ impl<'ctx> StackBackend<'ctx> for RuntimeStackBackend {
     }
 
     fn dup<'b>(&self, bctx: &BuildCtx<'ctx, 'b, Self>, index: u8) -> Result<(), Error> {
-        let index_value = bctx.env.types().i8.const_int(index as u64, false);
+        let runtime_index = index
+            .checked_sub(1)
+            .ok_or_else(|| Error::invariant_violation("dup index must be >= 1"))?;
+        let index_value = bctx.env.types().i8.const_int(runtime_index as u64, false);
         let ret = bctx.builder.build_call(
             bctx.env.symbols().stack_peek(),
             &[bctx.registers.exec_ctx.into(), index_value.into()],
@@ -215,7 +218,10 @@ impl<'ctx> StackBackend<'ctx> for RuntimeStackBackend {
     }
 
     fn swap<'b>(&self, bctx: &BuildCtx<'ctx, 'b, Self>, index: u8) -> Result<(), Error> {
-        let index_value = bctx.env.types().i8.const_int(index as u64, false);
+        let runtime_index = index
+            .checked_sub(1)
+            .ok_or_else(|| Error::invariant_violation("swap index must be >= 1"))?;
+        let index_value = bctx.env.types().i8.const_int(runtime_index as u64, false);
         bctx.builder.build_call(
             bctx.env.symbols().stack_swap(),
             &[bctx.registers.exec_ctx.into(), index_value.into()],

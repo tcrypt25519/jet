@@ -1,8 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use inkwell::{
     basic_block::BasicBlock,
-    values::{FunctionValue, IntValue},
+    values::{FunctionValue, IntValue, PhiValue},
 };
 use log::{info, trace};
 
@@ -451,24 +451,91 @@ struct SymbolicIncoming<'ctx> {
     stack: SymbolicStack<'ctx>,
 }
 
+#[derive(Default)]
+struct SymbolicInputs<'ctx> {
+    pending: HashMap<usize, Vec<SymbolicIncoming<'ctx>>>,
+    entry_phis: HashMap<usize, Vec<PhiValue<'ctx>>>,
+    phi_required: HashSet<usize>,
+}
+
+impl<'ctx> SymbolicInputs<'ctx> {
+    fn new(code_blocks: &CodeBlocks<'ctx, '_>) -> Self {
+        Self {
+            pending: HashMap::new(),
+            entry_phis: HashMap::new(),
+            phi_required: code_blocks
+                .iter()
+                .filter(|block| block.is_jumpdest())
+                .map(|block| block.offset)
+                .collect(),
+        }
+    }
+
+    fn is_phi_required(&self, offset: usize) -> bool {
+        self.phi_required.contains(&offset)
+    }
+
+    fn take_pending(&mut self, offset: usize) -> Option<Vec<SymbolicIncoming<'ctx>>> {
+        self.pending.remove(&offset)
+    }
+
+    fn set_entry_phis(&mut self, offset: usize, phis: Vec<PhiValue<'ctx>>) {
+        self.entry_phis.insert(offset, phis);
+    }
+
+    fn record(
+        &mut self,
+        target_offset: usize,
+        pred: BasicBlock<'ctx>,
+        stack: SymbolicStack<'ctx>,
+    ) -> Result<(), Error> {
+        if let Some(phis) = self.entry_phis.get(&target_offset) {
+            self.add_phi_incoming(target_offset, phis, pred, &stack)?;
+            return Ok(());
+        }
+
+        self.pending
+            .entry(target_offset)
+            .or_default()
+            .push(SymbolicIncoming { pred, stack });
+        Ok(())
+    }
+
+    fn add_phi_incoming(
+        &self,
+        target_offset: usize,
+        phis: &[PhiValue<'ctx>],
+        pred: BasicBlock<'ctx>,
+        stack: &SymbolicStack<'ctx>,
+    ) -> Result<(), Error> {
+        if stack.len() != phis.len() {
+            return Err(Error::invariant_violation(format!(
+                "symbolic stack height mismatch at block {}",
+                target_offset
+            )));
+        }
+
+        let slots = stack.clone_slots();
+        for (phi, slot) in phis.iter().zip(slots.iter()) {
+            let value = symbolic_slot_word(slot)?;
+            phi.add_incoming(&[(&value, pred)]);
+        }
+        Ok(())
+    }
+}
+
 fn build_symbolic_contract_body<'ctx, 'b>(
     bctx: &'b BuildCtx<'ctx, 'b, SymbolicStackBackend<'ctx>>,
     code_blocks: &CodeBlocks<'ctx, 'b>,
 ) -> Result<(), Error> {
-    let mut incoming: HashMap<usize, Vec<SymbolicIncoming<'ctx>>> = HashMap::new();
+    let mut inputs = SymbolicInputs::new(code_blocks);
 
     let mut code_blocks_iter = code_blocks.iter().peekable();
     while let Some(code_block) = code_blocks_iter.next() {
-        restore_symbolic_entry_stack(bctx, code_block, incoming.remove(&code_block.offset))?;
+        restore_symbolic_entry_stack(bctx, code_block, &mut inputs)?;
 
         let following_block = code_blocks_iter.peek();
-        build_symbolic_code_block(
-            bctx,
-            code_block,
-            following_block,
-            code_blocks,
-            &mut incoming,
-        )?;
+        build_symbolic_code_block(bctx, code_block, following_block, code_blocks, &mut inputs)?;
 
         if code_block.terminates() {
             continue;
@@ -476,7 +543,7 @@ fn build_symbolic_contract_body<'ctx, 'b>(
 
         match following_block {
             Some(next_block) => {
-                record_symbolic_incoming(bctx, &mut incoming, next_block.offset)?;
+                record_symbolic_incoming(bctx, &mut inputs, next_block.offset)?;
                 bctx.builder
                     .build_unconditional_branch(next_block.entry_block)?;
             }
@@ -490,9 +557,10 @@ fn build_symbolic_contract_body<'ctx, 'b>(
 fn restore_symbolic_entry_stack<'ctx>(
     bctx: &BuildCtx<'ctx, '_, SymbolicStackBackend<'ctx>>,
     code_block: &CodeBlock<'ctx, '_>,
-    incoming: Option<Vec<SymbolicIncoming<'ctx>>>,
+    inputs: &mut SymbolicInputs<'ctx>,
 ) -> Result<(), Error> {
     bctx.builder.position_at_end(code_block.entry_block);
+    let incoming = inputs.take_pending(code_block.offset);
 
     let Some(incoming) = incoming else {
         if code_block.offset == 0 {
@@ -501,9 +569,13 @@ fn restore_symbolic_entry_stack<'ctx>(
         return Ok(());
     };
 
+    if incoming.is_empty() {
+        return Ok(());
+    }
+
+    let needs_phi_entry = inputs.is_phi_required(code_block.offset) || incoming.len() > 1;
     match incoming.as_slice() {
-        [] => Ok(()),
-        [one] => {
+        [one] if !needs_phi_entry => {
             bctx.stack.restore(one.stack.clone());
             Ok(())
         }
@@ -517,17 +589,20 @@ fn restore_symbolic_entry_stack<'ctx>(
             }
 
             let mut merged_slots = Vec::with_capacity(len);
+            let mut entry_phis = Vec::with_capacity(len);
             for slot_idx in 0..len {
                 let phi = bctx.builder.build_phi(bctx.env.types().i256, "stack_phi")?;
                 for incoming in many {
                     let value = symbolic_slot_word(&incoming.stack.clone_slots()[slot_idx])?;
                     phi.add_incoming(&[(&value, incoming.pred)]);
                 }
+                entry_phis.push(phi);
                 merged_slots.push(StackValue::Word {
                     value: phi.as_basic_value().into_int_value(),
                     known_u64: None,
                 });
             }
+            inputs.set_entry_phis(code_block.offset, entry_phis);
             bctx.stack.restore(SymbolicStack::from_slots(merged_slots));
             Ok(())
         }
@@ -542,27 +617,23 @@ fn symbolic_slot_word<'ctx>(slot: &StackValue<'ctx>) -> Result<IntValue<'ctx>, E
 
 fn record_symbolic_incoming<'ctx>(
     bctx: &BuildCtx<'ctx, '_, SymbolicStackBackend<'ctx>>,
-    incoming: &mut HashMap<usize, Vec<SymbolicIncoming<'ctx>>>,
+    inputs: &mut SymbolicInputs<'ctx>,
     target_offset: usize,
 ) -> Result<(), Error> {
     let pred = bctx
         .builder
         .get_insert_block()
         .ok_or_else(|| Error::invariant_violation("missing current block for symbolic edge"))?;
-    record_symbolic_incoming_from(incoming, target_offset, pred, bctx.stack.snapshot());
-    Ok(())
+    record_symbolic_incoming_from(inputs, target_offset, pred, bctx.stack.snapshot())
 }
 
 fn record_symbolic_incoming_from<'ctx>(
-    incoming: &mut HashMap<usize, Vec<SymbolicIncoming<'ctx>>>,
+    inputs: &mut SymbolicInputs<'ctx>,
     target_offset: usize,
     pred: BasicBlock<'ctx>,
     stack: SymbolicStack<'ctx>,
-) {
-    incoming
-        .entry(target_offset)
-        .or_default()
-        .push(SymbolicIncoming { pred, stack });
+) -> Result<(), Error> {
+    inputs.record(target_offset, pred, stack)
 }
 
 fn build_symbolic_code_block<'ctx>(
@@ -570,7 +641,7 @@ fn build_symbolic_code_block<'ctx>(
     code_block: &CodeBlock<'ctx, '_>,
     following_block: Option<&&CodeBlock<'ctx, '_>>,
     code_blocks: &CodeBlocks<'ctx, '_>,
-    incoming: &mut HashMap<usize, Vec<SymbolicIncoming<'ctx>>>,
+    inputs: &mut SymbolicInputs<'ctx>,
 ) -> Result<(), Error> {
     trace!("symbolic: Building code");
     trace!("symbolic: Offset: {}", code_block.offset);
@@ -587,12 +658,12 @@ fn build_symbolic_code_block<'ctx>(
                 ops::push(bctx, new_data)?;
             }
             IterItem::Instr(pc, instr) => match instr {
-                Instruction::JUMP => build_symbolic_jump(bctx, code_blocks, incoming)?,
+                Instruction::JUMP => build_symbolic_jump(bctx, code_blocks, inputs)?,
                 Instruction::JUMPI => {
                     let following_block = following_block.ok_or_else(|| {
                         Error::invariant_violation("JUMPI without following block")
                     })?;
-                    build_symbolic_jumpi(bctx, following_block, code_blocks, incoming)?;
+                    build_symbolic_jumpi(bctx, following_block, code_blocks, inputs)?;
                 }
                 _ => build_non_jump_instruction(bctx, code_block, pc, instr)?,
             },
@@ -612,7 +683,7 @@ fn build_symbolic_code_block<'ctx>(
 fn build_symbolic_jump<'ctx>(
     bctx: &BuildCtx<'ctx, '_, SymbolicStackBackend<'ctx>>,
     code_blocks: &CodeBlocks<'ctx, '_>,
-    incoming: &mut HashMap<usize, Vec<SymbolicIncoming<'ctx>>>,
+    inputs: &mut SymbolicInputs<'ctx>,
 ) -> Result<(), Error> {
     let target = bctx
         .stack
@@ -621,13 +692,13 @@ fn build_symbolic_jump<'ctx>(
 
     let Some(target) = target else {
         let pc = bctx.stack.pop_word(bctx)?;
-        return build_symbolic_dynamic_jump_switch(bctx, pc, code_blocks, incoming);
+        return build_symbolic_dynamic_jump_switch(bctx, pc, code_blocks, inputs);
     };
 
     let pc = bctx.stack.pop_word(bctx)?;
     let pc = truncate_jump_pc(bctx, pc, "jump_pc")?;
     bctx.builder.build_store(bctx.registers.jump_ptr, pc)?;
-    record_symbolic_incoming(bctx, incoming, target.offset)?;
+    record_symbolic_incoming(bctx, inputs, target.offset)?;
     bctx.builder
         .build_unconditional_branch(target.entry_block)?;
     Ok(())
@@ -637,7 +708,7 @@ fn build_symbolic_jumpi<'ctx>(
     bctx: &BuildCtx<'ctx, '_, SymbolicStackBackend<'ctx>>,
     following_block: &CodeBlock<'ctx, '_>,
     code_blocks: &CodeBlocks<'ctx, '_>,
-    incoming: &mut HashMap<usize, Vec<SymbolicIncoming<'ctx>>>,
+    inputs: &mut SymbolicInputs<'ctx>,
 ) -> Result<(), Error> {
     let target = bctx
         .stack
@@ -652,7 +723,7 @@ fn build_symbolic_jumpi<'ctx>(
             cond,
             following_block,
             code_blocks,
-            incoming,
+            inputs,
         );
     };
 
@@ -666,8 +737,8 @@ fn build_symbolic_jumpi<'ctx>(
         "jumpi_cmp",
     )?;
 
-    record_symbolic_incoming(bctx, incoming, following_block.offset)?;
-    record_symbolic_incoming(bctx, incoming, target.offset)?;
+    record_symbolic_incoming(bctx, inputs, following_block.offset)?;
+    record_symbolic_incoming(bctx, inputs, target.offset)?;
     bctx.builder
         .build_conditional_branch(cmp, following_block.entry_block, target.entry_block)?;
     Ok(())
@@ -679,7 +750,7 @@ fn build_symbolic_dynamic_jumpi_switch<'ctx>(
     cond: IntValue<'ctx>,
     following_block: &CodeBlock<'ctx, '_>,
     code_blocks: &CodeBlocks<'ctx, '_>,
-    incoming: &mut HashMap<usize, Vec<SymbolicIncoming<'ctx>>>,
+    inputs: &mut SymbolicInputs<'ctx>,
 ) -> Result<(), Error> {
     let pc = truncate_jump_pc(bctx, pc, "jumpi_pc")?;
     bctx.builder.build_store(bctx.registers.jump_ptr, pc)?;
@@ -699,34 +770,34 @@ fn build_symbolic_dynamic_jumpi_switch<'ctx>(
         .context()
         .append_basic_block(bctx.func, "jumpi_dynamic_targets");
     record_symbolic_incoming_from(
-        incoming,
+        inputs,
         following_block.offset,
         branch_block,
         bctx.stack.snapshot(),
-    );
+    )?;
     bctx.builder
         .build_conditional_branch(cmp, following_block.entry_block, target_switch_block)?;
 
     bctx.builder.position_at_end(target_switch_block);
-    build_symbolic_dynamic_jump_switch_from_current_block(bctx, pc, code_blocks, incoming)
+    build_symbolic_dynamic_jump_switch_from_current_block(bctx, pc, code_blocks, inputs)
 }
 
 fn build_symbolic_dynamic_jump_switch<'ctx>(
     bctx: &BuildCtx<'ctx, '_, SymbolicStackBackend<'ctx>>,
     pc: IntValue<'ctx>,
     code_blocks: &CodeBlocks<'ctx, '_>,
-    incoming: &mut HashMap<usize, Vec<SymbolicIncoming<'ctx>>>,
+    inputs: &mut SymbolicInputs<'ctx>,
 ) -> Result<(), Error> {
     let pc = truncate_jump_pc(bctx, pc, "jump_pc")?;
     bctx.builder.build_store(bctx.registers.jump_ptr, pc)?;
-    build_symbolic_dynamic_jump_switch_from_current_block(bctx, pc, code_blocks, incoming)
+    build_symbolic_dynamic_jump_switch_from_current_block(bctx, pc, code_blocks, inputs)
 }
 
 fn build_symbolic_dynamic_jump_switch_from_current_block<'ctx>(
     bctx: &BuildCtx<'ctx, '_, SymbolicStackBackend<'ctx>>,
     pc: IntValue<'ctx>,
     code_blocks: &CodeBlocks<'ctx, '_>,
-    incoming: &mut HashMap<usize, Vec<SymbolicIncoming<'ctx>>>,
+    inputs: &mut SymbolicInputs<'ctx>,
 ) -> Result<(), Error> {
     let switch_block = bctx
         .builder
@@ -735,7 +806,7 @@ fn build_symbolic_dynamic_jump_switch_from_current_block<'ctx>(
     let jump_failure_block = build_jump_failure_block(bctx)?;
     bctx.builder.position_at_end(switch_block);
     let stack = bctx.stack.snapshot();
-    let jump_cases = symbolic_jump_cases(bctx, code_blocks, incoming, switch_block, stack)?;
+    let jump_cases = symbolic_jump_cases(bctx, code_blocks, inputs, switch_block, stack)?;
 
     if jump_cases.is_empty() {
         bctx.builder
@@ -750,7 +821,7 @@ fn build_symbolic_dynamic_jump_switch_from_current_block<'ctx>(
 fn symbolic_jump_cases<'ctx>(
     bctx: &BuildCtx<'ctx, '_, SymbolicStackBackend<'ctx>>,
     code_blocks: &CodeBlocks<'ctx, '_>,
-    incoming: &mut HashMap<usize, Vec<SymbolicIncoming<'ctx>>>,
+    inputs: &mut SymbolicInputs<'ctx>,
     pred: BasicBlock<'ctx>,
     stack: SymbolicStack<'ctx>,
 ) -> Result<Vec<(IntValue<'ctx>, BasicBlock<'ctx>)>, Error> {
@@ -760,7 +831,7 @@ fn symbolic_jump_cases<'ctx>(
             .offset
             .checked_sub(1)
             .ok_or_else(|| Error::invariant_violation("Jump destination at offset 0"))?;
-        record_symbolic_incoming_from(incoming, code_block.offset, pred, stack.clone());
+        record_symbolic_incoming_from(inputs, code_block.offset, pred, stack.clone())?;
         jump_cases.push((
             bctx.env.types().i32.const_int(jumpdest_pc as u64, false),
             code_block.entry_block,

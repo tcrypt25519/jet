@@ -58,9 +58,12 @@ define_ops!(
     JUMPI,
     JUMPDEST,
     PC,
+    POP,
     MLOAD,
     MSTORE,
     MSTORE8,
+    DUP1,
+    SWAP1,
     RETURN,
     CALL,
     RETURNDATASIZE,
@@ -239,6 +242,55 @@ rom_tests! {
             stack_ptr: 1,
             jump_ptr: 14,
             stack: vec![stack_word(&[0x2D])],
+            ..Default::default()
+        },
+    },
+
+    dup1_duplicates_top_stack_word: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x2A),
+            DUP1!(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 2,
+            stack: vec![stack_word(&[0x2A]), stack_word(&[0x2A])],
+            ..Default::default()
+        },
+    },
+
+    swap1_exchanges_top_two_stack_words: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x01),
+            PUSH1!(0x02),
+            SWAP1!(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 2,
+            stack: vec![stack_word(&[0x02]), stack_word(&[0x01])],
+            ..Default::default()
+        },
+    },
+
+    loop_backedge_updates_symbolic_stack: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x01),
+            JUMPDEST!(),
+            DUP1!(),
+            ISZERO!(),
+            PUSH1!(0x0E),
+            JUMPI!(),
+            POP!(),
+            PUSH1!(0x00),
+            PUSH1!(0x02),
+            JUMP!(),
+            JUMPDEST!(),
+            STOP!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::Stop,
+            stack_ptr: 1,
+            jump_ptr: 0x0E,
+            stack: vec![stack_word(&[0x00])],
             ..Default::default()
         },
     },
