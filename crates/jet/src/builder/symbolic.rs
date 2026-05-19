@@ -49,19 +49,6 @@ impl<'ctx> SymbolicStack<'ctx> {
         }
     }
 
-    pub(crate) fn peek_word(&self, depth_from_top: usize) -> Result<IntValue<'ctx>, Error> {
-        if depth_from_top >= self.slots.len() {
-            return Err(Error::invariant_violation(
-                "symbolic stack peek out of bounds",
-            ));
-        }
-
-        let idx = self.slots.len() - 1 - depth_from_top;
-        match self.slots[idx] {
-            StackValue::Word { value, .. } => Ok(value),
-        }
-    }
-
     pub(crate) fn peek_word_known_u64(&self, depth_from_top: usize) -> Result<Option<u64>, Error> {
         if depth_from_top >= self.slots.len() {
             return Err(Error::invariant_violation(
@@ -79,8 +66,14 @@ impl<'ctx> SymbolicStack<'ctx> {
         if index_1_based == 0 {
             return Err(Error::invariant_violation("dup index must be >= 1"));
         }
-        let value = self.peek_word((index_1_based - 1) as usize)?;
-        self.push_word(value);
+        let depth = (index_1_based - 1) as usize;
+        if depth >= self.slots.len() {
+            return Err(Error::invariant_violation(
+                "symbolic stack peek out of bounds",
+            ));
+        }
+        let slot = self.slots[self.slots.len() - 1 - depth].clone();
+        self.slots.push(slot);
         Ok(())
     }
 
