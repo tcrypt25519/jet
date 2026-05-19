@@ -27,6 +27,7 @@ macro_rules! define_ops {
 generate_push_macros!(0..=32);
 
 define_ops!(
+    STOP,
     ADD,
     MUL,
     SUB,
@@ -54,11 +55,15 @@ define_ops!(
     SAR,
     KECCAK256,
     JUMP,
+    JUMPI,
     JUMPDEST,
     PC,
+    POP,
     MLOAD,
     MSTORE,
     MSTORE8,
+    DUP1,
+    SWAP1,
     RETURN,
     CALL,
     RETURNDATASIZE,
@@ -128,6 +133,232 @@ rom_tests! {
             stack_ptr: 2,
             jump_ptr: 7,
             stack: vec![stack_word(&[0x03]), stack_word(&[0x2A])],
+            ..Default::default()
+        },
+    },
+
+    jumpi_true_join_merges_symbolic_stack: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x01),
+            PUSH1!(0x0A),
+            JUMPI!(),
+            PUSH1!(0x02),
+            PUSH1!(0x0D),
+            JUMP!(),
+            JUMPDEST!(),
+            PUSH1!(0x05),
+            JUMPDEST!(),
+            PUSH1!(0x03),
+            ADD!(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            jump_ptr: 10,
+            stack: vec![stack_word(&[0x08])],
+            ..Default::default()
+        },
+    },
+
+    jumpi_false_join_merges_symbolic_stack: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x00),
+            PUSH1!(0x0A),
+            JUMPI!(),
+            PUSH1!(0x02),
+            PUSH1!(0x0D),
+            JUMP!(),
+            JUMPDEST!(),
+            PUSH1!(0x05),
+            JUMPDEST!(),
+            PUSH1!(0x03),
+            ADD!(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            jump_ptr: 13,
+            stack: vec![stack_word(&[0x05])],
+            ..Default::default()
+        },
+    },
+
+    dynamic_jump_preserves_symbolic_stack: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x2A),
+            PUSH1!(0x07),
+            PUSH1!(0x01),
+            ADD!(),
+            JUMP!(),
+            JUMPDEST!(),
+            PUSH1!(0x03),
+            ADD!(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            jump_ptr: 8,
+            stack: vec![stack_word(&[0x2D])],
+            ..Default::default()
+        },
+    },
+
+    dynamic_jumpi_true_preserves_symbolic_stack: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x2A),
+            PUSH1!(0x01),
+            PUSH1!(0x0C),
+            PUSH1!(0x01),
+            ADD!(),
+            JUMPI!(),
+            PUSH1!(0xFF),
+            STOP!(),
+            JUMPDEST!(),
+            PUSH1!(0x03),
+            ADD!(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            jump_ptr: 13,
+            stack: vec![stack_word(&[0x2D])],
+            ..Default::default()
+        },
+    },
+
+    dynamic_jumpi_false_uses_fallthrough_stack: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x2A),
+            PUSH1!(0x00),
+            PUSH1!(0x0D),
+            PUSH1!(0x01),
+            ADD!(),
+            JUMPI!(),
+            PUSH1!(0x03),
+            ADD!(),
+            STOP!(),
+            JUMPDEST!(),
+            PUSH1!(0xFF),
+            STOP!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::Stop,
+            stack_ptr: 1,
+            jump_ptr: 14,
+            stack: vec![stack_word(&[0x2D])],
+            ..Default::default()
+        },
+    },
+
+    dup1_duplicates_top_stack_word: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x2A),
+            DUP1!(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 2,
+            stack: vec![stack_word(&[0x2A]), stack_word(&[0x2A])],
+            ..Default::default()
+        },
+    },
+
+    swap1_exchanges_top_two_stack_words: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x01),
+            PUSH1!(0x02),
+            SWAP1!(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 2,
+            stack: vec![stack_word(&[0x02]), stack_word(&[0x01])],
+            ..Default::default()
+        },
+    },
+
+    loop_backedge_updates_symbolic_stack: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x01),
+            JUMPDEST!(),
+            DUP1!(),
+            ISZERO!(),
+            PUSH1!(0x0E),
+            JUMPI!(),
+            POP!(),
+            PUSH1!(0x00),
+            PUSH1!(0x02),
+            JUMP!(),
+            JUMPDEST!(),
+            STOP!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::Stop,
+            stack_ptr: 1,
+            jump_ptr: 0x0E,
+            stack: vec![stack_word(&[0x00])],
+            ..Default::default()
+        },
+    },
+
+    backward_only_target_gets_symbolic_entry_shape: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x08),
+            JUMP!(),
+            JUMPDEST!(),
+            PUSH1!(0x01),
+            ADD!(),
+            STOP!(),
+            JUMPDEST!(),
+            PUSH1!(0x2A),
+            PUSH1!(0x03),
+            JUMP!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::Stop,
+            stack_ptr: 1,
+            jump_ptr: 0x03,
+            stack: vec![stack_word(&[0x2B])],
+            ..Default::default()
+        },
+    },
+
+    dup_preserves_static_jump_target_metadata: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x04),
+            DUP1!(),
+            JUMP!(),
+            JUMPDEST!(),
+            PUSH1!(0x01),
+            ADD!(),
+            STOP!(),
+            JUMPDEST!(),
+            STOP!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::Stop,
+            stack_ptr: 1,
+            jump_ptr: 0x04,
+            stack: vec![stack_word(&[0x05])],
+            ..Default::default()
+        },
+    },
+
+    join_with_different_stack_heights_uses_specialized_blocks: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x01),
+            PUSH1!(0x0C),
+            JUMPI!(),
+            PUSH1!(0x11),
+            PUSH1!(0x22),
+            PUSH1!(0x12),
+            JUMP!(),
+            JUMPDEST!(),
+            PUSH1!(0x2A),
+            PUSH1!(0x12),
+            JUMP!(),
+            JUMPDEST!(),
+            POP!(),
+            STOP!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::Stop,
+            stack_ptr: 0,
+            jump_ptr: 0x12,
             ..Default::default()
         },
     },

@@ -10,6 +10,8 @@ pub mod env;
 /// Manages multiple contract compilations within a shared LLVM module.
 pub mod manager;
 pub(crate) mod ops;
+pub(crate) mod stack;
+pub(crate) mod symbolic;
 
 /// An unrecognised opcode byte encountered while translating EVM bytecode.
 #[derive(Error, Debug)]

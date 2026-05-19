@@ -1,478 +1,234 @@
+use std::num::NonZeroU32;
+
 use inkwell::{
     basic_block::BasicBlock,
     builder::BuilderError,
-    types::IntType,
     values::{AsValueRef, CallSiteValue, IntValue, PointerValue},
 };
 
 use jet_runtime::exec::ReturnCode;
 
 use crate::{
-    builder::{Error, contract::BuildCtx},
+    builder::{Error, contract::BuildCtx, stack::StackBackend},
     instructions::Instruction,
 };
 
-type StackPop1<'ctx> = PointerValue<'ctx>;
-type StackPop2<'ctx> = (PointerValue<'ctx>, PointerValue<'ctx>);
-type StackPop3<'ctx> = (PointerValue<'ctx>, PointerValue<'ctx>, PointerValue<'ctx>);
-type StackPop7<'ctx> = (
-    PointerValue<'ctx>,
-    PointerValue<'ctx>,
-    PointerValue<'ctx>,
-    PointerValue<'ctx>,
-    PointerValue<'ctx>,
-    PointerValue<'ctx>,
-    PointerValue<'ctx>,
-);
-
-// OPCode implementations
-//
-
-pub(crate) fn build_return(bctx: &BuildCtx<'_, '_>, return_value: ReturnCode) -> Result<(), Error> {
+pub(crate) fn build_return<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+    return_value: ReturnCode,
+) -> Result<(), Error> {
+    bctx.stack.materialize_for_return(bctx)?;
     let return_value = bctx.env.types().i8.const_int(return_value as u64, false);
     bctx.builder.build_return(Some(&return_value))?;
     Ok(())
 }
 
-pub(crate) fn push(bctx: &BuildCtx<'_, '_>, bytes: [u8; 32]) -> Result<(), Error> {
-    let t = bctx.env.types();
-
-    let values = bytes
-        .iter()
-        .map(|byte| t.i8.const_int(*byte as u64, false))
-        .collect::<Vec<_>>();
-
-    let values = t.i8.const_array(&values);
-    let values_ptr = bctx.builder.build_alloca(t.word_bytes, "push_bytes.ptr")?;
-    bctx.builder.build_store(values_ptr, values)?;
-
-    stack_push_ptr(bctx, values_ptr)?;
-
-    Ok(())
+pub(crate) fn push<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+    bytes: [u8; 32],
+) -> Result<(), Error> {
+    let mut limbs = [0u64; 4];
+    for (i, chunk) in bytes.chunks_exact(8).enumerate() {
+        let chunk: [u8; 8] = chunk
+            .try_into()
+            .map_err(|_| Error::invariant_violation("invalid PUSH limb width"))?;
+        limbs[i] = u64::from_le_bytes(chunk);
+    }
+    let value = bctx.env.types().i256.const_int_arbitrary_precision(&limbs);
+    let known_u64 = limbs[1..].iter().all(|limb| *limb == 0).then_some(limbs[0]);
+    bctx.stack.push_word_with_known_u64(bctx, value, known_u64)
 }
 
-pub(crate) fn dup(bctx: &BuildCtx<'_, '_>, index: u8) -> Result<(), Error> {
-    let peeked_value_ptr = call_stack_peek(bctx, index)?;
-    call_stack_push_ptr(bctx, peeked_value_ptr)?;
-    Ok(())
+pub(crate) fn dup<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+    index: u8,
+) -> Result<(), Error> {
+    bctx.stack.dup(bctx, index)
 }
 
-pub(crate) fn swap(bctx: &BuildCtx<'_, '_>, index: u8) -> Result<(), Error> {
-    call_stack_swap(bctx, index)?;
-    Ok(())
+pub(crate) fn swap<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+    index: u8,
+) -> Result<(), Error> {
+    bctx.stack.swap(bctx, index)
 }
 
-pub(crate) fn stop(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
+pub(crate) fn stop<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
     build_return(bctx, ReturnCode::Stop)
 }
 
-pub(crate) fn add(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = stack_pop_2(bctx)?;
-    let a = load_i256(bctx, a)?;
-    let b = load_i256(bctx, b)?;
+pub(crate) fn add<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
+    let (a, b) = bctx.stack.pop_2(bctx)?;
     let result = bctx.builder.build_int_add(a, b, "add_result")?;
-    call_stack_push_i256(bctx, result)?;
-    Ok(())
+    bctx.stack.push_word(bctx, result)
 }
 
-pub(crate) fn mul(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = stack_pop_2(bctx)?;
-    let a = load_i256(bctx, a)?;
-    let b = load_i256(bctx, b)?;
+pub(crate) fn mul<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
+    let (a, b) = bctx.stack.pop_2(bctx)?;
     let result = bctx.builder.build_int_mul(a, b, "mul_result")?;
-    call_stack_push_i256(bctx, result)?;
-    Ok(())
+    bctx.stack.push_word(bctx, result)
 }
 
-pub(crate) fn sub(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = stack_pop_2(bctx)?;
-    let a = load_i256(bctx, a)?;
-    let b = load_i256(bctx, b)?;
+pub(crate) fn sub<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
+    let (a, b) = bctx.stack.pop_2(bctx)?;
     let result = bctx.builder.build_int_sub(a, b, "sub_result")?;
-    stack_push_int(bctx, result)?;
-    Ok(())
+    bctx.stack.push_word(bctx, result)
 }
 
-pub(crate) fn div(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = stack_pop_2(bctx)?;
-    let a = load_i256(bctx, a)?;
-    let b = load_i256(bctx, b)?;
-
-    let zero = bctx.env.types().i256.const_zero();
-    // EVM spec: division by zero returns 0.
-    // Must branch — LLVM udiv with b=0 is poison even inside a select.
-    let b_is_zero =
-        bctx.builder
-            .build_int_compare(inkwell::IntPredicate::EQ, b, zero, "div_by_zero")?;
-    build_zero_guard(bctx, b_is_zero, "div", |cont| {
-        let result = bctx.builder.build_int_unsigned_div(a, b, "div_result")?;
-        stack_push_int(bctx, result)?;
-        bctx.builder.build_unconditional_branch(cont)?;
-        Ok(())
-    })
+pub(crate) fn div<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
+    let (a, b) = bctx.stack.pop_2(bctx)?;
+    let result = build_zero_guarded_value(bctx, b, "div", |bctx| {
+        bctx.builder.build_int_unsigned_div(a, b, "div_result")
+    })?;
+    bctx.stack.push_word(bctx, result)
 }
 
-pub(crate) fn sdiv(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = stack_pop_2(bctx)?;
-    let a = load_i256(bctx, a)?;
-    let b = load_i256(bctx, b)?;
-
-    let t = bctx.env.types();
-    let zero = t.i256.const_zero();
-
-    // Guard 1: b == 0 → result = 0
-    let b_is_zero =
-        bctx.builder
-            .build_int_compare(inkwell::IntPredicate::EQ, b, zero, "sdiv_b_is_zero")?;
-    build_zero_guard(bctx, b_is_zero, "sdiv", |cont| {
-        // Guard 2: MIN_INT256 / -1 overflows in LLVM sdiv (poison).
-        // EVM spec: the result wraps back to MIN_INT256.
-        let min_int = t
-            .i256
-            .const_int_arbitrary_precision(&[0, 0, 0, 0x8000_0000_0000_0000]);
-        let neg_one = t.i256.const_all_ones();
-        let a_is_min = bctx.builder.build_int_compare(
-            inkwell::IntPredicate::EQ,
-            a,
-            min_int,
-            "sdiv_a_is_min",
-        )?;
-        let b_is_neg_one = bctx.builder.build_int_compare(
-            inkwell::IntPredicate::EQ,
-            b,
-            neg_one,
-            "sdiv_b_is_neg_one",
-        )?;
-        let is_overflow = bctx
-            .builder
-            .build_and(a_is_min, b_is_neg_one, "sdiv_is_overflow")?;
-
-        let overflow_block = bctx
-            .env
-            .context()
-            .append_basic_block(bctx.func, "sdiv_overflow");
-        let normal_block = bctx
-            .env
-            .context()
-            .append_basic_block(bctx.func, "sdiv_normal");
-        bctx.builder
-            .build_conditional_branch(is_overflow, overflow_block, normal_block)?;
-
-        bctx.builder.position_at_end(overflow_block);
-        stack_push_int(bctx, min_int)?;
-        bctx.builder.build_unconditional_branch(cont)?;
-
-        bctx.builder.position_at_end(normal_block);
-        let result = bctx.builder.build_int_signed_div(a, b, "sdiv_result")?;
-        stack_push_int(bctx, result)?;
-        bctx.builder.build_unconditional_branch(cont)?;
-        Ok(())
-    })
+pub(crate) fn sdiv<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
+    let (a, b) = bctx.stack.pop_2(bctx)?;
+    let result = build_signed_div_or_rem_value(bctx, a, b, "sdiv", true)?;
+    bctx.stack.push_word(bctx, result)
 }
 
-pub(crate) fn _mod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = stack_pop_2(bctx)?;
-    let a = load_i256(bctx, a)?;
-    let b = load_i256(bctx, b)?;
-
-    let zero = bctx.env.types().i256.const_zero();
-    // EVM spec: modulo by zero returns 0.
-    // Must branch — LLVM urem with b=0 is poison even inside a select.
-    let b_is_zero =
-        bctx.builder
-            .build_int_compare(inkwell::IntPredicate::EQ, b, zero, "mod_by_zero")?;
-    build_zero_guard(bctx, b_is_zero, "mod", |cont| {
-        let result = bctx.builder.build_int_unsigned_rem(a, b, "mod_result")?;
-        stack_push_int(bctx, result)?;
-        bctx.builder.build_unconditional_branch(cont)?;
-        Ok(())
-    })
+pub(crate) fn _mod<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
+    let (a, b) = bctx.stack.pop_2(bctx)?;
+    let result = build_zero_guarded_value(bctx, b, "mod", |bctx| {
+        bctx.builder.build_int_unsigned_rem(a, b, "mod_result")
+    })?;
+    bctx.stack.push_word(bctx, result)
 }
 
-pub(crate) fn smod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = stack_pop_2(bctx)?;
-    let a = load_i256(bctx, a)?;
-    let b = load_i256(bctx, b)?;
-
-    let t = bctx.env.types();
-    let zero = t.i256.const_zero();
-
-    // Guard 1: b == 0 → result = 0
-    let b_is_zero =
-        bctx.builder
-            .build_int_compare(inkwell::IntPredicate::EQ, b, zero, "smod_b_is_zero")?;
-    build_zero_guard(bctx, b_is_zero, "smod", |cont| {
-        // Guard 2: MIN_INT256 % -1 — LLVM srem overflows (poison).
-        // Mathematically the remainder is 0 (MIN_INT is exactly divisible by -1).
-        let min_int = t
-            .i256
-            .const_int_arbitrary_precision(&[0, 0, 0, 0x8000_0000_0000_0000]);
-        let neg_one = t.i256.const_all_ones();
-        let a_is_min = bctx.builder.build_int_compare(
-            inkwell::IntPredicate::EQ,
-            a,
-            min_int,
-            "smod_a_is_min",
-        )?;
-        let b_is_neg_one = bctx.builder.build_int_compare(
-            inkwell::IntPredicate::EQ,
-            b,
-            neg_one,
-            "smod_b_is_neg_one",
-        )?;
-        let is_overflow = bctx
-            .builder
-            .build_and(a_is_min, b_is_neg_one, "smod_is_overflow")?;
-
-        let overflow_block = bctx
-            .env
-            .context()
-            .append_basic_block(bctx.func, "smod_overflow");
-        let normal_block = bctx
-            .env
-            .context()
-            .append_basic_block(bctx.func, "smod_normal");
-        bctx.builder
-            .build_conditional_branch(is_overflow, overflow_block, normal_block)?;
-
-        bctx.builder.position_at_end(overflow_block);
-        stack_push_int(bctx, zero)?;
-        bctx.builder.build_unconditional_branch(cont)?;
-
-        bctx.builder.position_at_end(normal_block);
-        let result = bctx.builder.build_int_signed_rem(a, b, "smod_result")?;
-        stack_push_int(bctx, result)?;
-        bctx.builder.build_unconditional_branch(cont)?;
-        Ok(())
-    })
+pub(crate) fn smod<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
+    let (a, b) = bctx.stack.pop_2(bctx)?;
+    let result = build_signed_div_or_rem_value(bctx, a, b, "smod", false)?;
+    bctx.stack.push_word(bctx, result)
 }
 
-pub(crate) fn addmod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b, c) = stack_pop_3(bctx)?;
-
-    // Call 512-bit addmod builtin, reusing `a` as the result buffer
-    bctx.builder.build_call(
-        bctx.env.symbols().addmod(),
-        &[a.into(), a.into(), b.into(), c.into()],
-        "addmod_call",
-    )?;
-
-    // Push result back onto stack (reusing the `a` buffer which now contains the result)
-    call_stack_push_ptr(bctx, a)?;
-    Ok(())
+pub(crate) fn addmod<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<(), Error> {
+    let (a, b, c) = bctx.stack.pop_3(bctx)?;
+    let result = build_wide_mod_op(bctx, a, b, c, "addmod", |lhs, rhs| {
+        bctx.builder.build_int_add(lhs, rhs, "addmod_wide_sum")
+    })?;
+    bctx.stack.push_word(bctx, result)
 }
 
-pub(crate) fn mulmod(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b, c) = stack_pop_3(bctx)?;
-
-    // Call 512-bit mulmod builtin, reusing `a` as the result buffer
-    bctx.builder.build_call(
-        bctx.env.symbols().mulmod(),
-        &[a.into(), a.into(), b.into(), c.into()],
-        "mulmod_call",
-    )?;
-
-    // Push result back onto stack (reusing the `a` buffer which now contains the result)
-    call_stack_push_ptr(bctx, a)?;
-    Ok(())
+pub(crate) fn mulmod<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<(), Error> {
+    let (a, b, c) = bctx.stack.pop_3(bctx)?;
+    let result = build_wide_mod_op(bctx, a, b, c, "mulmod", |lhs, rhs| {
+        bctx.builder.build_int_mul(lhs, rhs, "mulmod_wide_product")
+    })?;
+    bctx.stack.push_word(bctx, result)
 }
 
-pub(crate) fn exp(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (base, exponent) = stack_pop_2(bctx)?;
-    bctx.builder.build_call(
-        bctx.env.symbols().exp(),
-        &[base.into(), exponent.into()],
-        "exp_result",
-    )?;
-    call_stack_push_ptr(bctx, base)?;
-    Ok(())
+pub(crate) fn exp<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
+    let (base, exponent) = bctx.stack.pop_2(bctx)?;
+    let result = build_exp_value(bctx, base, exponent)?;
+    bctx.stack.push_word(bctx, result)
 }
 
-pub(crate) fn signextend(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (b_ptr, x_ptr) = stack_pop_2(bctx)?;
-    let b = load_i256(bctx, b_ptr)?;
-    let x = load_i256(bctx, x_ptr)?;
-
+pub(crate) fn signextend<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<(), Error> {
+    let (b, x) = bctx.stack.pop_2(bctx)?;
     let t = bctx.env.types();
     let const_31 = t.i256.const_int(31, false);
     let const_8 = t.i256.const_int(8, false);
     let const_248 = t.i256.const_int(248, false);
-
-    // in_range = b <= 31; if b >= 32 the result is x unchanged
     let in_range = bctx.builder.build_int_compare(
         inkwell::IntPredicate::ULE,
         b,
         const_31,
         "signextend_in_range",
     )?;
-
-    // Clamp b to 31 to keep shift amount non-negative
     let b_safe = bctx
         .builder
         .build_select(in_range, b, const_31, "signextend_b_safe")?
         .into_int_value();
-
-    // shift = 248 - 8 * b_safe  (moves sign bit at position 8*b+7 to bit 255)
     let b8 = bctx
         .builder
         .build_int_mul(b_safe, const_8, "signextend_b8")?;
     let shift = bctx
         .builder
         .build_int_sub(const_248, b8, "signextend_shift")?;
-
-    // (x << shift) >>arithmetic shift  — sign-extends from the original sign bit
     let shl = bctx.builder.build_left_shift(x, shift, "signextend_shl")?;
     let extended = bctx
         .builder
         .build_right_shift(shl, shift, true, "signextend_sar")?;
-
-    // If b > 31 return x unchanged, otherwise return the sign-extended value
     let result = bctx
         .builder
         .build_select(in_range, extended, x, "signextend_result")?
         .into_int_value();
-
-    stack_push_int(bctx, result)?;
-    Ok(())
+    bctx.stack.push_word(bctx, result)
 }
 
-pub(crate) fn lt(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = stack_pop_2(bctx)?;
-    let a = load_i256(bctx, a)?;
-    let b = load_i256(bctx, b)?;
-    let result = bctx
-        .builder
-        .build_int_compare(inkwell::IntPredicate::ULT, a, b, "lt_result")?;
-    stack_push_int(bctx, result)?;
-    Ok(())
+pub(crate) fn lt<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
+    compare_2(bctx, inkwell::IntPredicate::ULT, "lt_result")
 }
 
-pub(crate) fn gt(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = stack_pop_2(bctx)?;
-    let a = load_i256(bctx, a)?;
-    let b = load_i256(bctx, b)?;
-    let result = bctx
-        .builder
-        .build_int_compare(inkwell::IntPredicate::UGT, a, b, "gt_result")?;
-    stack_push_int(bctx, result)?;
-    Ok(())
+pub(crate) fn gt<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
+    compare_2(bctx, inkwell::IntPredicate::UGT, "gt_result")
 }
 
-pub(crate) fn slt(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = stack_pop_2(bctx)?;
-    let a = load_i256(bctx, a)?;
-    let b = load_i256(bctx, b)?;
-    let result = bctx
-        .builder
-        .build_int_compare(inkwell::IntPredicate::SLT, a, b, "slt_result")?;
-    stack_push_int(bctx, result)?;
-    Ok(())
+pub(crate) fn slt<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
+    compare_2(bctx, inkwell::IntPredicate::SLT, "slt_result")
 }
 
-pub(crate) fn sgt(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = stack_pop_2(bctx)?;
-    let a = load_i256(bctx, a)?;
-    let b = load_i256(bctx, b)?;
-    let result = bctx
-        .builder
-        .build_int_compare(inkwell::IntPredicate::SGT, a, b, "sgt_result")?;
-    stack_push_int(bctx, result)?;
-    Ok(())
+pub(crate) fn sgt<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
+    compare_2(bctx, inkwell::IntPredicate::SGT, "sgt_result")
 }
 
-pub(crate) fn eq(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = stack_pop_2(bctx)?;
-    let a = load_i256(bctx, a)?;
-    let b = load_i256(bctx, b)?;
-    let result = bctx
-        .builder
-        .build_int_compare(inkwell::IntPredicate::EQ, a, b, "eq_result")?;
-    stack_push_int(bctx, result)?;
-    Ok(())
+pub(crate) fn eq<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
+    compare_2(bctx, inkwell::IntPredicate::EQ, "eq_result")
 }
 
-pub(crate) fn iszero(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let a = stack_pop_1(bctx)?;
-    let a = load_i256(bctx, a)?;
+pub(crate) fn iszero<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<(), Error> {
+    let a = bctx.stack.pop_word(bctx)?;
     let result = bctx.builder.build_int_compare(
         inkwell::IntPredicate::EQ,
         a,
         bctx.env.types().i256.const_zero(),
         "iszero_result",
     )?;
-    stack_push_int(bctx, result)?;
-    Ok(())
+    bctx.stack.push_word(bctx, result)
 }
 
-pub(crate) fn and(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = stack_pop_2(bctx)?;
-    let a = load_i256(bctx, a)?;
-    let b = load_i256(bctx, b)?;
-    let result = bctx.builder.build_and(a, b, "and_result")?;
-    stack_push_int(bctx, result)?;
-    Ok(())
+pub(crate) fn and<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
+    bitwise_2(bctx, "and_result", |bctx, a, b| {
+        bctx.builder.build_and(a, b, "and_result")
+    })
 }
 
-pub(crate) fn or(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = stack_pop_2(bctx)?;
-    let a = load_i256(bctx, a)?;
-    let b = load_i256(bctx, b)?;
-    let result = bctx.builder.build_or(a, b, "or_result")?;
-    stack_push_int(bctx, result)?;
-    Ok(())
+pub(crate) fn or<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
+    bitwise_2(bctx, "or_result", |bctx, a, b| {
+        bctx.builder.build_or(a, b, "or_result")
+    })
 }
 
-pub(crate) fn xor(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = stack_pop_2(bctx)?;
-    let a = load_i256(bctx, a)?;
-    let b = load_i256(bctx, b)?;
-    let result = bctx.builder.build_xor(a, b, "xor_result")?;
-    stack_push_int(bctx, result)?;
-    Ok(())
+pub(crate) fn xor<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
+    bitwise_2(bctx, "xor_result", |bctx, a, b| {
+        bctx.builder.build_xor(a, b, "xor_result")
+    })
 }
 
-pub(crate) fn not(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let a = stack_pop_1(bctx)?;
-    let a = load_i256(bctx, a)?;
+pub(crate) fn not<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
+    let a = bctx.stack.pop_word(bctx)?;
     let result = bctx.builder.build_not(a, "not_result")?;
-    stack_push_int(bctx, result)?;
-    Ok(())
+    bctx.stack.push_word(bctx, result)
 }
 
-pub(crate) fn byte(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (idx, word) = stack_pop_2(bctx)?;
-
-    // Load index as i256 so the out-of-range check sees the full EVM value.
-    let idx = load_i256(bctx, idx)?;
-
+pub(crate) fn byte<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
+    let (idx, word) = bctx.stack.pop_2(bctx)?;
     let t = bctx.env.types();
     let zero = t.i256.const_zero();
     let const_32 = t.i256.const_int(32, false);
-
-    // EVM spec: if i >= 32 the result is 0.
-    // Must branch — the GEP below is in-bounds only when idx < 32.
     let is_oob =
         bctx.builder
             .build_int_compare(inkwell::IntPredicate::UGE, idx, const_32, "byte_oob")?;
-
-    let oob_block = bctx.env.context().append_basic_block(bctx.func, "byte_oob");
-    let inbounds_block = bctx
-        .env
-        .context()
-        .append_basic_block(bctx.func, "byte_inbounds");
-    let cont = bctx
-        .env
-        .context()
-        .append_basic_block(bctx.func, "byte_cont");
-    bctx.builder
-        .build_conditional_branch(is_oob, oob_block, inbounds_block)?;
-
-    bctx.builder.position_at_end(oob_block);
-    stack_push_int(bctx, zero)?;
-    bctx.builder.build_unconditional_branch(cont)?;
-
-    bctx.builder.position_at_end(inbounds_block);
-    // Safe to truncate: idx is verified < 32, fits in i32.
     let idx_i32 = bctx
         .builder
         .build_int_truncate(idx, t.i32, "byte_idx_i32")?;
@@ -480,95 +236,40 @@ pub(crate) fn byte(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     let idx_reversed = bctx
         .builder
         .build_int_sub(const_31, idx_i32, "byte_idx_reversed")?;
-    let typ = t.word_bytes;
-    let path = [idx_reversed];
-    let byte_ptr = unsafe {
+    let shift =
         bctx.builder
-            .build_in_bounds_gep(typ, word, &path, "byte_ptr")
-    }?;
-    let byte = load_i8(bctx, byte_ptr)?;
-    stack_push_int(bctx, byte)?;
-    bctx.builder.build_unconditional_branch(cont)?;
-
-    bctx.builder.position_at_end(cont);
-    Ok(())
-}
-
-pub(crate) fn shl(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (shift, value) = stack_pop_2(bctx)?;
-    let shift = load_i256(bctx, shift)?;
-    let value = load_i256(bctx, value)?;
-
-    let t = bctx.env.types();
-    let zero = t.i256.const_zero();
-    let max_shift = t.i256.const_int(255, false);
-
-    // EVM spec: shift >= 256 → result = 0.
-    // LLVM shl with shift >= 256 is poison, so clamp to 0 first, then select.
-    let is_large = bctx.builder.build_int_compare(
-        inkwell::IntPredicate::UGT,
-        shift,
-        max_shift,
-        "shl_is_large",
-    )?;
-    let safe_shift = bctx
+            .build_int_mul(idx_reversed, t.i32.const_int(8, false), "byte_shift")?;
+    let shift = bctx
         .builder
-        .build_select(is_large, zero, shift, "shl_safe_shift")?
-        .into_int_value();
+        .build_int_z_extend(shift, t.i256, "byte_shift_i256")?;
     let shifted = bctx
         .builder
-        .build_left_shift(value, safe_shift, "shl_shifted")?;
+        .build_right_shift(word, shift, false, "byte_shifted")?;
+    let byte = bctx
+        .builder
+        .build_int_truncate(shifted, t.i8, "byte_value")?;
+    let byte = bctx
+        .builder
+        .build_int_z_extend(byte, t.i256, "byte_value_i256")?;
     let result = bctx
         .builder
-        .build_select(is_large, zero, shifted, "shl_result")?
+        .build_select(is_oob, zero, byte, "byte_result")?
         .into_int_value();
-    stack_push_int(bctx, result)?;
-    Ok(())
+    bctx.stack.push_word(bctx, result)
 }
 
-pub(crate) fn shr(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (shift, value) = stack_pop_2(bctx)?;
-    let shift = load_i256(bctx, shift)?;
-    let value = load_i256(bctx, value)?;
-
-    let t = bctx.env.types();
-    let zero = t.i256.const_zero();
-    let max_shift = t.i256.const_int(255, false);
-
-    // EVM spec: shift >= 256 → result = 0.
-    // LLVM lshr with shift >= 256 is poison, so clamp to 0 first, then select.
-    let is_large = bctx.builder.build_int_compare(
-        inkwell::IntPredicate::UGT,
-        shift,
-        max_shift,
-        "shr_is_large",
-    )?;
-    let safe_shift = bctx
-        .builder
-        .build_select(is_large, zero, shift, "shr_safe_shift")?
-        .into_int_value();
-    let shifted = bctx
-        .builder
-        .build_right_shift(value, safe_shift, false, "shr_shifted")?;
-    let result = bctx
-        .builder
-        .build_select(is_large, zero, shifted, "shr_result")?
-        .into_int_value();
-    stack_push_int(bctx, result)?;
-    Ok(())
+pub(crate) fn shl<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
+    shift_left_or_right(bctx, true, false, "shl")
 }
 
-pub(crate) fn sar(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (shift, value) = stack_pop_2(bctx)?;
-    let shift = load_i256(bctx, shift)?;
-    let value = load_i256(bctx, value)?;
+pub(crate) fn shr<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
+    shift_left_or_right(bctx, false, false, "shr")
+}
 
+pub(crate) fn sar<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
+    let (shift, value) = bctx.stack.pop_2(bctx)?;
     let t = bctx.env.types();
     let max_shift = t.i256.const_int(255, false);
-
-    // EVM spec: shift >= 256 → fill with sign bit (0 or 0xFFFF…FF).
-    // Clamp to 255: ashr(value, 255) already produces the correct sign-fill result,
-    // so no select is needed — the clamp alone is sufficient.
     let is_large = bctx.builder.build_int_compare(
         inkwell::IntPredicate::UGT,
         shift,
@@ -582,101 +283,72 @@ pub(crate) fn sar(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     let result = bctx
         .builder
         .build_right_shift(value, safe_shift, true, "sar_result")?;
-    stack_push_int(bctx, result)?;
-    Ok(())
+    bctx.stack.push_word(bctx, result)
 }
 
-pub(crate) fn keccak256(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    // EVM: KECCAK256 pops offset (TOS) then size, reads size bytes from memory
-    // at offset, hashes them, and pushes the 32-byte result.
-    let (offset_ptr, size_ptr) = stack_pop_2(bctx)?;
-    let offset_i32 = load_i32(bctx, offset_ptr)?;
-    let size_i32 = load_i32(bctx, size_ptr)?;
-
+pub(crate) fn keccak256<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<(), Error> {
+    let (offset, size) = bctx.stack.pop_2(bctx)?;
+    let offset_i32 = truncate_to_i32(bctx, offset, "keccak_offset")?;
+    let size_i32 = truncate_to_i32(bctx, size, "keccak_size")?;
     call_mem_expand_checked(bctx, offset_i32, size_i32, "keccak256")?;
-
-    // Reuse offset_ptr as the result buffer — the stack slot is free after pop.
+    let result_ptr = bctx
+        .builder
+        .build_alloca(bctx.env.types().i256, "keccak_result")?;
     let ret = bctx.builder.build_call(
         bctx.env.symbols().keccak256(),
         &[
             bctx.registers.exec_ctx.into(),
             offset_i32.into(),
             size_i32.into(),
-            offset_ptr.into(),
+            result_ptr.into(),
         ],
         "keccak256",
     )?;
-
-    // Check return code from jet_ops_keccak256
-    // SAFETY: IntValue::new requires a valid LLVM value reference.
-    // ret.as_value_ref() returns the underlying ValueRef from a CallSiteValue,
-    // which is guaranteed to be valid by inkwell's build_call.
-    let ret_i8 = unsafe { IntValue::new(ret.as_value_ref()) };
-    let zero = bctx.env.types().i8.const_int(0, false);
-    let is_ok =
-        bctx.builder
-            .build_int_compare(inkwell::IntPredicate::EQ, ret_i8, zero, "keccak256_ok")?;
-
-    let ok_block = bctx
-        .env
-        .context()
-        .append_basic_block(bctx.func, "keccak256_success");
-    let err_block = bctx
-        .env
-        .context()
-        .append_basic_block(bctx.func, "keccak256_error");
-    bctx.builder
-        .build_conditional_branch(is_ok, ok_block, err_block)?;
-
-    bctx.builder.position_at_end(err_block);
-    build_return(bctx, ReturnCode::Invalid)?;
-
-    bctx.builder.position_at_end(ok_block);
-    call_stack_push_ptr(bctx, offset_ptr)?;
-    Ok(())
+    branch_on_i8_success(bctx, ret, "keccak256")?;
+    let result = bctx
+        .builder
+        .build_load(bctx.env.types().i256, result_ptr, "keccak_result")?
+        .into_int_value();
+    bctx.stack.push_word(bctx, result)
 }
 
-pub(crate) fn returndatasize(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    // Load sub call ctx
+pub(crate) fn returndatasize<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<(), Error> {
     let sub_call_ctx_ptr = bctx.builder.build_load(
         bctx.env.types().ptr,
         bctx.registers.sub_call,
         "sub_call_ctx_ptr",
     )?;
-
     let sub_call_ctx_ptr = unsafe { PointerValue::new(sub_call_ctx_ptr.as_value_ref()) };
-
-    // GetElementPointer to the return length
     let return_length_ptr = bctx.builder.build_struct_gep(
         bctx.env.types().exec_ctx,
         sub_call_ctx_ptr,
         3,
         "return_length_ptr",
     )?;
-
-    let return_length = load_i32(bctx, return_length_ptr)?;
-
-    stack_push_int(bctx, return_length)?;
-    Ok(())
+    let return_length = bctx
+        .builder
+        .build_load(bctx.env.types().i32, return_length_ptr, "return_length")?
+        .into_int_value();
+    bctx.stack.push_word(bctx, return_length)
 }
 
-pub(crate) fn returndatacopy(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (dest_off, src_off, len) = stack_pop_3(bctx)?;
-
-    // Load sub call ctx
+pub(crate) fn returndatacopy<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<(), Error> {
+    let (dest_off, src_off, len) = bctx.stack.pop_3(bctx)?;
     let sub_call_ctx_ptr = bctx.builder.build_load(
         bctx.env.types().ptr,
         bctx.registers.sub_call,
         "sub_call_ctx_ptr",
     )?;
-
     let sub_call_ctx_ptr = unsafe { PointerValue::new(sub_call_ctx_ptr.as_value_ref()) };
-
-    let dest_off = load_i32(bctx, dest_off)?;
-    let src_off = load_i32(bctx, src_off)?;
-    let len = load_i32(bctx, len)?;
-
-    // Call the runtime function to copy the return data
+    let dest_off = truncate_to_i32(bctx, dest_off, "retcopy_dest")?;
+    let src_off = truncate_to_i32(bctx, src_off, "retcopy_src")?;
+    let len = truncate_to_i32(bctx, len, "retcopy_len")?;
     bctx.builder.build_call(
         bctx.env.symbols().contract_call_return_data_copy(),
         &[
@@ -688,366 +360,680 @@ pub(crate) fn returndatacopy(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
         ],
         "return_data_copy",
     )?;
-
     Ok(())
 }
 
-pub(crate) fn blockhash(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    block_info_hash(bctx)?;
+pub(crate) fn blockhash<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<(), Error> {
+    block_info_hash(bctx)
+}
+
+pub(crate) fn pop<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
+    let _ = bctx.stack.pop_word(bctx)?;
     Ok(())
 }
 
-pub(crate) fn pop(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    // TODO: We could simply decrement stack ptr
-    stack_pop_1(bctx)?;
-    Ok(())
-}
-
-pub(crate) fn mload(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let loc = stack_pop_1(bctx)?;
-
-    // Expand memory if needed (MLOAD reads 32 bytes).
-    // This must happen before jet.mem.load so that memory_ptr in the context
-    // is up-to-date; jet_mem_expand may reallocate the buffer and update the
-    // pointer, and jet.mem.load re-reads it from the context after the call.
-    let loc_i32 = load_i32(bctx, loc)?;
+pub(crate) fn mload<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<(), Error> {
+    let loc = bctx.stack.pop_word(bctx)?;
+    let loc_i32 = truncate_to_i32(bctx, loc, "mload_loc")?;
     let size = bctx.env.types().i32.const_int(32, false);
     call_mem_expand_checked(bctx, loc_i32, size, "mload")?;
-
-    let mem_value = bctx.builder.build_call(
-        bctx.env.symbols().mem_load(),
-        &[bctx.registers.exec_ctx.into(), loc.into()],
-        "mload",
-    )?;
-
-    // mem_load returns the i256 value directly (not a pointer), preventing
-    // UAF when memory is reallocated.
-    let value = unsafe { IntValue::new(mem_value.as_value_ref()) };
-    call_stack_push_i256(bctx, value)?;
-
-    Ok(())
+    let value = build_mem_load_value(bctx, loc_i32)?;
+    bctx.stack.push_word(bctx, value)
 }
 
-pub(crate) fn mstore(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (loc, val) = stack_pop_2(bctx)?;
-
-    let loc_i32 = load_i32(bctx, loc)?;
+pub(crate) fn mstore<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<(), Error> {
+    let (loc, val) = bctx.stack.pop_2(bctx)?;
+    let loc_i32 = truncate_to_i32(bctx, loc, "mstore_loc")?;
     let size = bctx.env.types().i32.const_int(32, false);
     call_mem_expand_checked(bctx, loc_i32, size, "mstore")?;
-
-    bctx.builder.build_call(
-        bctx.env.symbols().mem_store(),
-        &[bctx.registers.exec_ctx.into(), loc.into(), val.into()],
-        "mstore",
-    )?;
-    Ok(())
+    build_mem_store_value(bctx, loc_i32, val)
 }
 
-pub(crate) fn mstore8(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (loc, val) = stack_pop_2(bctx)?;
-
-    let loc_i32 = load_i32(bctx, loc)?;
+pub(crate) fn mstore8<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<(), Error> {
+    let (loc, val) = bctx.stack.pop_2(bctx)?;
+    let loc_i32 = truncate_to_i32(bctx, loc, "mstore8_loc")?;
     let size = bctx.env.types().i32.const_int(1, false);
     call_mem_expand_checked(bctx, loc_i32, size, "mstore8")?;
-
-    bctx.builder.build_call(
-        bctx.env.symbols().mem_store_byte(),
-        &[bctx.registers.exec_ctx.into(), loc.into(), val.into()],
-        "mstore8",
-    )?;
-    Ok(())
+    build_mem_store_byte_value(bctx, loc_i32, val)
 }
 
-pub(crate) fn jump(bctx: &BuildCtx<'_, '_>, jump_block: BasicBlock) -> Result<(), Error> {
-    let pc = stack_pop_1(bctx)?;
-
-    let pc_i32 = load_i32(bctx, pc)?;
-
-    bctx.builder.build_store(bctx.registers.jump_ptr, pc_i32)?;
+pub(crate) fn jump<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+    jump_block: BasicBlock<'ctx>,
+) -> Result<(), Error> {
+    let pc = bctx.stack.pop_word(bctx)?;
+    let pc = truncate_to_i32(bctx, pc, "jump_pc")?;
+    bctx.builder.build_store(bctx.registers.jump_ptr, pc)?;
     bctx.builder.build_unconditional_branch(jump_block)?;
     Ok(())
 }
 
-pub(crate) fn jumpi(
-    bctx: &BuildCtx<'_, '_>,
-
-    jump_block: BasicBlock,
-    jump_else_block: BasicBlock,
+pub(crate) fn jumpi<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+    jump_block: BasicBlock<'ctx>,
+    jump_else_block: BasicBlock<'ctx>,
 ) -> Result<(), Error> {
-    let (pc, cond) = stack_pop_2(bctx)?;
-
-    let pc = load_i32(bctx, pc)?;
-    let cond = load_i64(bctx, cond)?;
-
+    let (pc, cond) = bctx.stack.pop_2(bctx)?;
+    let pc = truncate_to_i32(bctx, pc, "jumpi_pc")?;
     bctx.builder.build_store(bctx.registers.jump_ptr, pc)?;
-    let zero = bctx.env.types().i256.const_zero();
-    let cmp = bctx
-        .builder
-        .build_int_compare(inkwell::IntPredicate::EQ, cond, zero, "jumpi_cmp")?;
+    let cmp = bctx.builder.build_int_compare(
+        inkwell::IntPredicate::EQ,
+        cond,
+        bctx.env.types().i256.const_zero(),
+        "jumpi_cmp",
+    )?;
     bctx.builder
         .build_conditional_branch(cmp, jump_else_block, jump_block)?;
     Ok(())
 }
 
-pub(crate) fn pc(bctx: &BuildCtx<'_, '_>, pc: usize) -> Result<(), Error> {
-    let pc = bctx.env.types().i256.const_int(pc as u64, false);
-    stack_push_int(bctx, pc)?;
-    Ok(())
+pub(crate) fn pc<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+    pc: usize,
+) -> Result<(), Error> {
+    let pc_value = bctx.env.types().i256.const_int(pc as u64, false);
+    bctx.stack
+        .push_word_with_known_u64(bctx, pc_value, Some(pc as u64))
 }
 
-pub(crate) fn call(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (_gas, to, _value, _in_off, _in_len, out_off, out_len) = stack_pop_7(bctx)?;
-
-    // Call the contract with the call context
-    let contract_call_fn = bctx.env.symbols().contract_call();
+pub(crate) fn call<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
+    let (_gas, to, _value, _in_off, _in_len, out_off, out_len) = bctx.stack.pop_7(bctx)?;
     let jit_engine = bctx.env.symbols().jit_engine();
     let jit_engine_ptr = jit_engine.as_pointer_value();
+    let (addr_lo, addr_mid, addr_hi) = build_address_limbs(bctx, to)?;
+    let out_off = truncate_to_i32(bctx, out_off, "call.out_off")?;
+    let out_len = truncate_to_i32(bctx, out_len, "call.out_len")?;
     let make_contract_call = bctx.builder.build_call(
-        contract_call_fn,
+        bctx.env.symbols().contract_call_values(),
         &[
             bctx.registers.exec_ctx.into(),
             jit_engine_ptr.into(),
-            to.into(),
+            addr_lo.into(),
+            addr_mid.into(),
+            addr_hi.into(),
             out_off.into(),
             out_len.into(),
         ],
         "contract_call",
     )?;
-
     let ret = unsafe { IntValue::new(make_contract_call.as_value_ref()) };
-
-    stack_push_int(bctx, ret)?;
-
-    Ok(())
+    bctx.stack.push_word(bctx, ret)
 }
 
-pub(crate) fn _return(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (offset, size) = stack_pop_2(bctx)?;
-
-    // TODO: Copy instead of load and re-store
-    let offset = load_i32(bctx, offset)?;
-    let size = load_i32(bctx, size)?;
-
+pub(crate) fn _return<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<(), Error> {
+    let (offset, size) = bctx.stack.pop_2(bctx)?;
+    let offset = truncate_to_i32(bctx, offset, "return_offset")?;
+    let size = truncate_to_i32(bctx, size, "return_length")?;
     bctx.builder
         .build_store(bctx.registers.return_offset, offset)?;
     bctx.builder
         .build_store(bctx.registers.return_length, size)?;
-
     build_return(bctx, ReturnCode::ExplicitReturn)
 }
 
-pub(crate) fn revert(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
+pub(crate) fn revert<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<(), Error> {
     build_return(bctx, ReturnCode::Revert)
 }
 
-pub(crate) fn invalid(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
+pub(crate) fn invalid<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<(), Error> {
     build_return(bctx, ReturnCode::Invalid)
 }
 
-pub(crate) fn selfdestruct(_bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
+pub(crate) fn selfdestruct<'ctx, S: StackBackend<'ctx>>(
+    _bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<(), Error> {
     Err(Error::UnimplementedInstruction(Instruction::SELFDESTRUCT))
 }
 
-// Private helpers
-//
+fn compare_2<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+    predicate: inkwell::IntPredicate,
+    name: &str,
+) -> Result<(), Error> {
+    let (a, b) = bctx.stack.pop_2(bctx)?;
+    let result = bctx.builder.build_int_compare(predicate, a, b, name)?;
+    bctx.stack.push_word(bctx, result)
+}
 
-fn block_info_hash(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
+fn bitwise_2<'ctx, S, F>(bctx: &BuildCtx<'ctx, '_, S>, _name: &str, op: F) -> Result<(), Error>
+where
+    S: StackBackend<'ctx>,
+    F: FnOnce(
+        &BuildCtx<'ctx, '_, S>,
+        IntValue<'ctx>,
+        IntValue<'ctx>,
+    ) -> Result<IntValue<'ctx>, BuilderError>,
+{
+    let (a, b) = bctx.stack.pop_2(bctx)?;
+    let result = op(bctx, a, b)?;
+    bctx.stack.push_word(bctx, result)
+}
+
+fn normalize_to_i256<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+    value: IntValue<'ctx>,
+) -> Result<IntValue<'ctx>, Error> {
+    let bit_width = value.get_type().get_bit_width();
+    match bit_width {
+        1 | 8 | 32 => {
+            Ok(bctx
+                .builder
+                .build_int_z_extend(value, bctx.env.types().i256, "int_to_word")?)
+        }
+        256 => Ok(value),
+        _ => Err(Error::InvalidBitWidth(bit_width)),
+    }
+}
+
+fn block_info_hash<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
     let hash_ptr = bctx.builder.build_struct_gep(
         bctx.env.types().block_info,
         bctx.registers.block_info,
         7,
         "block_info_hash_ptr",
     )?;
-
-    let hash = load_i256(bctx, hash_ptr)?;
-    stack_push_int(bctx, hash)?;
-    Ok(())
+    let hash = bctx
+        .builder
+        .build_load(bctx.env.types().i256, hash_ptr, "block_info_hash")?
+        .into_int_value();
+    bctx.stack.push_word(bctx, hash)
 }
 
-fn stack_push_int<'ctx>(bctx: &BuildCtx<'ctx, '_>, value: IntValue<'ctx>) -> Result<(), Error> {
-    let bit_width = value.get_type().get_bit_width();
-    let value_i256 = match bit_width {
-        1 | 8 | 32 => {
-            bctx.builder
-                .build_int_z_extend(value, bctx.env.types().i256, "int_to_word")?
-        }
-        256 => value,
-        _ => {
-            return Err(Error::InvalidBitWidth(bit_width));
-        }
-    };
-
-    call_stack_push_i256(bctx, value_i256)?;
-    Ok(())
-}
-
-fn stack_push_ptr<'ctx>(bctx: &BuildCtx<'ctx, '_>, value: PointerValue<'ctx>) -> Result<(), Error> {
-    call_stack_push_ptr(bctx, value)?;
-    Ok(())
-}
-
-fn stack_pop_1<'ctx>(bctx: &BuildCtx<'ctx, '_>) -> Result<StackPop1<'ctx>, Error> {
-    let a = call_stack_pop(bctx)?;
-    Ok(a)
-}
-
-fn stack_pop_2<'ctx>(bctx: &BuildCtx<'ctx, '_>) -> Result<StackPop2<'ctx>, Error> {
-    let a = call_stack_pop(bctx)?;
-    let b = call_stack_pop(bctx)?;
-
-    Ok((a, b))
-}
-
-fn stack_pop_3<'ctx>(bctx: &BuildCtx<'ctx, '_>) -> Result<StackPop3<'ctx>, Error> {
-    let a = call_stack_pop(bctx)?;
-    let b = call_stack_pop(bctx)?;
-    let c = call_stack_pop(bctx)?;
-
-    Ok((a, b, c))
-}
-
-fn stack_pop_7<'ctx>(bctx: &BuildCtx<'ctx, '_>) -> Result<StackPop7<'ctx>, Error> {
-    let a = call_stack_pop(bctx)?;
-    let b = call_stack_pop(bctx)?;
-    let c = call_stack_pop(bctx)?;
-    let d = call_stack_pop(bctx)?;
-    let e = call_stack_pop(bctx)?;
-    let f = call_stack_pop(bctx)?;
-    let g = call_stack_pop(bctx)?;
-
-    Ok((a, b, c, d, e, f, g))
-}
-
-fn call_stack_push_i256<'ctx>(
-    bctx: &BuildCtx<'ctx, '_>,
-    value: IntValue<'ctx>,
-) -> Result<CallSiteValue<'ctx>, BuilderError> {
-    bctx.builder.build_call(
-        bctx.env.symbols().stack_push_word(),
-        &[bctx.registers.exec_ctx.into(), value.into()],
-        "stack_push_i256",
-    )
-}
-
-fn call_stack_push_ptr<'ctx>(
-    bctx: &BuildCtx<'ctx, '_>,
-    ptr: PointerValue<'ctx>,
-) -> Result<CallSiteValue<'ctx>, BuilderError> {
-    bctx.builder.build_call(
-        bctx.env.symbols().stack_push_ptr(),
-        &[bctx.registers.exec_ctx.into(), ptr.into()],
-        "stack_push_ptr",
-    )
-}
-
-fn call_stack_pop<'ctx>(bctx: &BuildCtx<'ctx, '_>) -> Result<PointerValue<'ctx>, Error> {
-    let ret = bctx.builder.build_call(
-        bctx.env.symbols().stack_pop(),
-        &[bctx.registers.exec_ctx.into()],
-        "word_ptr",
+fn build_zero_guarded_value<'ctx, S, F>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+    divisor: IntValue<'ctx>,
+    name: &str,
+    nonzero_fn: F,
+) -> Result<IntValue<'ctx>, Error>
+where
+    S: StackBackend<'ctx>,
+    F: FnOnce(&BuildCtx<'ctx, '_, S>) -> Result<IntValue<'ctx>, BuilderError>,
+{
+    let zero = bctx.env.types().i256.const_zero();
+    let is_zero = bctx.builder.build_int_compare(
+        inkwell::IntPredicate::EQ,
+        divisor,
+        zero,
+        &format!("{name}_by_zero"),
     )?;
-    let ptr = call_return_to_ptr(ret);
-
-    // Check if stack underflow occurred (null pointer returned)
-    let is_null = bctx.builder.build_is_null(ptr, "is_stack_underflow")?;
-
-    // Create basic blocks for handling null/non-null cases
-    let underflow_block = bctx
+    let zero_block = bctx
         .env
         .context()
-        .append_basic_block(bctx.func, "stack_underflow");
-    let valid_block = bctx
+        .append_basic_block(bctx.func, &format!("{name}_zero"));
+    let nonzero_block = bctx
         .env
         .context()
-        .append_basic_block(bctx.func, "stack_valid");
-
+        .append_basic_block(bctx.func, &format!("{name}_nonzero"));
+    let cont = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, &format!("{name}_cont"));
     bctx.builder
-        .build_conditional_branch(is_null, underflow_block, valid_block)?;
+        .build_conditional_branch(is_zero, zero_block, nonzero_block)?;
 
-    // In underflow block, return with StackUnderflow error
-    bctx.builder.position_at_end(underflow_block);
-    build_return(bctx, ReturnCode::StackUnderflow)?;
+    bctx.builder.position_at_end(zero_block);
+    bctx.builder.build_unconditional_branch(cont)?;
 
-    // Continue in valid block
-    bctx.builder.position_at_end(valid_block);
+    bctx.builder.position_at_end(nonzero_block);
+    let result = nonzero_fn(bctx)?;
+    bctx.builder.build_unconditional_branch(cont)?;
 
-    Ok(ptr)
+    bctx.builder.position_at_end(cont);
+    let phi = bctx
+        .builder
+        .build_phi(bctx.env.types().i256, &format!("{name}_phi"))?;
+    phi.add_incoming(&[(&zero, zero_block), (&result, nonzero_block)]);
+    Ok(phi.as_basic_value().into_int_value())
 }
 
-fn call_stack_peek<'ctx>(
-    bctx: &BuildCtx<'ctx, '_>,
-    index: u8,
-) -> Result<PointerValue<'ctx>, Error> {
-    let index_value = bctx.env.types().i8.const_int(index as u64, false);
-    let ret = bctx.builder.build_call(
-        bctx.env.symbols().stack_peek(),
-        &[bctx.registers.exec_ctx.into(), index_value.into()],
-        "stack_peek_word_result",
+fn build_signed_div_or_rem_value<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+    a: IntValue<'ctx>,
+    b: IntValue<'ctx>,
+    name: &str,
+    is_div: bool,
+) -> Result<IntValue<'ctx>, Error> {
+    let t = bctx.env.types();
+    let zero = t.i256.const_zero();
+    let b_is_zero = bctx.builder.build_int_compare(
+        inkwell::IntPredicate::EQ,
+        b,
+        zero,
+        &format!("{name}_b_is_zero"),
     )?;
-    Ok(call_return_to_ptr(ret))
+    let zero_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, &format!("{name}_zero"));
+    let nonzero_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, &format!("{name}_nonzero"));
+    let inner_cont = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, &format!("{name}_inner_cont"));
+    let outer_cont = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, &format!("{name}_cont"));
+    bctx.builder
+        .build_conditional_branch(b_is_zero, zero_block, nonzero_block)?;
+
+    bctx.builder.position_at_end(zero_block);
+    bctx.builder.build_unconditional_branch(outer_cont)?;
+
+    bctx.builder.position_at_end(nonzero_block);
+    let min_int = t
+        .i256
+        .const_int_arbitrary_precision(&[0, 0, 0, 0x8000_0000_0000_0000]);
+    let neg_one = t.i256.const_all_ones();
+    let a_is_min = bctx.builder.build_int_compare(
+        inkwell::IntPredicate::EQ,
+        a,
+        min_int,
+        &format!("{name}_a_is_min"),
+    )?;
+    let b_is_neg_one = bctx.builder.build_int_compare(
+        inkwell::IntPredicate::EQ,
+        b,
+        neg_one,
+        &format!("{name}_b_is_neg_one"),
+    )?;
+    let is_overflow =
+        bctx.builder
+            .build_and(a_is_min, b_is_neg_one, &format!("{name}_is_overflow"))?;
+    let overflow_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, &format!("{name}_overflow"));
+    let normal_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, &format!("{name}_normal"));
+    bctx.builder
+        .build_conditional_branch(is_overflow, overflow_block, normal_block)?;
+
+    bctx.builder.position_at_end(overflow_block);
+    bctx.builder.build_unconditional_branch(inner_cont)?;
+
+    bctx.builder.position_at_end(normal_block);
+    let normal_result = if is_div {
+        bctx.builder
+            .build_int_signed_div(a, b, &format!("{name}_result"))?
+    } else {
+        bctx.builder
+            .build_int_signed_rem(a, b, &format!("{name}_result"))?
+    };
+    bctx.builder.build_unconditional_branch(inner_cont)?;
+
+    bctx.builder.position_at_end(inner_cont);
+    let overflow_result = if is_div { min_int } else { zero };
+    let inner_phi = bctx
+        .builder
+        .build_phi(bctx.env.types().i256, &format!("{name}_inner_phi"))?;
+    inner_phi.add_incoming(&[
+        (&overflow_result, overflow_block),
+        (&normal_result, normal_block),
+    ]);
+    let inner_result = inner_phi.as_basic_value().into_int_value();
+    bctx.builder.build_unconditional_branch(outer_cont)?;
+
+    bctx.builder.position_at_end(outer_cont);
+    let outer_phi = bctx
+        .builder
+        .build_phi(bctx.env.types().i256, &format!("{name}_result_phi"))?;
+    outer_phi.add_incoming(&[(&zero, zero_block), (&inner_result, inner_cont)]);
+    Ok(outer_phi.as_basic_value().into_int_value())
 }
 
-fn call_stack_swap(bctx: &BuildCtx<'_, '_>, index: u8) -> Result<(), Error> {
-    let index_value = bctx.env.types().i8.const_int(index as u64, false);
-
-    bctx.builder.build_call(
-        bctx.env.symbols().stack_swap(),
-        &[bctx.registers.exec_ctx.into(), index_value.into()],
-        "stack_swap_ret",
+fn build_wide_mod_op<'ctx, S, F>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+    a: IntValue<'ctx>,
+    b: IntValue<'ctx>,
+    modulus: IntValue<'ctx>,
+    name: &str,
+    op: F,
+) -> Result<IntValue<'ctx>, Error>
+where
+    S: StackBackend<'ctx>,
+    F: FnOnce(IntValue<'ctx>, IntValue<'ctx>) -> Result<IntValue<'ctx>, BuilderError>,
+{
+    let t = bctx.env.types();
+    let zero = t.i256.const_zero();
+    let modulus_is_zero = bctx.builder.build_int_compare(
+        inkwell::IntPredicate::EQ,
+        modulus,
+        zero,
+        &format!("{name}_modulus_is_zero"),
     )?;
+    let zero_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, &format!("{name}_zero"));
+    let nonzero_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, &format!("{name}_nonzero"));
+    let cont = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, &format!("{name}_cont"));
+    bctx.builder
+        .build_conditional_branch(modulus_is_zero, zero_block, nonzero_block)?;
+
+    bctx.builder.position_at_end(zero_block);
+    bctx.builder.build_unconditional_branch(cont)?;
+
+    bctx.builder.position_at_end(nonzero_block);
+    let i512 = bctx
+        .env
+        .context()
+        .custom_width_int_type(NonZeroU32::new(512).expect("non-zero bit width"))
+        .expect("i512 should be valid");
+    let a = bctx
+        .builder
+        .build_int_z_extend(a, i512, &format!("{name}_a512"))?;
+    let b = bctx
+        .builder
+        .build_int_z_extend(b, i512, &format!("{name}_b512"))?;
+    let modulus = bctx
+        .builder
+        .build_int_z_extend(modulus, i512, &format!("{name}_modulus512"))?;
+    let wide_result = op(a, b)?;
+    let reduced =
+        bctx.builder
+            .build_int_unsigned_rem(wide_result, modulus, &format!("{name}_reduced"))?;
+    let reduced = bctx
+        .builder
+        .build_int_truncate(reduced, t.i256, &format!("{name}_result"))?;
+    bctx.builder.build_unconditional_branch(cont)?;
+
+    bctx.builder.position_at_end(cont);
+    let phi = bctx
+        .builder
+        .build_phi(t.i256, &format!("{name}_result_phi"))?;
+    phi.add_incoming(&[(&zero, zero_block), (&reduced, nonzero_block)]);
+    Ok(phi.as_basic_value().into_int_value())
+}
+
+fn build_exp_value<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+    base: IntValue<'ctx>,
+    exponent: IntValue<'ctx>,
+) -> Result<IntValue<'ctx>, Error> {
+    let t = bctx.env.types();
+    let initial_block = bctx
+        .builder
+        .get_insert_block()
+        .ok_or_else(|| Error::invariant_violation("builder has no insertion block"))?;
+    let loop_block = bctx.env.context().append_basic_block(bctx.func, "exp_loop");
+    let body_block = bctx.env.context().append_basic_block(bctx.func, "exp_body");
+    let cont_block = bctx.env.context().append_basic_block(bctx.func, "exp_cont");
+
+    bctx.builder.build_unconditional_branch(loop_block)?;
+    bctx.builder.position_at_end(loop_block);
+
+    let result_phi = bctx.builder.build_phi(t.i256, "exp_result_phi")?;
+    let base_phi = bctx.builder.build_phi(t.i256, "exp_base_phi")?;
+    let exponent_phi = bctx.builder.build_phi(t.i256, "exp_exponent_phi")?;
+    result_phi.add_incoming(&[(&t.i256.const_int(1, false), initial_block)]);
+    base_phi.add_incoming(&[(&base, initial_block)]);
+    exponent_phi.add_incoming(&[(&exponent, initial_block)]);
+
+    let result = result_phi.as_basic_value().into_int_value();
+    let base = base_phi.as_basic_value().into_int_value();
+    let exponent = exponent_phi.as_basic_value().into_int_value();
+    let is_done = bctx.builder.build_int_compare(
+        inkwell::IntPredicate::EQ,
+        exponent,
+        t.i256.const_zero(),
+        "exp_done",
+    )?;
+    bctx.builder
+        .build_conditional_branch(is_done, cont_block, body_block)?;
+
+    bctx.builder.position_at_end(body_block);
+    let is_odd = bctx.builder.build_int_compare(
+        inkwell::IntPredicate::NE,
+        bctx.builder
+            .build_and(exponent, t.i256.const_int(1, false), "exp_odd_bit")?,
+        t.i256.const_zero(),
+        "exp_is_odd",
+    )?;
+    let multiplied = bctx
+        .builder
+        .build_int_mul(result, base, "exp_result_multiplied")?;
+    let next_result = bctx
+        .builder
+        .build_select(is_odd, multiplied, result, "exp_next_result")?
+        .into_int_value();
+    let next_base = bctx.builder.build_int_mul(base, base, "exp_next_base")?;
+    let next_exponent = bctx.builder.build_right_shift(
+        exponent,
+        t.i256.const_int(1, false),
+        false,
+        "exp_next_exponent",
+    )?;
+    bctx.builder.build_unconditional_branch(loop_block)?;
+    let body_block = bctx
+        .builder
+        .get_insert_block()
+        .ok_or_else(|| Error::invariant_violation("builder has no insertion block"))?;
+
+    result_phi.add_incoming(&[(&next_result, body_block)]);
+    base_phi.add_incoming(&[(&next_base, body_block)]);
+    exponent_phi.add_incoming(&[(&next_exponent, body_block)]);
+
+    bctx.builder.position_at_end(cont_block);
+    Ok(result)
+}
+
+fn build_mem_load_value<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+    loc: IntValue<'ctx>,
+) -> Result<IntValue<'ctx>, Error> {
+    let mem_ptr = load_memory_ptr(bctx)?;
+    let loc = memory_gep_index(bctx, loc, "mem.load.index")?;
+    let byte_ptr = unsafe {
+        bctx.builder
+            .build_gep(bctx.env.types().i8, mem_ptr, &[loc], "mem.byte.ptr")
+    }?;
+    Ok(bctx
+        .builder
+        .build_load(bctx.env.types().i256, byte_ptr, "mem.value")?
+        .into_int_value())
+}
+
+fn build_mem_store_value<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+    loc: IntValue<'ctx>,
+    value: IntValue<'ctx>,
+) -> Result<(), Error> {
+    let mem_ptr = load_memory_ptr(bctx)?;
+    let loc = memory_gep_index(bctx, loc, "mem.store.index")?;
+    let byte_ptr = unsafe {
+        bctx.builder
+            .build_gep(bctx.env.types().i8, mem_ptr, &[loc], "mem.byte.ptr")
+    }?;
+    bctx.builder
+        .build_store(byte_ptr, normalize_to_i256(bctx, value)?)?;
     Ok(())
 }
 
-fn load_i8<'a>(bctx: &BuildCtx<'a, '_>, ptr: PointerValue<'a>) -> Result<IntValue<'a>, Error> {
-    let int = load_int(bctx, ptr, bctx.env.types().i8)?;
-    Ok(int)
+fn build_mem_store_byte_value<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+    loc: IntValue<'ctx>,
+    value: IntValue<'ctx>,
+) -> Result<(), Error> {
+    let mem_ptr = load_memory_ptr(bctx)?;
+    let loc = memory_gep_index(bctx, loc, "mem.store8.index")?;
+    let byte_ptr = unsafe {
+        bctx.builder
+            .build_gep(bctx.env.types().i8, mem_ptr, &[loc], "mem.byte.ptr")
+    }?;
+    let value = if value.get_type().get_bit_width() == 8 {
+        value
+    } else {
+        bctx.builder
+            .build_int_truncate(value, bctx.env.types().i8, "mem.store.byte")?
+    };
+    bctx.builder.build_store(byte_ptr, value)?;
+    Ok(())
 }
 
-/// Truncates an EVM word (i256) to i32.
-///
-/// This is safe for memory operations because EVM gas costs make >4GB memory
-/// economically impossible. See docs/adrs/adr-004.md for full analysis.
-fn load_i32<'a>(bctx: &BuildCtx<'a, '_>, ptr: PointerValue<'a>) -> Result<IntValue<'a>, Error> {
-    let int = load_int(bctx, ptr, bctx.env.types().i32)?;
-    Ok(int)
+fn memory_gep_index<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+    value: IntValue<'ctx>,
+    name: &str,
+) -> Result<IntValue<'ctx>, Error> {
+    match value.get_type().get_bit_width() {
+        64 => Ok(value),
+        width if width < 64 => {
+            Ok(bctx
+                .builder
+                .build_int_z_extend(value, bctx.env.types().i64, name)?)
+        }
+        _ => Ok(bctx
+            .builder
+            .build_int_truncate(value, bctx.env.types().i64, name)?),
+    }
 }
 
-fn load_i64<'a>(bctx: &BuildCtx<'a, '_>, ptr: PointerValue<'a>) -> Result<IntValue<'a>, Error> {
-    let int = load_int(bctx, ptr, bctx.env.types().i64)?;
-    Ok(int)
+fn load_memory_ptr<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<PointerValue<'ctx>, Error> {
+    let mem_ptr_addr = bctx.builder.build_struct_gep(
+        bctx.env.types().exec_ctx,
+        bctx.registers.exec_ctx,
+        6,
+        "mem.ptr.addr",
+    )?;
+    Ok(bctx
+        .builder
+        .build_load(bctx.env.types().ptr, mem_ptr_addr, "mem.ptr")?
+        .into_pointer_value())
 }
 
-fn load_i256<'a>(bctx: &BuildCtx<'a, '_>, ptr: PointerValue<'a>) -> Result<IntValue<'a>, Error> {
-    let int = load_int(bctx, ptr, bctx.env.types().i256)?;
-    Ok(int)
+fn build_address_limbs<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+    value: IntValue<'ctx>,
+) -> Result<(IntValue<'ctx>, IntValue<'ctx>, IntValue<'ctx>), Error> {
+    let value = normalize_to_i256(bctx, value)?;
+    let shift_64 = bctx.env.types().i256.const_int(64, false);
+    let shift_128 = bctx.env.types().i256.const_int(128, false);
+    let addr_lo = bctx
+        .builder
+        .build_int_truncate(value, bctx.env.types().i64, "call.addr.lo")?;
+    let addr_mid_src =
+        bctx.builder
+            .build_right_shift(value, shift_64, false, "call.addr.mid.src")?;
+    let addr_mid =
+        bctx.builder
+            .build_int_truncate(addr_mid_src, bctx.env.types().i64, "call.addr.mid")?;
+    let addr_hi_src =
+        bctx.builder
+            .build_right_shift(value, shift_128, false, "call.addr.hi.src")?;
+    let addr_hi =
+        bctx.builder
+            .build_int_truncate(addr_hi_src, bctx.env.types().i32, "call.addr.hi")?;
+    Ok((addr_lo, addr_mid, addr_hi))
 }
 
-fn load_int<'a>(
-    bctx: &BuildCtx,
-    ptr: PointerValue<'a>,
-    ty: IntType<'a>,
-) -> Result<IntValue<'a>, Error> {
-    let value = bctx.builder.build_load(ty, ptr, "load_int")?;
-    let value_ref = value.as_value_ref();
-    let value_int = unsafe { IntValue::new(value_ref) };
-    Ok(value_int)
+fn truncate_to_i32<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+    value: IntValue<'ctx>,
+    name: &str,
+) -> Result<IntValue<'ctx>, Error> {
+    if value.get_type().get_bit_width() == 32 {
+        return Ok(value);
+    }
+    Ok(bctx
+        .builder
+        .build_int_truncate(value, bctx.env.types().i32, name)?)
 }
 
-fn call_return_to_ptr(ret: CallSiteValue) -> PointerValue {
-    let value_ref = ret.as_value_ref();
-    unsafe { PointerValue::new(value_ref) }
+fn shift_left_or_right<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+    left: bool,
+    signed: bool,
+    name: &str,
+) -> Result<(), Error> {
+    let (shift, value) = bctx.stack.pop_2(bctx)?;
+    let t = bctx.env.types();
+    let zero = t.i256.const_zero();
+    let max_shift = t.i256.const_int(255, false);
+    let is_large = bctx.builder.build_int_compare(
+        inkwell::IntPredicate::UGT,
+        shift,
+        max_shift,
+        &format!("{name}_is_large"),
+    )?;
+    let safe_shift = bctx
+        .builder
+        .build_select(is_large, zero, shift, &format!("{name}_safe_shift"))?
+        .into_int_value();
+    let shifted = if left {
+        bctx.builder
+            .build_left_shift(value, safe_shift, &format!("{name}_shifted"))?
+    } else {
+        bctx.builder
+            .build_right_shift(value, safe_shift, signed, &format!("{name}_shifted"))?
+    };
+    let result = bctx
+        .builder
+        .build_select(is_large, zero, shifted, &format!("{name}_result"))?
+        .into_int_value();
+    bctx.stack.push_word(bctx, result)
 }
 
-/// Emit jet.mem.expand and check its return value.
-///
-/// On success (return == 0) the builder is positioned at a new continuation block
-/// and this function returns `Ok(())`.  On failure the emitted IR returns
-/// `ReturnCode::Invalid` from the contract function directly, so the caller never
-/// sees a non-zero result.
-fn call_mem_expand_checked(
-    bctx: &BuildCtx<'_, '_>,
-    loc_i32: IntValue<'_>,
-    size: IntValue<'_>,
+fn branch_on_i8_success<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+    ret: CallSiteValue<'ctx>,
+    name: &str,
+) -> Result<(), Error> {
+    let ret_i8 = unsafe { IntValue::new(ret.as_value_ref()) };
+    let zero = bctx.env.types().i8.const_int(0, false);
+    let is_ok = bctx.builder.build_int_compare(
+        inkwell::IntPredicate::EQ,
+        ret_i8,
+        zero,
+        &format!("{name}_ok"),
+    )?;
+    let ok_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, &format!("{name}_success"));
+    let err_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, &format!("{name}_error"));
+    bctx.builder
+        .build_conditional_branch(is_ok, ok_block, err_block)?;
+    bctx.builder.position_at_end(err_block);
+    build_return(bctx, ReturnCode::Invalid)?;
+    bctx.builder.position_at_end(ok_block);
+    Ok(())
+}
+
+fn call_mem_expand_checked<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+    loc_i32: IntValue<'ctx>,
+    size: IntValue<'ctx>,
     label: &str,
 ) -> Result<(), Error> {
     let ret = bctx.builder.build_call(
@@ -1080,51 +1066,5 @@ fn call_mem_expand_checked(
     build_return(bctx, ReturnCode::Invalid)?;
 
     bctx.builder.position_at_end(ok_block);
-    Ok(())
-}
-
-/// Emit a guarded branch for operations whose denominator/modulus must not be zero.
-///
-/// Branches on `is_zero_cond`:
-/// - **zero path**: pushes `0i256` onto the EVM stack and jumps to the continuation block.
-/// - **nonzero path**: calls `nonzero_fn(cont_block)`, which is responsible for computing
-///   the result, pushing it, and branching to `cont_block`.
-///
-/// After this call the builder is positioned at `cont_block`.
-fn build_zero_guard<'ctx, F>(
-    bctx: &BuildCtx<'ctx, '_>,
-    is_zero_cond: IntValue<'ctx>,
-    op_name: &str,
-    nonzero_fn: F,
-) -> Result<(), Error>
-where
-    F: FnOnce(BasicBlock<'ctx>) -> Result<(), Error>,
-{
-    let zero = bctx.env.types().i256.const_zero();
-
-    let zero_block = bctx
-        .env
-        .context()
-        .append_basic_block(bctx.func, &format!("{op_name}_zero"));
-    let nonzero_block = bctx
-        .env
-        .context()
-        .append_basic_block(bctx.func, &format!("{op_name}_nonzero"));
-    let cont = bctx
-        .env
-        .context()
-        .append_basic_block(bctx.func, &format!("{op_name}_cont"));
-
-    bctx.builder
-        .build_conditional_branch(is_zero_cond, zero_block, nonzero_block)?;
-
-    bctx.builder.position_at_end(zero_block);
-    stack_push_int(bctx, zero)?;
-    bctx.builder.build_unconditional_branch(cont)?;
-
-    bctx.builder.position_at_end(nonzero_block);
-    nonzero_fn(cont)?;
-
-    bctx.builder.position_at_end(cont);
     Ok(())
 }

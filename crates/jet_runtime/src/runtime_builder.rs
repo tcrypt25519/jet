@@ -54,7 +54,7 @@ impl<'ctx> RuntimeBuilder<'ctx> {
     /// require Rust's standard library or external dependencies.
     fn declare_external_builtins(&self) {
         self.module.add_function(
-            "jet.contract.call",
+            crate::symbols::FN_CONTRACT_CALL,
             self.types.i8.fn_type(
                 &[
                     self.types.ptr.into(),
@@ -69,7 +69,24 @@ impl<'ctx> RuntimeBuilder<'ctx> {
         );
 
         self.module.add_function(
-            "jet.contracts.call_return_data_copy",
+            crate::symbols::FN_CONTRACT_CALL_VALUES,
+            self.types.i8.fn_type(
+                &[
+                    self.types.ptr.into(),
+                    self.types.ptr.into(),
+                    self.types.i64.into(),
+                    self.types.i64.into(),
+                    self.types.i32.into(),
+                    self.types.i32.into(),
+                    self.types.i32.into(),
+                ],
+                false,
+            ),
+            None,
+        );
+
+        self.module.add_function(
+            crate::symbols::FN_CONTRACT_CALL_RETURN_DATA_COPY,
             self.types.i8.fn_type(
                 &[
                     self.types.ptr.into(),
