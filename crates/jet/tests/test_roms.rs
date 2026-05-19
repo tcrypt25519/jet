@@ -295,6 +295,74 @@ rom_tests! {
         },
     },
 
+    backward_only_target_gets_symbolic_entry_shape: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x08),
+            JUMP!(),
+            JUMPDEST!(),
+            PUSH1!(0x01),
+            ADD!(),
+            STOP!(),
+            JUMPDEST!(),
+            PUSH1!(0x2A),
+            PUSH1!(0x03),
+            JUMP!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::Stop,
+            stack_ptr: 1,
+            jump_ptr: 0x03,
+            stack: vec![stack_word(&[0x2B])],
+            ..Default::default()
+        },
+    },
+
+    dup_preserves_static_jump_target_metadata: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x04),
+            DUP1!(),
+            JUMP!(),
+            JUMPDEST!(),
+            PUSH1!(0x01),
+            ADD!(),
+            STOP!(),
+            JUMPDEST!(),
+            STOP!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::Stop,
+            stack_ptr: 1,
+            jump_ptr: 0x04,
+            stack: vec![stack_word(&[0x05])],
+            ..Default::default()
+        },
+    },
+
+    join_with_different_stack_heights_uses_specialized_blocks: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x01),
+            PUSH1!(0x0C),
+            JUMPI!(),
+            PUSH1!(0x11),
+            PUSH1!(0x22),
+            PUSH1!(0x12),
+            JUMP!(),
+            JUMPDEST!(),
+            PUSH1!(0x2A),
+            PUSH1!(0x12),
+            JUMP!(),
+            JUMPDEST!(),
+            POP!(),
+            STOP!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::Stop,
+            stack_ptr: 0,
+            jump_ptr: 0x12,
+            ..Default::default()
+        },
+    },
+
     return_sets_offset_and_length: Test{
         roms: vec![bytecode![
             PUSH1!(0x20),

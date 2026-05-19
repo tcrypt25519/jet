@@ -53,47 +53,73 @@ target value. The lookup rule is:
 2. look it up in the jumpdest map;
 3. if found, branch directly to that target block.
 
-## Symbolic Control Flow
+## Symbolic Control-Flow Plan
 
-Symbolic mode uses a separate contract-body builder because control-flow edges
-must carry symbolic stack state.
+Symbolic mode builds a control-flow plan before it emits the function body. The
+plan is an abstract interpretation over `CodeBlock`s, not a second runtime stack.
+It tracks:
 
-For each block:
+- the current stack height;
+- optional `known_u64` metadata for each slot;
+- the block index reached by each successor edge.
 
-1. Restore the block's entry stack.
+The analysis starts at block 0 with an empty stack and runs a worklist to a fixed
+point. Non-jump opcodes are modeled only by their stack effects and by whether
+they preserve or destroy `known_u64` metadata. Static `JUMP` and `JUMPI` targets
+use the `jumpdest_pc -> block_index` map. Dynamic jump targets conservatively add
+successor edges to every known `JUMPDEST` with the post-pop stack shape.
+
+Incoming states are grouped by `(block_index, stack_height)`. When two incoming
+states for the same block and height disagree on a known literal, that slot's
+metadata is dropped to `None`; the LLVM value is still represented by the entry
+phi. When the same bytecode block is reached with different stack heights, the
+planner creates distinct block variants so each variant has one stable symbolic
+entry shape.
+
+## Symbolic Emission
+
+After planning, symbolic mode creates all block entry phis before emitting any
+block body. Each planned block variant has one phi per entry stack slot, and
+emission restores the symbolic stack from those phis before walking the block's
+bytecode.
+
+For each emitted block variant:
+
+1. Restore the variant's entry stack from its phis.
 2. Emit instructions in bytecode order.
 3. For non-jump opcodes, call the shared generic opcode dispatcher.
-4. For static `JUMP` or `JUMPI`, pop the target/condition, record the outgoing
-   symbolic stack for each successor, and emit a direct LLVM branch.
-5. For dynamic `JUMP` or taken `JUMPI`, emit a site-local LLVM `switch` over
-   all known `JUMPDEST` blocks and record the outgoing stack for each possible
-   target.
-6. When a later block has multiple incoming stack states with the same height,
-   build one LLVM phi per stack slot and use those phi values as that block's
-   entry stack.
-7. Because `JUMPDEST` blocks can receive backedges after their bytecode has
-   already been emitted, symbolic mode gives them phi-backed entry slots once
-   their first incoming stack is known. Later incoming edges add operands to
-   those existing phis.
+4. For static `JUMP` or `JUMPI`, record phi incoming values for the planned
+   successor variant and emit a direct LLVM branch.
+5. For dynamic `JUMP` or taken `JUMPI`, emit a site-local LLVM `switch` over all
+   `JUMPDEST` variants with the current stack height and record phi incoming
+   values for each case.
+6. For ordinary fallthrough, branch to the following block variant matching the
+   current stack height.
 
 Only `JUMP` and `JUMPI` are mode-specific in this path. The normal
 opcode-to-emitter match is shared so runtime and symbolic modes do not maintain
 separate implemented-opcode lists.
 
+Original LLVM blocks that are not used by any planned variant are terminated with
+an invalid return so LLVM never sees an unterminated block. Reachable variants
+use normal EVM return codes and materialize the symbolic stack into
+`Context.stack` only at contract exits.
+
 ## Current Limits
 
-This is not full EVM symbolic correctness yet. Dynamic jump targets now create
-conservative successor edges to all `JUMPDEST` blocks with the post-pop stack
-state, and simple loop-carried stack values are represented with entry phis.
-Block specialization and more precise CFG handling are still outstanding.
+The symbolic path now handles fixed-point stack-shape planning, backedges, and
+same-bytecode block specialization by stack height. The remaining correctness
+work is less about whether stack values can cross CFG edges and more about
+expanding the compiler's opcode surface and making dynamic jumps more precise.
 
 The current implementation covers:
 
 - static `JUMP` targets;
 - static `JUMPI` targets;
-- dynamic forward `JUMP` and `JUMPI` targets through conservative switches;
+- dynamic `JUMP` and `JUMPI` targets through conservative switches;
 - same-height joins through LLVM phi nodes;
-- simple loop/backedge stack values through `JUMPDEST` entry phis;
+- loop/backedge stack values through pre-created entry phis;
+- different-height joins through specialized block variants;
 - runtime stack mode preserved as its own backend.
 
 The runtime backend remains useful as an oracle during development. It is not
