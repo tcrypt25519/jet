@@ -22,7 +22,7 @@ pub type HashHistory = [Hash; BLOCK_HASH_HISTORY_SIZE];
 /// Every compiled contract is exposed as a function with this signature.
 /// The `*const Context` argument points to the caller-allocated execution
 /// context; the function returns a [`ReturnCode`] indicating how it stopped.
-pub type ContractFunc = unsafe extern "C" fn(*const Context) -> ReturnCode;
+pub type ContractFunc = unsafe extern "C" fn(*const Context, *const BlockInfo) -> ReturnCode;
 
 /// EVM execution context passed to every JIT-compiled contract function.
 ///

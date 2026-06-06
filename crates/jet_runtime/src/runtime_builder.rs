@@ -62,6 +62,7 @@ impl<'ctx> RuntimeBuilder<'ctx> {
                     self.types.ptr.into(),
                     self.types.ptr.into(),
                     self.types.ptr.into(),
+                    self.types.ptr.into(),
                 ],
                 false,
             ),
@@ -72,6 +73,7 @@ impl<'ctx> RuntimeBuilder<'ctx> {
             crate::symbols::FN_CONTRACT_CALL_VALUES,
             self.types.i8.fn_type(
                 &[
+                    self.types.ptr.into(),
                     self.types.ptr.into(),
                     self.types.ptr.into(),
                     self.types.i64.into(),

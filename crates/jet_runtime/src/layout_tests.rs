@@ -2,7 +2,7 @@
 /// Ensures consistency between Rust Context struct and LLVM IR exec_ctx type.
 #[cfg(test)]
 mod layout_verification_tests {
-    use crate::exec::Context;
+    use crate::exec::{BlockInfo, Context};
     use inkwell::context::Context as LLVMContext;
     use inkwell::types::AnyTypeEnum;
     use jet_ir::Types;
@@ -21,6 +21,44 @@ mod layout_verification_tests {
         MemoryPtr = 6,
         MemoryLen = 7,
         MemoryCap = 8,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    #[repr(u32)]
+    enum BlockInfoField {
+        Number = 0,
+        Difficulty = 1,
+        GasLimit = 2,
+        Timestamp = 3,
+        BaseFee = 4,
+        BlobBaseFee = 5,
+        ChainId = 6,
+        Hash = 7,
+        HashHistory = 8,
+        Coinbase = 9,
+    }
+
+    impl BlockInfoField {
+        const FIELD_COUNT: u32 = 10;
+
+        fn index(self) -> u32 {
+            self as u32
+        }
+
+        fn expected_type_kind(self) -> TypeKind {
+            match self {
+                BlockInfoField::Number
+                | BlockInfoField::Difficulty
+                | BlockInfoField::GasLimit
+                | BlockInfoField::Timestamp
+                | BlockInfoField::BaseFee
+                | BlockInfoField::BlobBaseFee
+                | BlockInfoField::ChainId => TypeKind::Int,
+                BlockInfoField::Hash | BlockInfoField::HashHistory | BlockInfoField::Coinbase => {
+                    TypeKind::Array
+                }
+            }
+        }
     }
 
     impl ExecCtxField {
@@ -172,5 +210,80 @@ mod layout_verification_tests {
             256,
             "Stack elements should be i256"
         );
+    }
+
+    #[test]
+    fn test_block_info_struct_size() {
+        let block_info_size = mem::size_of::<BlockInfo>();
+        const MIN_EXPECTED_SIZE: usize = 8_300;
+
+        assert!(
+            block_info_size >= MIN_EXPECTED_SIZE,
+            "BlockInfo size {} is less than expected minimum {}",
+            block_info_size,
+            MIN_EXPECTED_SIZE
+        );
+    }
+
+    #[test]
+    fn test_llvm_block_info_field_count() {
+        let llvm_context = LLVMContext::create();
+        let types = Types::new(&llvm_context);
+
+        let field_count = types.block_info.count_fields();
+        assert_eq!(
+            field_count,
+            BlockInfoField::FIELD_COUNT,
+            "block_info should have {} fields, got {}",
+            BlockInfoField::FIELD_COUNT,
+            field_count
+        );
+    }
+
+    #[test]
+    fn test_block_info_field_types() {
+        let llvm_context = LLVMContext::create();
+        let types = Types::new(&llvm_context);
+
+        let fields_to_test = [
+            BlockInfoField::Number,
+            BlockInfoField::Difficulty,
+            BlockInfoField::GasLimit,
+            BlockInfoField::Timestamp,
+            BlockInfoField::BaseFee,
+            BlockInfoField::BlobBaseFee,
+            BlockInfoField::ChainId,
+            BlockInfoField::Hash,
+            BlockInfoField::HashHistory,
+            BlockInfoField::Coinbase,
+        ];
+
+        for field in fields_to_test {
+            let field_type = types
+                .block_info
+                .get_field_type_at_index(field.index())
+                .unwrap_or_else(|| panic!("Failed to get field type for {:?}", field));
+
+            let actual_kind = get_type_kind(match field_type {
+                inkwell::types::BasicTypeEnum::ArrayType(t) => t.into(),
+                inkwell::types::BasicTypeEnum::FloatType(t) => t.into(),
+                inkwell::types::BasicTypeEnum::IntType(t) => t.into(),
+                inkwell::types::BasicTypeEnum::PointerType(t) => t.into(),
+                inkwell::types::BasicTypeEnum::StructType(t) => t.into(),
+                inkwell::types::BasicTypeEnum::VectorType(t) => t.into(),
+                inkwell::types::BasicTypeEnum::ScalableVectorType(t) => t.into(),
+            });
+            let expected_kind = field.expected_type_kind();
+
+            assert_eq!(
+                actual_kind,
+                expected_kind,
+                "Field {:?} (index {}) has wrong type: expected {:?}, got {:?}",
+                field,
+                field.index(),
+                expected_kind,
+                actual_kind
+            );
+        }
     }
 }
