@@ -67,7 +67,16 @@ define_ops!(
     RETURN,
     CALL,
     RETURNDATASIZE,
-    RETURNDATACOPY
+    RETURNDATACOPY,
+    COINBASE,
+    TIMESTAMP,
+    NUMBER,
+    DIFFICULTY,
+    GASLIMIT,
+    CHAINID,
+    BASEFEE,
+    BLOBBASEFEE,
+    MSIZE
 );
 
 rom_tests! {
@@ -543,6 +552,76 @@ rom_tests! {
             stack_ptr: 4,
             jump_ptr: 6,
             stack: vec![stack_word(&[]), stack_word(&[0x01]), stack_word(&[0x02]), stack_word(&[0x07])],
+            ..Default::default()
+        },
+    },
+
+    block_info_opcodes_push_expected_values: Test {
+        roms: vec![bytecode![
+            NUMBER!(),
+            DIFFICULTY!(),
+            GASLIMIT!(),
+            TIMESTAMP!(),
+            BASEFEE!(),
+            BLOBBASEFEE!(),
+            CHAINID!(),
+            COINBASE!(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 8,
+            stack: vec![
+                stack_word(&[0x2A]),
+                stack_word(&[0x64]),
+                stack_word(&[0x64]),
+                stack_word(&[0xBD, 0xBE, 0x5C, 0x66]),
+                stack_word(&[0x40, 0x4B, 0x4C]),
+                stack_word(&[0x40, 0x42, 0x0F]),
+                stack_word(&[0x01]),
+                stack_word(&[0x01]),
+            ],
+            ..Default::default()
+        },
+    },
+
+    msize_tracks_memory_length: Test {
+        roms: vec![bytecode![
+            MSIZE!(),
+            PUSH1!(0x42),
+            PUSH1!(0x00),
+            MSTORE!(),
+            MSIZE!(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 2,
+            stack: vec![stack_word(&[]), stack_word(&[0x20])],
+            memory_len: Some(32),
+            ..Default::default()
+        },
+    },
+
+    call_propagates_block_info_to_subcontract: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x20),
+            PUSH1!(0x00),
+            PUSH1!(0x00),
+            PUSH1!(0x00),
+            PUSH1!(0x00),
+            PUSH20!(0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
+            PUSH1!(0x00),
+            CALL!(),
+            PUSH1!(0x00),
+            MLOAD!(),
+        ], bytecode![
+            NUMBER!(),
+            PUSH1!(0x00),
+            MSTORE!(),
+            PUSH1!(0x20),
+            PUSH1!(0x00),
+            RETURN!(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 2,
+            stack: vec![stack_word(&[0x00]), stack_word(&[0x2A])],
             ..Default::default()
         },
     },

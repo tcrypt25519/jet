@@ -3,7 +3,7 @@ use log::trace;
 
 use crate::{
     ADDRESS_SIZE_BYTES,
-    exec::{Context, ContractFunc, ReturnCode, jet_contract_fn_lookup},
+    exec::{BlockInfo, Context, ContractFunc, ReturnCode, jet_contract_fn_lookup},
 };
 
 // Contract calls
@@ -42,6 +42,7 @@ enum ContractCallError {
 /// - `-4`: Sub-context creation failed
 pub unsafe extern "C" fn jet_contract_call(
     ctx: *mut Context,
+    block_info: *const BlockInfo,
     jit_engine: *const ExecutionEngine,
     addr: *const u8,
     ret_dest: *const u32,
@@ -54,7 +55,7 @@ pub unsafe extern "C" fn jet_contract_call(
     let addr_slice = unsafe { std::slice::from_raw_parts(addr, ADDRESS_SIZE_BYTES) };
     let ret_dest = unsafe { *ret_dest };
     let ret_len = unsafe { *ret_len };
-    unsafe { jet_contract_call_impl(ctx, jit_engine, addr_slice, ret_dest, ret_len) }
+    unsafe { jet_contract_call_impl(ctx, block_info, jit_engine, addr_slice, ret_dest, ret_len) }
 }
 
 /// Calls a contract using value arguments instead of stack-word pointers.
@@ -68,6 +69,7 @@ pub unsafe extern "C" fn jet_contract_call(
 /// pointers. The caller must ensure both pointers are valid.
 pub unsafe extern "C" fn jet_contract_call_values(
     ctx: *mut Context,
+    block_info: *const BlockInfo,
     jit_engine: *const ExecutionEngine,
     addr_lo: u64,
     addr_mid: u64,
@@ -80,11 +82,12 @@ pub unsafe extern "C" fn jet_contract_call_values(
     addr[8..16].copy_from_slice(&addr_mid.to_le_bytes());
     addr[16..20].copy_from_slice(&addr_hi.to_le_bytes());
 
-    unsafe { jet_contract_call_impl(ctx, jit_engine, &addr, ret_dest, ret_len) }
+    unsafe { jet_contract_call_impl(ctx, block_info, jit_engine, &addr, ret_dest, ret_len) }
 }
 
 unsafe fn jet_contract_call_impl(
     ctx: *mut Context,
+    block_info: *const BlockInfo,
     jit_engine: *const ExecutionEngine,
     addr_slice: &[u8],
     ret_dest: u32,
@@ -116,7 +119,7 @@ unsafe fn jet_contract_call_impl(
 
     // Execute the contract function
     let contract_func: ContractFunc = unsafe { std::mem::transmute(fn_ptr) };
-    let result = unsafe { contract_func(callee_ctx) };
+    let result = unsafe { contract_func(callee_ctx, block_info) };
     if result != ReturnCode::ExplicitReturn && result != ReturnCode::ImplicitReturn {
         return ContractCallError::InvocationFailed as i8;
     }

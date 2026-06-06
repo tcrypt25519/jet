@@ -136,7 +136,7 @@ impl RuntimeStackBackend {
     ) -> Result<IntValue<'ctx>, Error> {
         let bit_width = value.get_type().get_bit_width();
         match bit_width {
-            1 | 8 | 32 => {
+            1 | 8 | 32 | 64 | 160 => {
                 Ok(bctx
                     .builder
                     .build_int_z_extend(value, bctx.env.types().i256, "int_to_word")?)
@@ -272,7 +272,7 @@ impl<'ctx> SymbolicStackBackend<'ctx> {
     ) -> Result<IntValue<'ctx>, Error> {
         let bit_width = value.get_type().get_bit_width();
         match bit_width {
-            1 | 8 | 32 => {
+            1 | 8 | 32 | 64 | 160 => {
                 Ok(bctx
                     .builder
                     .build_int_z_extend(value, bctx.env.types().i256, "int_to_word")?)

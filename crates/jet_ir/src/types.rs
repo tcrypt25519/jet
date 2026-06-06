@@ -59,7 +59,7 @@ pub struct Types<'ctx> {
     pub exec_ctx: StructType<'ctx>,
     /// The LLVM struct type for [`jet_runtime::exec::BlockInfo`].
     pub block_info: StructType<'ctx>,
-    /// The LLVM function type for a compiled contract: `fn(*const Context) -> i8`.
+    /// The LLVM function type for a compiled contract: `fn(*const Context, *const BlockInfo) -> i8`.
     pub contract_fn: FunctionType<'ctx>,
 }
 
@@ -120,18 +120,26 @@ impl<'ctx> Types<'ctx> {
             PACK_STRUCTS,
         );
 
+        let hash_history = word_bytes.array_type(
+            BLOCK_HASH_HISTORY_SIZE
+                .try_into()
+                .expect("block hash history size fits in u32"),
+        );
+        let address_bytes = i8.array_type(20);
+
         // Block information structure
         let block_info = context.struct_type(
             &[
-                i64.into(),  // timestamp
-                i64.into(),  // number
-                i64.into(),  // gaslimit
-                i64.into(),  // chainid
-                i64.into(),  // selfbalance
-                i64.into(),  // basefee
-                i64.into(),  // prevrandao
-                i256.into(), // difficulty
-                i160.into(), // coinbase
+                i64.into(),           // number
+                i64.into(),           // difficulty
+                i64.into(),           // gas_limit
+                i64.into(),           // timestamp
+                i64.into(),           // base_fee
+                i64.into(),           // blob_base_fee
+                i64.into(),           // chain_id
+                word_bytes.into(),    // hash
+                hash_history.into(),  // hash_history
+                address_bytes.into(), // coinbase
             ],
             PACK_STRUCTS,
         );

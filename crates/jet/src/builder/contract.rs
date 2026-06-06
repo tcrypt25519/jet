@@ -871,7 +871,17 @@ fn apply_abstract_instruction(
             stack.pop_n(7)?;
             stack.push_unknown()
         }
-        Instruction::RETURNDATASIZE | Instruction::BLOCKHASH => stack.push_unknown(),
+        Instruction::RETURNDATASIZE
+        | Instruction::BLOCKHASH
+        | Instruction::COINBASE
+        | Instruction::TIMESTAMP
+        | Instruction::NUMBER
+        | Instruction::DIFFICULTY
+        | Instruction::GASLIMIT
+        | Instruction::CHAINID
+        | Instruction::BASEFEE
+        | Instruction::BLOBBASEFEE
+        | Instruction::MSIZE => stack.push_unknown(),
         Instruction::RETURNDATACOPY => {
             stack.pop_n(3)?;
             Ok(())
@@ -922,19 +932,10 @@ fn apply_abstract_instruction(
         | Instruction::EXTCODESIZE
         | Instruction::EXTCODECOPY
         | Instruction::EXTCODEHASH
-        | Instruction::COINBASE
-        | Instruction::TIMESTAMP
-        | Instruction::NUMBER
-        | Instruction::DIFFICULTY
-        | Instruction::GASLIMIT
-        | Instruction::CHAINID
         | Instruction::SELFBALANCE
-        | Instruction::BASEFEE
         | Instruction::BLOBHASH
-        | Instruction::BLOBBASEFEE
         | Instruction::SLOAD
         | Instruction::SSTORE
-        | Instruction::MSIZE
         | Instruction::GAS
         | Instruction::TLOAD
         | Instruction::TSTORE
@@ -1401,10 +1402,19 @@ fn build_non_jump_instruction<'ctx, S: StackBackend<'ctx>>(
         Instruction::RETURNDATASIZE => ops::returndatasize(bctx),
         Instruction::RETURNDATACOPY => ops::returndatacopy(bctx),
         Instruction::BLOCKHASH => ops::blockhash(bctx),
+        Instruction::COINBASE => ops::coinbase(bctx),
+        Instruction::TIMESTAMP => ops::timestamp(bctx),
+        Instruction::NUMBER => ops::number(bctx),
+        Instruction::DIFFICULTY => ops::difficulty(bctx),
+        Instruction::GASLIMIT => ops::gaslimit(bctx),
+        Instruction::CHAINID => ops::chainid(bctx),
+        Instruction::BASEFEE => ops::basefee(bctx),
+        Instruction::BLOBBASEFEE => ops::blobbasefee(bctx),
         Instruction::POP => ops::pop(bctx),
         Instruction::MLOAD => ops::mload(bctx),
         Instruction::MSTORE => ops::mstore(bctx),
         Instruction::MSTORE8 => ops::mstore8(bctx),
+        Instruction::MSIZE => ops::msize(bctx),
         Instruction::PC => ops::pc(bctx, code_block.offset + pc),
         Instruction::CALL => ops::call(bctx),
         Instruction::RETURN => ops::_return(bctx),
@@ -1466,19 +1476,10 @@ fn build_non_jump_instruction<'ctx, S: StackBackend<'ctx>>(
         Instruction::EXTCODESIZE => Err(Error::UnimplementedInstruction(Instruction::EXTCODESIZE)),
         Instruction::EXTCODECOPY => Err(Error::UnimplementedInstruction(Instruction::EXTCODECOPY)),
         Instruction::EXTCODEHASH => Err(Error::UnimplementedInstruction(Instruction::EXTCODEHASH)),
-        Instruction::COINBASE => Err(Error::UnimplementedInstruction(Instruction::COINBASE)),
-        Instruction::TIMESTAMP => Err(Error::UnimplementedInstruction(Instruction::TIMESTAMP)),
-        Instruction::NUMBER => Err(Error::UnimplementedInstruction(Instruction::NUMBER)),
-        Instruction::DIFFICULTY => Err(Error::UnimplementedInstruction(Instruction::DIFFICULTY)),
-        Instruction::GASLIMIT => Err(Error::UnimplementedInstruction(Instruction::GASLIMIT)),
-        Instruction::CHAINID => Err(Error::UnimplementedInstruction(Instruction::CHAINID)),
         Instruction::SELFBALANCE => Err(Error::UnimplementedInstruction(Instruction::SELFBALANCE)),
-        Instruction::BASEFEE => Err(Error::UnimplementedInstruction(Instruction::BASEFEE)),
         Instruction::BLOBHASH => Err(Error::UnimplementedInstruction(Instruction::BLOBHASH)),
-        Instruction::BLOBBASEFEE => Err(Error::UnimplementedInstruction(Instruction::BLOBBASEFEE)),
         Instruction::SLOAD => Err(Error::UnimplementedInstruction(Instruction::SLOAD)),
         Instruction::SSTORE => Err(Error::UnimplementedInstruction(Instruction::SSTORE)),
-        Instruction::MSIZE => Err(Error::UnimplementedInstruction(Instruction::MSIZE)),
         Instruction::GAS => Err(Error::UnimplementedInstruction(Instruction::GAS)),
         Instruction::TLOAD => Err(Error::UnimplementedInstruction(Instruction::TLOAD)),
         Instruction::TSTORE => Err(Error::UnimplementedInstruction(Instruction::TSTORE)),

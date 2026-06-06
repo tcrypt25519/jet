@@ -91,7 +91,7 @@ impl<'ctx> Engine<'ctx> {
     pub fn run_contract(
         &self,
         addr: Address,
-        _block_info: &BlockInfo,
+        block_info: &BlockInfo,
     ) -> Result<ContractRun, Error> {
         // Create a JIT execution engine
         let jit = self
@@ -111,7 +111,8 @@ impl<'ctx> Engine<'ctx> {
 
         trace!("Running function...");
         let ctx = exec::Context::new().map_err(|e| Error::Build(builder::Error::Runtime(e)))?;
-        let result = unsafe { contract_exec_fn.call(&ctx as *const exec::Context) };
+        let result =
+            unsafe { contract_exec_fn.call(&ctx as *const exec::Context, block_info as *const _) };
         trace!("Function returned");
 
         Ok(ContractRun::new(result, ctx))

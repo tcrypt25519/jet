@@ -369,6 +369,54 @@ pub(crate) fn blockhash<'ctx, S: StackBackend<'ctx>>(
     block_info_hash(bctx)
 }
 
+pub(crate) fn coinbase<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<(), Error> {
+    push_block_info_i160_field(bctx, 9, "block_info_coinbase")
+}
+
+pub(crate) fn timestamp<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<(), Error> {
+    push_block_info_u64_field(bctx, 3, "block_info_timestamp")
+}
+
+pub(crate) fn number<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<(), Error> {
+    push_block_info_u64_field(bctx, 0, "block_info_number")
+}
+
+pub(crate) fn difficulty<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<(), Error> {
+    push_block_info_u64_field(bctx, 1, "block_info_difficulty")
+}
+
+pub(crate) fn gaslimit<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<(), Error> {
+    push_block_info_u64_field(bctx, 2, "block_info_gaslimit")
+}
+
+pub(crate) fn chainid<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<(), Error> {
+    push_block_info_u64_field(bctx, 6, "block_info_chainid")
+}
+
+pub(crate) fn basefee<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<(), Error> {
+    push_block_info_u64_field(bctx, 4, "block_info_basefee")
+}
+
+pub(crate) fn blobbasefee<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<(), Error> {
+    push_block_info_u64_field(bctx, 5, "block_info_blobbasefee")
+}
+
 pub(crate) fn pop<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
     let _ = bctx.stack.pop_word(bctx)?;
     Ok(())
@@ -455,6 +503,7 @@ pub(crate) fn call<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) ->
         bctx.env.symbols().contract_call_values(),
         &[
             bctx.registers.exec_ctx.into(),
+            bctx.registers.block_info.into(),
             jit_engine_ptr.into(),
             addr_lo.into(),
             addr_mid.into(),
@@ -497,6 +546,22 @@ pub(crate) fn selfdestruct<'ctx, S: StackBackend<'ctx>>(
     _bctx: &BuildCtx<'ctx, '_, S>,
 ) -> Result<(), Error> {
     Err(Error::UnimplementedInstruction(Instruction::SELFDESTRUCT))
+}
+
+pub(crate) fn msize<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<(), Error> {
+    let memory_len_ptr = bctx.builder.build_struct_gep(
+        bctx.env.types().exec_ctx,
+        bctx.registers.exec_ctx,
+        7,
+        "memory_len_ptr",
+    )?;
+    let memory_len = bctx
+        .builder
+        .build_load(bctx.env.types().i32, memory_len_ptr, "memory_len")?
+        .into_int_value();
+    bctx.stack.push_word(bctx, memory_len)
 }
 
 fn compare_2<'ctx, S: StackBackend<'ctx>>(
@@ -551,6 +616,42 @@ fn block_info_hash<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) ->
         .build_load(bctx.env.types().i256, hash_ptr, "block_info_hash")?
         .into_int_value();
     bctx.stack.push_word(bctx, hash)
+}
+
+fn push_block_info_u64_field<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+    field_index: u32,
+    name: &str,
+) -> Result<(), Error> {
+    let field_ptr = bctx.builder.build_struct_gep(
+        bctx.env.types().block_info,
+        bctx.registers.block_info,
+        field_index,
+        &format!("{name}_ptr"),
+    )?;
+    let field = bctx
+        .builder
+        .build_load(bctx.env.types().i64, field_ptr, name)?
+        .into_int_value();
+    bctx.stack.push_word(bctx, field)
+}
+
+fn push_block_info_i160_field<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+    field_index: u32,
+    name: &str,
+) -> Result<(), Error> {
+    let field_ptr = bctx.builder.build_struct_gep(
+        bctx.env.types().block_info,
+        bctx.registers.block_info,
+        field_index,
+        &format!("{name}_ptr"),
+    )?;
+    let field = bctx
+        .builder
+        .build_load(bctx.env.types().i160, field_ptr, name)?
+        .into_int_value();
+    bctx.stack.push_word(bctx, field)
 }
 
 fn build_zero_guarded_value<'ctx, S, F>(
