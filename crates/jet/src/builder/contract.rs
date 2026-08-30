@@ -12,7 +12,7 @@ use jet_runtime::exec::ReturnCode;
 use crate::{
     builder::{
         Error, InvalidOpcode,
-        env::Env,
+        env::{Env, StackMode},
         ops,
         stack::{RuntimeStackBackend, StackBackend, SymbolicStackBackend},
         symbolic::{StackValue, SymbolicStack},
@@ -64,27 +64,6 @@ impl<'ctx> Registers<'ctx> {
             return_offset,
             return_length,
             sub_call,
-        }
-    }
-}
-
-pub(crate) enum StackMode {
-    RuntimeOnly,
-    SymbolicPreferred,
-}
-
-impl StackMode {
-    fn from_env() -> Self {
-        match std::env::var("JET_SYMBOLIC_STACK") {
-            Ok(value) => {
-                let enabled = matches!(value.as_str(), "1" | "true" | "TRUE" | "True");
-                if enabled {
-                    StackMode::SymbolicPreferred
-                } else {
-                    StackMode::RuntimeOnly
-                }
-            }
-            Err(_) => StackMode::RuntimeOnly,
         }
     }
 }
@@ -219,7 +198,7 @@ impl<'ctx, 'b> CodeBlocks<'ctx, 'b> {
 }
 
 pub fn build(env: &'_ Env<'_>, name: &str, rom: &[u8]) -> Result<(), Error> {
-    match StackMode::from_env() {
+    match env.opts().stack_mode() {
         StackMode::RuntimeOnly => build_with_stack(env, name, rom, RuntimeStackBackend),
         StackMode::SymbolicPreferred => build_with_symbolic_stack(env, name, rom),
     }

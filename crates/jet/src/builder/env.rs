@@ -18,6 +18,7 @@ pub struct Options {
     mode: Mode,
     emit_llvm: bool,
     assert: bool,
+    stack_mode: StackMode,
 }
 
 impl Options {
@@ -30,17 +31,32 @@ impl Options {
     ///   after each contract is compiled.
     /// - `assert` — When `true`, the LLVM IR is verified after each contract
     ///   is compiled, returning an error if verification fails.
+    ///
+    /// The stack mode defaults to [`StackMode::RuntimeOnly`]; use
+    /// [`Options::with_stack_mode`] to select symbolic lowering.
     pub fn new(mode: Mode, emit_llvm: bool, assert: bool) -> Self {
         Self {
             mode,
             emit_llvm,
             assert,
+            stack_mode: StackMode::default(),
         }
+    }
+
+    /// Returns a copy of these options with the given stack mode.
+    pub fn with_stack_mode(mut self, stack_mode: StackMode) -> Self {
+        self.stack_mode = stack_mode;
+        self
     }
 
     /// Returns the compilation mode.
     pub fn mode(&self) -> Mode {
         self.mode.clone()
+    }
+
+    /// Returns the stack lowering mode.
+    pub fn stack_mode(&self) -> StackMode {
+        self.stack_mode.clone()
     }
 
     /// Returns `true` if the generated LLVM IR should be printed to stdout.
@@ -74,6 +90,17 @@ impl FromStr for Mode {
             _ => Err(()),
         }
     }
+}
+
+/// Stack lowering mode selecting how EVM stack operations are compiled.
+#[derive(clap::ValueEnum, serde::Serialize, Clone, Debug, Default, PartialEq, Eq)]
+pub enum StackMode {
+    /// Keep the EVM operand stack in the runtime `Context` through builtin
+    /// calls.
+    #[default]
+    RuntimeOnly,
+    /// Track stack slots as LLVM SSA values during IR construction.
+    SymbolicPreferred,
 }
 
 pub(crate) struct Symbols<'ctx> {

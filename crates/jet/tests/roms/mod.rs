@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use jet::{
     builder,
-    builder::env::{Mode::Debug, Options},
+    builder::env::{Mode::Debug, Options, StackMode},
     engine,
     engine::Engine,
 };
@@ -26,7 +26,13 @@ macro_rules! rom_tests {
                 #[test]
                 fn [<test_rom_with_real_stack_ $name>]() -> Result<(), Error> {
                     let t: Test = $test;
-                    _test_rom_body(t)
+                    _test_rom_body(t, jet::builder::env::StackMode::RuntimeOnly)
+                }
+
+                #[test]
+                fn [<test_rom_with_symbolic_stack_ $name>]() -> Result<(), Error> {
+                    let t: Test = $test;
+                    _test_rom_body(t, jet::builder::env::StackMode::SymbolicPreferred)
                 }
             }
         )*
@@ -91,9 +97,9 @@ impl TestContractRun {
     }
 }
 
-pub(crate) fn _test_rom_body(t: Test) -> Result<(), Error> {
+pub(crate) fn _test_rom_body(t: Test, stack_mode: StackMode) -> Result<(), Error> {
     let llvm_ctx = Context::create();
-    let opts = Options::new(Debug, false, true);
+    let opts = Options::new(Debug, false, true).with_stack_mode(stack_mode);
     let block_info = new_test_block_info();
 
     let mut engine = Engine::new(&llvm_ctx, opts)?;
