@@ -28,11 +28,8 @@ pub(crate) fn push<'ctx, S: StackBackend<'ctx>>(
     bytes: [u8; 32],
 ) -> Result<(), Error> {
     let mut limbs = [0u64; 4];
-    for (i, chunk) in bytes.chunks_exact(8).enumerate() {
-        let chunk: [u8; 8] = chunk
-            .try_into()
-            .map_err(|_| Error::invariant_violation("invalid PUSH limb width"))?;
-        limbs[i] = u64::from_le_bytes(chunk);
+    for (i, chunk) in bytes.as_chunks::<8>().0.iter().enumerate() {
+        limbs[i] = u64::from_le_bytes(*chunk);
     }
     let value = bctx.env.types().i256.const_int_arbitrary_precision(&limbs);
     let known_u64 = limbs[1..].iter().all(|limb| *limb == 0).then_some(limbs[0]);
