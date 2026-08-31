@@ -256,6 +256,10 @@ impl<'ctx> SymbolicStackBackend<'ctx> {
         self.stack.borrow().clone()
     }
 
+    pub(crate) fn len(&self) -> usize {
+        self.stack.borrow().len()
+    }
+
     pub(crate) fn restore(&self, stack: SymbolicStack<'ctx>) {
         *self.stack.borrow_mut() = stack;
     }

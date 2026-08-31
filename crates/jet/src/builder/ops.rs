@@ -26,13 +26,17 @@ pub(crate) fn build_return<'ctx, S: StackBackend<'ctx>>(
 pub(crate) fn push<'ctx, S: StackBackend<'ctx>>(
     bctx: &BuildCtx<'ctx, '_, S>,
     bytes: [u8; 32],
+    known_u64: Option<u64>,
 ) -> Result<(), Error> {
     let mut limbs = [0u64; 4];
     for (i, chunk) in bytes.as_chunks::<8>().0.iter().enumerate() {
         limbs[i] = u64::from_le_bytes(*chunk);
     }
+    debug_assert_eq!(
+        known_u64,
+        limbs[1..].iter().all(|limb| *limb == 0).then_some(limbs[0])
+    );
     let value = bctx.env.types().i256.const_int_arbitrary_precision(&limbs);
-    let known_u64 = limbs[1..].iter().all(|limb| *limb == 0).then_some(limbs[0]);
     bctx.stack.push_word_with_known_u64(bctx, value, known_u64)
 }
 

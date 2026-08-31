@@ -594,6 +594,7 @@ fn fault_outcome(
 struct SymbolicAnalysis {
     entries: HashMap<usize, Vec<AbstractStackState>>,
     faults: HashMap<(usize, usize), PlannedFault>,
+    exit_heights: HashMap<(usize, usize), usize>,
 }
 
 type SymbolicVariantId = usize;
@@ -604,6 +605,7 @@ struct SymbolicBlockVariant<'ctx> {
     entry_block: BasicBlock<'ctx>,
     entry_phis: Vec<PhiValue<'ctx>>,
     fault: Option<PlannedFault>,
+    exit_height: Option<usize>,
 }
 
 impl<'ctx> SymbolicBlockVariant<'ctx> {
@@ -678,6 +680,10 @@ fn build_symbolic_plan<'ctx>(
             };
             let variant_id = variants.len();
             let fault = analysis.faults.get(&(block_index, state.len())).copied();
+            let exit_height = analysis
+                .exit_heights
+                .get(&(block_index, state.len()))
+                .copied();
             by_block_height.insert((block_index, state.len()), variant_id);
             variants.push(SymbolicBlockVariant {
                 block_index,
@@ -685,6 +691,7 @@ fn build_symbolic_plan<'ctx>(
                 entry_block,
                 entry_phis: Vec::new(),
                 fault,
+                exit_height,
             });
         }
     }
@@ -716,12 +723,16 @@ fn analyze_symbolic_entries(code_blocks: &CodeBlocks<'_, '_>) -> Result<Symbolic
     add_symbolic_entry_state(&mut entries, 0, AbstractStackState::new())?;
     queue.push_back(0);
 
+    let mut exit_heights: HashMap<(usize, usize), usize> = HashMap::new();
     while let Some(block_index) = queue.pop_front() {
         let states = entries.get(&block_index).cloned().unwrap_or_default();
         for state in states {
             let entry_height = state.len();
             match analyze_symbolic_successors(code_blocks, block_index, state)? {
                 AbstractBlockOutcome::Successors(successors) => {
+                    if let Some(first) = successors.first() {
+                        exit_heights.insert((block_index, entry_height), first.stack.len());
+                    }
                     for successor in successors {
                         if add_symbolic_entry_state(
                             &mut entries,
@@ -739,7 +750,11 @@ fn analyze_symbolic_entries(code_blocks: &CodeBlocks<'_, '_>) -> Result<Symbolic
         }
     }
 
-    Ok(SymbolicAnalysis { entries, faults })
+    Ok(SymbolicAnalysis {
+        entries,
+        faults,
+        exit_heights,
+    })
 }
 
 fn add_symbolic_entry_state(
@@ -875,13 +890,18 @@ fn symbolic_jump_successors(
         .collect()
 }
 
+/// The one rule for when a push constant is compile-time known: the value
+/// fits in a u64. Both the planner and the emitter must call this so their
+/// `known_u64` metadata never diverges; a divergence would make emission
+/// branch to variants the planner did not create.
 fn push_data_known_u64(data: &[u8]) -> Option<u64> {
-    if data.len() > 8 {
+    let (high, low) = data.split_at(data.len().saturating_sub(8));
+    if high.iter().any(|byte| *byte != 0) {
         return None;
     }
 
     let mut value = 0u64;
-    for byte in data {
+    for byte in low {
         value = (value << 8) | u64::from(*byte);
     }
     Some(value)
@@ -1096,14 +1116,21 @@ fn build_symbolic_contract_body<'ctx>(
 
         build_symbolic_code_block(bctx, variant.block_index, code_block, code_blocks, plan)?;
 
+        if let Some(exit_height) = variant.exit_height {
+            debug_assert_eq!(
+                bctx.stack.len(),
+                exit_height,
+                "planned and emitted stack heights diverge at block exit"
+            );
+        }
+
         if code_block.terminates() {
             continue;
         }
 
         match code_blocks.following_index(variant.block_index) {
             Some(following_index) => {
-                let target =
-                    plan.variant_for_stack_len(following_index, bctx.stack.snapshot().len())?;
+                let target = plan.variant_for_stack_len(following_index, bctx.stack.len())?;
                 record_symbolic_variant_incoming(bctx, plan, target)?;
                 bctx.builder
                     .build_unconditional_branch(plan.variants[target].entry_block)?;
@@ -1187,7 +1214,7 @@ fn build_push_data<'ctx, S: StackBackend<'ctx>>(
     let mut new_data = [0u8; 32];
     new_data[..data.len()].copy_from_slice(data);
     new_data[..data.len()].reverse();
-    ops::push(bctx, new_data)
+    ops::push(bctx, new_data, push_data_known_u64(data))
 }
 
 /// Emits a block variant that abstract interpretation proved always faults.
@@ -1221,7 +1248,7 @@ fn build_symbolic_fault_exit<'ctx>(
         }
     }
 
-    let height = bctx.stack.snapshot().len();
+    let height = bctx.stack.len();
     let excess = height
         .checked_sub(fault.fault_height)
         .ok_or_else(|| Error::invariant_violation("symbolic stack below planned fault height"))?;
@@ -1282,8 +1309,7 @@ fn build_symbolic_jump<'ctx>(
     match target_pc {
         Some(pc) => match code_blocks.jumpdest_index(pc) {
             Some(block_index) => {
-                let target =
-                    plan.variant_for_stack_len(block_index, bctx.stack.snapshot().len())?;
+                let target = plan.variant_for_stack_len(block_index, bctx.stack.len())?;
                 record_symbolic_variant_incoming(bctx, plan, target)?;
                 bctx.builder
                     .build_unconditional_branch(plan.variants[target].entry_block)?;
@@ -1320,12 +1346,11 @@ fn build_symbolic_jumpi<'ctx>(
         "jumpi_cmp",
     )?;
 
-    let following = plan.variant_for_stack_len(following_index, bctx.stack.snapshot().len())?;
+    let following = plan.variant_for_stack_len(following_index, bctx.stack.len())?;
     match target_pc {
         Some(pc) => match code_blocks.jumpdest_index(pc) {
             Some(block_index) => {
-                let target =
-                    plan.variant_for_stack_len(block_index, bctx.stack.snapshot().len())?;
+                let target = plan.variant_for_stack_len(block_index, bctx.stack.len())?;
                 record_symbolic_variant_incoming(bctx, plan, following)?;
                 record_symbolic_variant_incoming(bctx, plan, target)?;
                 bctx.builder.build_conditional_branch(
@@ -1409,7 +1434,7 @@ fn build_symbolic_dynamic_jump_switch_from_current_block<'ctx>(
         .ok_or_else(|| Error::invariant_violation("missing current block for dynamic jump"))?;
     let jump_failure_block = build_jump_failure_block(bctx)?;
     bctx.builder.position_at_end(switch_block);
-    let stack_len = bctx.stack.snapshot().len();
+    let stack_len = bctx.stack.len();
     let jump_cases = symbolic_jump_cases(bctx, code_blocks, plan, switch_block, stack_len)?;
 
     if jump_cases.is_empty() {
