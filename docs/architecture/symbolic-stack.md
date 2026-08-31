@@ -14,8 +14,10 @@ Jet currently has two stack backends:
   construction.
 
 These are alternative compilation modes, not two live stacks that run together.
-Runtime mode should continue to work while symbolic mode grows toward full
-register/SSA lowering.
+The mode is selected per compilation session through
+`builder::env::Options::with_stack_mode`. Runtime mode is both the default and
+the automatic fallback when symbolic planning exceeds its size limits, so it
+must keep working for every contract.
 
 ## Stack Values
 
@@ -26,8 +28,9 @@ The symbolic stack stores `StackValue::Word` entries. Each entry contains:
 
 `known_u64` is not a separate semantic value. It is a compile-time fact about
 the same EVM word, used when the compiler needs a small literal value without
-trying to recover it from LLVM. It is currently produced for small `PUSH` values
-and by `PC`.
+trying to recover it from LLVM. It is produced for any `PUSH` whose value fits
+in a u64 and by `PC`. One function, `push_data_known_u64`, is the single
+source of this metadata for push data in both the planner and the emitters.
 
 The metadata is deliberately named as a known integer, not as a program counter.
 Most static EVM jump targets are produced by `PUSH`, not by the `PC` opcode. A
@@ -74,7 +77,20 @@ states for the same block and height disagree on a known literal, that slot's
 metadata is dropped to `None`; the LLVM value is still represented by the entry
 phi. When the same bytecode block is reached with different stack heights, the
 planner creates distinct block variants so each variant has one stable symbolic
-entry shape.
+entry height.
+
+Stack faults the analysis proves (underflow or overflow along a statically
+reachable path) never abort compilation, because static reachability does not
+imply runtime reachability. The faulting variant is planned as a fault exit:
+emission runs the instructions before the fault for their side effects, trims
+the stack to the fault height, materializes it, and returns `StackUnderflow`
+or `StackOverflow`. This matches what the runtime backend's checked pops make
+observable.
+
+Planning is bounded: at most 64 entry states per block and 4096 in total.
+Bytecode that exceeds the caps, such as a loop with net stack growth, is
+compiled with the runtime stack backend instead. The fallback reuses the same
+function and code blocks and is logged at info level.
 
 ## Symbolic Emission
 
@@ -105,22 +121,33 @@ an invalid return so LLVM never sees an unterminated block. Reachable variants
 use normal EVM return codes and materialize the symbolic stack into
 `Context.stack` only at contract exits.
 
+## Jump Target Width
+
+Jump targets are 256-bit words but dispatch is over i32. Both backends narrow
+targets through a shared helper that maps any value above `u32::MAX` to a
+`u32::MAX` sentinel, which no jumpdest pc can occupy, so wide targets fail the
+jump instead of wrapping onto a real jumpdest.
+
 ## Current Limits
 
-The symbolic path now handles fixed-point stack-shape planning, backedges, and
-same-bytecode block specialization by stack height. The remaining correctness
-work is less about whether stack values can cross CFG edges and more about
-expanding the compiler's opcode surface and making dynamic jumps more precise.
+The symbolic path handles fixed-point stack planning, backedges, same-bytecode
+block specialization by stack height, planned fault exits, and bounded plan
+size with runtime fallback. Every rom test runs in both modes, so the runtime
+backend serves as a differential oracle. The remaining work is expanding the
+compiler's opcode surface and making dynamic jumps more precise.
 
 The current implementation covers:
 
-- static `JUMP` targets;
-- static `JUMPI` targets;
+- static `JUMP` and `JUMPI` targets, including invalid targets;
 - dynamic `JUMP` and `JUMPI` targets through conservative switches;
 - same-height joins through LLVM phi nodes;
 - loop/backedge stack values through pre-created entry phis;
 - different-height joins through specialized block variants;
-- runtime stack mode preserved as its own backend.
+- planned stack fault exits matching runtime backend behavior;
+- bounded planning with automatic runtime backend fallback.
 
-The runtime backend remains useful as an oracle during development. It is not
-the intended long-term fallback for valid EVM programs.
+Contract exits, planned fault exits, and jump failures all materialize the
+symbolic stack into `Context.stack`, so the observable execution context is
+identical between backends for every path the runtime backend can execute
+safely. The runtime backend's own gaps (no bounds checks on push, peek, or
+swap) are tracked in the completion plan as D9.
