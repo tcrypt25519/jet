@@ -204,6 +204,13 @@ pub fn build(env: &'_ Env<'_>, name: &str, rom: &[u8]) -> Result<(), Error> {
     }
 }
 
+/// Planning size limits. A plan that exceeds them compiles with the runtime
+/// stack backend instead, keeping compile time bounded for bytecode whose
+/// height-specialized CFG would explode (net-growth loops, dense dynamic
+/// jumps).
+const MAX_SYMBOLIC_VARIANTS_PER_BLOCK: usize = 64;
+const MAX_SYMBOLIC_VARIANTS_TOTAL: usize = 4096;
+
 fn build_with_symbolic_stack<'ctx>(
     env: &'_ Env<'ctx>,
     name: &str,
@@ -225,15 +232,33 @@ fn build_with_symbolic_stack<'ctx>(
     let preamble_block = env.context().append_basic_block(func, "preamble");
     builder.position_at_end(preamble_block);
 
-    let bctx = BuildCtx::new(env, &builder, func, SymbolicStackBackend::new());
     let code_blocks = find_code_blocks(env, func, rom)?;
-    let mut plan = build_symbolic_plan(env, func, &code_blocks)?;
-    create_symbolic_entry_phis(&bctx, &mut plan)?;
-    build_symbolic_contract_body(&bctx, &code_blocks, &plan)?;
+    match build_symbolic_plan(env, func, &code_blocks)? {
+        Some(mut plan) => {
+            let bctx = BuildCtx::new(env, &builder, func, SymbolicStackBackend::new());
+            create_symbolic_entry_phis(&bctx, &mut plan)?;
+            build_symbolic_contract_body(&bctx, &code_blocks, &plan)?;
 
-    bctx.builder.position_at_end(preamble_block);
-    bctx.builder
-        .build_unconditional_branch(plan.entry_block())?;
+            bctx.builder.position_at_end(preamble_block);
+            bctx.builder
+                .build_unconditional_branch(plan.entry_block())?;
+        }
+        None => {
+            info!(
+                "Symbolic plan for {} exceeds size limits; using the runtime stack backend",
+                name
+            );
+            let bctx = BuildCtx::new(env, &builder, func, RuntimeStackBackend);
+            build_contract_body(&bctx, &code_blocks)?;
+
+            let entry_block = code_blocks
+                .first()
+                .ok_or_else(|| Error::InvariantViolation("No code blocks found".to_string()))?;
+            bctx.builder.position_at_end(preamble_block);
+            bctx.builder
+                .build_unconditional_branch(entry_block.entry_block)?;
+        }
+    }
     Ok(())
 }
 
@@ -664,12 +689,16 @@ impl<'ctx> SymbolicPlan<'ctx> {
     }
 }
 
+/// Returns `None` when the plan would exceed the variant size limits; the
+/// caller falls back to the runtime stack backend.
 fn build_symbolic_plan<'ctx>(
     env: &Env<'ctx>,
     func: FunctionValue<'ctx>,
     code_blocks: &CodeBlocks<'ctx, '_>,
-) -> Result<SymbolicPlan<'ctx>, Error> {
-    let analysis = analyze_symbolic_entries(code_blocks)?;
+) -> Result<Option<SymbolicPlan<'ctx>>, Error> {
+    let Some(analysis) = analyze_symbolic_entries(code_blocks)? else {
+        return Ok(None);
+    };
     let mut variants = Vec::new();
     let mut by_block_height = HashMap::new();
     let mut original_blocks_used = HashSet::new();
@@ -713,18 +742,23 @@ fn build_symbolic_plan<'ctx>(
         .copied()
         .ok_or_else(|| Error::invariant_violation("missing symbolic entry variant"))?;
 
-    Ok(SymbolicPlan {
+    Ok(Some(SymbolicPlan {
         variants,
         by_block_height,
         entry_variant,
         original_blocks_used,
-    })
+    }))
 }
 
-fn analyze_symbolic_entries(code_blocks: &CodeBlocks<'_, '_>) -> Result<SymbolicAnalysis, Error> {
+/// Returns `None` when the number of `(block, height)` states exceeds the
+/// planning limits.
+fn analyze_symbolic_entries(
+    code_blocks: &CodeBlocks<'_, '_>,
+) -> Result<Option<SymbolicAnalysis>, Error> {
     let mut entries: HashMap<usize, Vec<AbstractStackState>> = HashMap::new();
     let mut faults: HashMap<(usize, usize), PlannedFault> = HashMap::new();
     let mut queue = VecDeque::new();
+    let mut total_states = 0usize;
 
     if code_blocks.first().is_none() {
         return Err(Error::InvariantViolation(
@@ -733,6 +767,7 @@ fn analyze_symbolic_entries(code_blocks: &CodeBlocks<'_, '_>) -> Result<Symbolic
     }
 
     add_symbolic_entry_state(&mut entries, 0, AbstractStackState::new())?;
+    total_states += 1;
     queue.push_back(0);
 
     let mut exit_heights: HashMap<(usize, usize), usize> = HashMap::new();
@@ -746,11 +781,23 @@ fn analyze_symbolic_entries(code_blocks: &CodeBlocks<'_, '_>) -> Result<Symbolic
                         exit_heights.insert((block_index, entry_height), first.stack.len());
                     }
                     for successor in successors {
+                        let block_states_before =
+                            entries.get(&successor.block_index).map_or(0, Vec::len);
                         if add_symbolic_entry_state(
                             &mut entries,
                             successor.block_index,
                             successor.stack,
                         )? {
+                            let block_states =
+                                entries.get(&successor.block_index).map_or(0, Vec::len);
+                            if block_states > block_states_before {
+                                total_states += 1;
+                                if block_states > MAX_SYMBOLIC_VARIANTS_PER_BLOCK
+                                    || total_states > MAX_SYMBOLIC_VARIANTS_TOTAL
+                                {
+                                    return Ok(None);
+                                }
+                            }
                             queue.push_back(successor.block_index);
                         }
                     }
@@ -762,11 +809,11 @@ fn analyze_symbolic_entries(code_blocks: &CodeBlocks<'_, '_>) -> Result<Symbolic
         }
     }
 
-    Ok(SymbolicAnalysis {
+    Ok(Some(SymbolicAnalysis {
         entries,
         faults,
         exit_heights,
-    })
+    }))
 }
 
 fn add_symbolic_entry_state(
@@ -1774,4 +1821,52 @@ fn build_jump_table<'ctx, S: StackBackend<'ctx>>(
         jump_cases,
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use inkwell::context::Context;
+
+    use jet_runtime::RuntimeBuilder;
+
+    use super::*;
+    use crate::builder::env::{Mode, Options};
+
+    fn with_env<F: for<'ctx> FnOnce(&Env<'ctx>, FunctionValue<'ctx>)>(f: F) {
+        let context = Context::create();
+        let module = RuntimeBuilder::new(&context, "test").build();
+        let env = Env::new(&context, module, Options::new(Mode::Debug, false, true)).unwrap();
+        let func = env
+            .module()
+            .add_function("test_contract", env.types().contract_fn, None);
+        f(&env, func);
+    }
+
+    // PUSH1 5; JUMPDEST; DUP1; ISZERO; PUSH1 18; JUMPI; PUSH1 42; SWAP1;
+    // PUSH1 1; SWAP1; SUB; PUSH1 2; JUMP; JUMPDEST; STOP
+    // Each iteration leaves one extra word on the stack, so the loop head
+    // accumulates one entry state per height.
+    const NET_GROWTH_LOOP: [u8; 20] = [
+        0x60, 0x05, 0x5B, 0x80, 0x15, 0x60, 0x12, 0x57, 0x60, 0x2A, 0x90, 0x60, 0x01, 0x90, 0x03,
+        0x60, 0x02, 0x56, 0x5B, 0x00,
+    ];
+
+    #[test]
+    fn net_growth_loop_exceeds_plan_limits() {
+        with_env(|env, func| {
+            let code_blocks = find_code_blocks(env, func, &NET_GROWTH_LOOP).unwrap();
+            let plan = build_symbolic_plan(env, func, &code_blocks).unwrap();
+            assert!(plan.is_none());
+        });
+    }
+
+    #[test]
+    fn bounded_rom_stays_within_plan_limits() {
+        with_env(|env, func| {
+            let rom = [0x60, 0x01, 0x00]; // PUSH1 1; STOP
+            let code_blocks = find_code_blocks(env, func, &rom).unwrap();
+            let plan = build_symbolic_plan(env, func, &code_blocks).unwrap();
+            assert!(plan.is_some());
+        });
+    }
 }

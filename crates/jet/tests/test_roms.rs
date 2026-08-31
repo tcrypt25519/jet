@@ -2149,6 +2149,45 @@ rom_tests! {
     },
 }
 
+// A loop that leaves one extra word on the stack per iteration. The planner
+// would need one variant per height at the loop head, so symbolic mode falls
+// back to the runtime backend and must still produce identical results.
+rom_tests! {
+    net_growth_loop_compiles_and_runs: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x05),
+            JUMPDEST!(),
+            DUP1!(),
+            ISZERO!(),
+            PUSH1!(0x12),
+            JUMPI!(),
+            PUSH1!(0x2A),
+            SWAP1!(),
+            PUSH1!(0x01),
+            SWAP1!(),
+            SUB!(),
+            PUSH1!(0x02),
+            JUMP!(),
+            JUMPDEST!(),
+            STOP!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::Stop,
+            jump_ptr: 18,
+            stack_ptr: 6,
+            stack: vec![
+                stack_word(&[42]),
+                stack_word(&[42]),
+                stack_word(&[42]),
+                stack_word(&[42]),
+                stack_word(&[42]),
+                stack_word(&[0]),
+            ],
+            ..Default::default()
+        },
+    },
+}
+
 // Symbolic-only fault tests. The runtime backend has no bounds checks on
 // push, peek, or swap, so these roms are memory-unsafe under it.
 #[test]
