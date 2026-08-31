@@ -430,6 +430,53 @@ fn build_contract_body<'ctx, 'b, S: StackBackend<'ctx>>(
     Ok(())
 }
 
+/// An EVM stack fault that abstract interpretation proved will occur on every
+/// execution reaching it. Faults lower to runtime failure returns, never to
+/// compile errors, because static reachability does not imply runtime
+/// reachability.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StackFault {
+    Underflow,
+    Overflow,
+}
+
+impl StackFault {
+    fn return_code(self) -> ReturnCode {
+        match self {
+            StackFault::Underflow => ReturnCode::StackUnderflow,
+            StackFault::Overflow => ReturnCode::StackOverflow,
+        }
+    }
+}
+
+/// A fault planned for one block variant: every execution entering the block
+/// at the variant's stack height faults at `rel_pc`, with `fault_height` words
+/// still on the stack (pops that succeeded within the faulting instruction are
+/// consumed, matching the runtime backend's observable state).
+#[derive(Clone, Copy, Debug)]
+struct PlannedFault {
+    kind: StackFault,
+    rel_pc: usize,
+    fault_height: usize,
+}
+
+enum AbstractError {
+    Fault(StackFault),
+    Build(Error),
+}
+
+impl From<StackFault> for AbstractError {
+    fn from(fault: StackFault) -> Self {
+        AbstractError::Fault(fault)
+    }
+}
+
+impl From<Error> for AbstractError {
+    fn from(e: Error) -> Self {
+        AbstractError::Build(e)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct AbstractStackSlot {
     known_u64: Option<u64>,
@@ -449,70 +496,57 @@ impl AbstractStackState {
         self.slots.len()
     }
 
-    fn push_unknown(&mut self) -> Result<(), Error> {
+    fn push_unknown(&mut self) -> Result<(), StackFault> {
         self.push(AbstractStackSlot { known_u64: None })
     }
 
-    fn push_known(&mut self, known_u64: Option<u64>) -> Result<(), Error> {
+    fn push_known(&mut self, known_u64: Option<u64>) -> Result<(), StackFault> {
         self.push(AbstractStackSlot { known_u64 })
     }
 
-    fn push(&mut self, slot: AbstractStackSlot) -> Result<(), Error> {
+    fn push(&mut self, slot: AbstractStackSlot) -> Result<(), StackFault> {
         if self.slots.len() >= STACK_SIZE_WORDS as usize {
-            return Err(Error::invariant_violation("symbolic stack overflow"));
+            return Err(StackFault::Overflow);
         }
         self.slots.push(slot);
         Ok(())
     }
 
-    fn pop(&mut self) -> Result<AbstractStackSlot, Error> {
-        self.slots
-            .pop()
-            .ok_or_else(|| Error::invariant_violation("symbolic stack underflow"))
+    fn pop(&mut self) -> Result<AbstractStackSlot, StackFault> {
+        self.slots.pop().ok_or(StackFault::Underflow)
     }
 
-    fn pop_n(&mut self, n: usize) -> Result<(), Error> {
+    fn pop_n(&mut self, n: usize) -> Result<(), StackFault> {
         for _ in 0..n {
             self.pop()?;
         }
         Ok(())
     }
 
-    fn peek_known_u64(&self, depth_from_top: usize) -> Result<Option<u64>, Error> {
+    fn peek_known_u64(&self, depth_from_top: usize) -> Result<Option<u64>, StackFault> {
         if depth_from_top >= self.slots.len() {
-            return Err(Error::invariant_violation(
-                "symbolic stack peek out of bounds",
-            ));
+            return Err(StackFault::Underflow);
         }
         Ok(self.slots[self.slots.len() - 1 - depth_from_top].known_u64)
     }
 
-    fn dup(&mut self, index_1_based: u8) -> Result<(), Error> {
-        if index_1_based == 0 {
-            return Err(Error::invariant_violation("dup index must be >= 1"));
-        }
+    fn dup(&mut self, index_1_based: u8) -> Result<(), StackFault> {
+        debug_assert!(index_1_based >= 1);
         let depth = (index_1_based - 1) as usize;
         if depth >= self.slots.len() {
-            return Err(Error::invariant_violation(
-                "symbolic stack peek out of bounds",
-            ));
+            return Err(StackFault::Underflow);
         }
         let slot = self.slots[self.slots.len() - 1 - depth].clone();
         self.push(slot)
     }
 
-    fn swap(&mut self, index_1_based: u8) -> Result<(), Error> {
-        if index_1_based == 0 {
-            return Err(Error::invariant_violation("swap index must be >= 1"));
-        }
-
+    fn swap(&mut self, index_1_based: u8) -> Result<(), StackFault> {
+        debug_assert!(index_1_based >= 1);
         let len = self.slots.len();
-        let top_idx = len
-            .checked_sub(1)
-            .ok_or_else(|| Error::invariant_violation("symbolic stack underflow"))?;
+        let top_idx = len.checked_sub(1).ok_or(StackFault::Underflow)?;
         let swap_idx = len
             .checked_sub(index_1_based as usize + 1)
-            .ok_or_else(|| Error::invariant_violation("symbolic stack swap out of bounds"))?;
+            .ok_or(StackFault::Underflow)?;
         self.slots.swap(top_idx, swap_idx);
         Ok(())
     }
@@ -540,6 +574,28 @@ struct AbstractSuccessor {
     stack: AbstractStackState,
 }
 
+enum AbstractBlockOutcome {
+    Successors(Vec<AbstractSuccessor>),
+    Fault(PlannedFault),
+}
+
+fn fault_outcome(
+    kind: StackFault,
+    rel_pc: usize,
+    state: &AbstractStackState,
+) -> AbstractBlockOutcome {
+    AbstractBlockOutcome::Fault(PlannedFault {
+        kind,
+        rel_pc,
+        fault_height: state.len(),
+    })
+}
+
+struct SymbolicAnalysis {
+    entries: HashMap<usize, Vec<AbstractStackState>>,
+    faults: HashMap<(usize, usize), PlannedFault>,
+}
+
 type SymbolicVariantId = usize;
 
 struct SymbolicBlockVariant<'ctx> {
@@ -547,6 +603,7 @@ struct SymbolicBlockVariant<'ctx> {
     entry_state: AbstractStackState,
     entry_block: BasicBlock<'ctx>,
     entry_phis: Vec<PhiValue<'ctx>>,
+    fault: Option<PlannedFault>,
 }
 
 impl<'ctx> SymbolicBlockVariant<'ctx> {
@@ -598,13 +655,13 @@ fn build_symbolic_plan<'ctx>(
     func: FunctionValue<'ctx>,
     code_blocks: &CodeBlocks<'ctx, '_>,
 ) -> Result<SymbolicPlan<'ctx>, Error> {
-    let entries = analyze_symbolic_entries(code_blocks)?;
+    let analysis = analyze_symbolic_entries(code_blocks)?;
     let mut variants = Vec::new();
     let mut by_block_height = HashMap::new();
     let mut original_blocks_used = HashSet::new();
 
     for block_index in 0..code_blocks.len() {
-        let Some(states) = entries.get(&block_index) else {
+        let Some(states) = analysis.entries.get(&block_index) else {
             continue;
         };
         let mut states = states.clone();
@@ -620,12 +677,14 @@ fn build_symbolic_plan<'ctx>(
                 env.context().append_basic_block(func, "block.specialized")
             };
             let variant_id = variants.len();
+            let fault = analysis.faults.get(&(block_index, state.len())).copied();
             by_block_height.insert((block_index, state.len()), variant_id);
             variants.push(SymbolicBlockVariant {
                 block_index,
                 entry_state: state,
                 entry_block,
                 entry_phis: Vec::new(),
+                fault,
             });
         }
     }
@@ -643,10 +702,9 @@ fn build_symbolic_plan<'ctx>(
     })
 }
 
-fn analyze_symbolic_entries(
-    code_blocks: &CodeBlocks<'_, '_>,
-) -> Result<HashMap<usize, Vec<AbstractStackState>>, Error> {
+fn analyze_symbolic_entries(code_blocks: &CodeBlocks<'_, '_>) -> Result<SymbolicAnalysis, Error> {
     let mut entries: HashMap<usize, Vec<AbstractStackState>> = HashMap::new();
+    let mut faults: HashMap<(usize, usize), PlannedFault> = HashMap::new();
     let mut queue = VecDeque::new();
 
     if code_blocks.first().is_none() {
@@ -661,16 +719,27 @@ fn analyze_symbolic_entries(
     while let Some(block_index) = queue.pop_front() {
         let states = entries.get(&block_index).cloned().unwrap_or_default();
         for state in states {
-            let successors = analyze_symbolic_successors(code_blocks, block_index, state)?;
-            for successor in successors {
-                if add_symbolic_entry_state(&mut entries, successor.block_index, successor.stack)? {
-                    queue.push_back(successor.block_index);
+            let entry_height = state.len();
+            match analyze_symbolic_successors(code_blocks, block_index, state)? {
+                AbstractBlockOutcome::Successors(successors) => {
+                    for successor in successors {
+                        if add_symbolic_entry_state(
+                            &mut entries,
+                            successor.block_index,
+                            successor.stack,
+                        )? {
+                            queue.push_back(successor.block_index);
+                        }
+                    }
+                }
+                AbstractBlockOutcome::Fault(fault) => {
+                    faults.insert((block_index, entry_height), fault);
                 }
             }
         }
     }
 
-    Ok(entries)
+    Ok(SymbolicAnalysis { entries, faults })
 }
 
 fn add_symbolic_entry_state(
@@ -698,7 +767,7 @@ fn analyze_symbolic_successors(
     code_blocks: &CodeBlocks<'_, '_>,
     block_index: usize,
     entry_state: AbstractStackState,
-) -> Result<Vec<AbstractSuccessor>, Error> {
+) -> Result<AbstractBlockOutcome, Error> {
     let code_block = code_blocks
         .get(block_index)
         .ok_or_else(|| Error::invariant_violation("missing code block"))?;
@@ -706,37 +775,58 @@ fn analyze_symbolic_successors(
 
     for item in instructions::Iter::new(code_block.rom) {
         match item {
-            IterItem::PushData(_, _, data) => {
-                state.push_known(push_data_known_u64(data))?;
+            IterItem::PushData(pc, _, data) => {
+                if let Err(kind) = state.push_known(push_data_known_u64(data)) {
+                    return Ok(fault_outcome(kind, pc, &state));
+                }
             }
             IterItem::Instr(pc, instr) => match instr {
                 Instruction::JUMP => {
-                    let target_pc = state.peek_known_u64(0)?;
-                    state.pop()?;
-                    return symbolic_jump_successors(code_blocks, target_pc, state);
+                    let target_pc = match state.peek_known_u64(0) {
+                        Ok(target_pc) => target_pc,
+                        Err(kind) => return Ok(fault_outcome(kind, pc, &state)),
+                    };
+                    if let Err(kind) = state.pop() {
+                        return Ok(fault_outcome(kind, pc, &state));
+                    }
+                    let successors = symbolic_jump_successors(code_blocks, target_pc, state)?;
+                    return Ok(AbstractBlockOutcome::Successors(successors));
                 }
                 Instruction::JUMPI => {
                     let following_index =
                         code_blocks.following_index(block_index).ok_or_else(|| {
                             Error::invariant_violation("JUMPI without following block")
                         })?;
-                    let target_pc = state.peek_known_u64(0)?;
-                    state.pop_n(2)?;
+                    let target_pc = match state.peek_known_u64(0) {
+                        Ok(target_pc) => target_pc,
+                        Err(kind) => return Ok(fault_outcome(kind, pc, &state)),
+                    };
+                    if let Err(kind) = state.pop_n(2) {
+                        return Ok(fault_outcome(kind, pc, &state));
+                    }
                     let mut successors = vec![AbstractSuccessor {
                         block_index: following_index,
                         stack: state.clone(),
                     }];
                     successors.extend(symbolic_jump_successors(code_blocks, target_pc, state)?);
-                    return Ok(successors);
+                    return Ok(AbstractBlockOutcome::Successors(successors));
                 }
                 Instruction::STOP | Instruction::REVERT | Instruction::INVALID => {
-                    return Ok(Vec::new());
+                    return Ok(AbstractBlockOutcome::Successors(Vec::new()));
                 }
                 Instruction::RETURN => {
-                    state.pop_n(2)?;
-                    return Ok(Vec::new());
+                    if let Err(kind) = state.pop_n(2) {
+                        return Ok(fault_outcome(kind, pc, &state));
+                    }
+                    return Ok(AbstractBlockOutcome::Successors(Vec::new()));
                 }
-                _ => apply_abstract_instruction(&mut state, code_block, pc, instr)?,
+                _ => match apply_abstract_instruction(&mut state, code_block, pc, instr) {
+                    Ok(()) => {}
+                    Err(AbstractError::Fault(kind)) => {
+                        return Ok(fault_outcome(kind, pc, &state));
+                    }
+                    Err(AbstractError::Build(e)) => return Err(e),
+                },
             },
             IterItem::Invalid(pc) => {
                 let absolute_pc = code_block.offset + pc;
@@ -750,12 +840,12 @@ fn analyze_symbolic_successors(
     }
 
     if let Some(following_index) = code_blocks.following_index(block_index) {
-        Ok(vec![AbstractSuccessor {
+        Ok(AbstractBlockOutcome::Successors(vec![AbstractSuccessor {
             block_index: following_index,
             stack: state,
-        }])
+        }]))
     } else {
-        Ok(Vec::new())
+        Ok(AbstractBlockOutcome::Successors(Vec::new()))
     }
 }
 
@@ -802,7 +892,7 @@ fn apply_abstract_instruction(
     code_block: &CodeBlock<'_, '_>,
     pc: usize,
     instr: Instruction,
-) -> Result<(), Error> {
+) -> Result<(), AbstractError> {
     match instr {
         Instruction::ADD
         | Instruction::MUL
@@ -827,15 +917,15 @@ fn apply_abstract_instruction(
         | Instruction::SAR
         | Instruction::KECCAK256 => {
             stack.pop_n(2)?;
-            stack.push_unknown()
+            Ok(stack.push_unknown()?)
         }
         Instruction::ADDMOD | Instruction::MULMOD => {
             stack.pop_n(3)?;
-            stack.push_unknown()
+            Ok(stack.push_unknown()?)
         }
         Instruction::ISZERO | Instruction::NOT | Instruction::MLOAD => {
             stack.pop()?;
-            stack.push_unknown()
+            Ok(stack.push_unknown()?)
         }
         Instruction::POP => {
             stack.pop()?;
@@ -845,10 +935,10 @@ fn apply_abstract_instruction(
             stack.pop_n(2)?;
             Ok(())
         }
-        Instruction::PC => stack.push_known(Some((code_block.offset + pc) as u64)),
+        Instruction::PC => Ok(stack.push_known(Some((code_block.offset + pc) as u64))?),
         Instruction::CALL => {
             stack.pop_n(7)?;
-            stack.push_unknown()
+            Ok(stack.push_unknown()?)
         }
         Instruction::RETURNDATASIZE
         | Instruction::BLOCKHASH
@@ -860,43 +950,43 @@ fn apply_abstract_instruction(
         | Instruction::CHAINID
         | Instruction::BASEFEE
         | Instruction::BLOBBASEFEE
-        | Instruction::MSIZE => stack.push_unknown(),
+        | Instruction::MSIZE => Ok(stack.push_unknown()?),
         Instruction::RETURNDATACOPY => {
             stack.pop_n(3)?;
             Ok(())
         }
-        Instruction::DUP1 => stack.dup(1),
-        Instruction::DUP2 => stack.dup(2),
-        Instruction::DUP3 => stack.dup(3),
-        Instruction::DUP4 => stack.dup(4),
-        Instruction::DUP5 => stack.dup(5),
-        Instruction::DUP6 => stack.dup(6),
-        Instruction::DUP7 => stack.dup(7),
-        Instruction::DUP8 => stack.dup(8),
-        Instruction::DUP9 => stack.dup(9),
-        Instruction::DUP10 => stack.dup(10),
-        Instruction::DUP11 => stack.dup(11),
-        Instruction::DUP12 => stack.dup(12),
-        Instruction::DUP13 => stack.dup(13),
-        Instruction::DUP14 => stack.dup(14),
-        Instruction::DUP15 => stack.dup(15),
-        Instruction::DUP16 => stack.dup(16),
-        Instruction::SWAP1 => stack.swap(1),
-        Instruction::SWAP2 => stack.swap(2),
-        Instruction::SWAP3 => stack.swap(3),
-        Instruction::SWAP4 => stack.swap(4),
-        Instruction::SWAP5 => stack.swap(5),
-        Instruction::SWAP6 => stack.swap(6),
-        Instruction::SWAP7 => stack.swap(7),
-        Instruction::SWAP8 => stack.swap(8),
-        Instruction::SWAP9 => stack.swap(9),
-        Instruction::SWAP10 => stack.swap(10),
-        Instruction::SWAP11 => stack.swap(11),
-        Instruction::SWAP12 => stack.swap(12),
-        Instruction::SWAP13 => stack.swap(13),
-        Instruction::SWAP14 => stack.swap(14),
-        Instruction::SWAP15 => stack.swap(15),
-        Instruction::SWAP16 => stack.swap(16),
+        Instruction::DUP1 => Ok(stack.dup(1)?),
+        Instruction::DUP2 => Ok(stack.dup(2)?),
+        Instruction::DUP3 => Ok(stack.dup(3)?),
+        Instruction::DUP4 => Ok(stack.dup(4)?),
+        Instruction::DUP5 => Ok(stack.dup(5)?),
+        Instruction::DUP6 => Ok(stack.dup(6)?),
+        Instruction::DUP7 => Ok(stack.dup(7)?),
+        Instruction::DUP8 => Ok(stack.dup(8)?),
+        Instruction::DUP9 => Ok(stack.dup(9)?),
+        Instruction::DUP10 => Ok(stack.dup(10)?),
+        Instruction::DUP11 => Ok(stack.dup(11)?),
+        Instruction::DUP12 => Ok(stack.dup(12)?),
+        Instruction::DUP13 => Ok(stack.dup(13)?),
+        Instruction::DUP14 => Ok(stack.dup(14)?),
+        Instruction::DUP15 => Ok(stack.dup(15)?),
+        Instruction::DUP16 => Ok(stack.dup(16)?),
+        Instruction::SWAP1 => Ok(stack.swap(1)?),
+        Instruction::SWAP2 => Ok(stack.swap(2)?),
+        Instruction::SWAP3 => Ok(stack.swap(3)?),
+        Instruction::SWAP4 => Ok(stack.swap(4)?),
+        Instruction::SWAP5 => Ok(stack.swap(5)?),
+        Instruction::SWAP6 => Ok(stack.swap(6)?),
+        Instruction::SWAP7 => Ok(stack.swap(7)?),
+        Instruction::SWAP8 => Ok(stack.swap(8)?),
+        Instruction::SWAP9 => Ok(stack.swap(9)?),
+        Instruction::SWAP10 => Ok(stack.swap(10)?),
+        Instruction::SWAP11 => Ok(stack.swap(11)?),
+        Instruction::SWAP12 => Ok(stack.swap(12)?),
+        Instruction::SWAP13 => Ok(stack.swap(13)?),
+        Instruction::SWAP14 => Ok(stack.swap(14)?),
+        Instruction::SWAP15 => Ok(stack.swap(15)?),
+        Instruction::SWAP16 => Ok(stack.swap(16)?),
         Instruction::ADDRESS
         | Instruction::BALANCE
         | Instruction::ORIGIN
@@ -929,9 +1019,9 @@ fn apply_abstract_instruction(
         | Instruction::CALLCODE
         | Instruction::DELEGATECALL
         | Instruction::STATICCALL
-        | Instruction::SELFDESTRUCT => Err(Error::UnimplementedInstruction(instr)),
+        | Instruction::SELFDESTRUCT => Err(Error::UnimplementedInstruction(instr).into()),
         Instruction::JUMP | Instruction::JUMPI | Instruction::JUMPDEST => {
-            Err(Error::UnexpectedInstruction(instr))
+            Err(Error::UnexpectedInstruction(instr).into())
         }
         Instruction::STOP
         | Instruction::RETURN
@@ -969,7 +1059,7 @@ fn apply_abstract_instruction(
         | Instruction::PUSH29
         | Instruction::PUSH30
         | Instruction::PUSH31
-        | Instruction::PUSH32 => Err(Error::UnexpectedInstruction(instr)),
+        | Instruction::PUSH32 => Err(Error::UnexpectedInstruction(instr).into()),
     }
 }
 
@@ -998,6 +1088,11 @@ fn build_symbolic_contract_body<'ctx>(
             .ok_or_else(|| Error::invariant_violation("missing code block"))?;
         bctx.builder.position_at_end(variant.entry_block);
         bctx.stack.restore(variant.entry_stack());
+
+        if let Some(fault) = variant.fault {
+            build_symbolic_fault_exit(bctx, code_block, fault)?;
+            continue;
+        }
 
         build_symbolic_code_block(bctx, variant.block_index, code_block, code_blocks, plan)?;
 
@@ -1085,6 +1180,57 @@ fn record_symbolic_variant_incoming_from<'ctx>(
     Ok(())
 }
 
+fn build_push_data<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+    data: &[u8],
+) -> Result<(), Error> {
+    let mut new_data = [0u8; 32];
+    new_data[..data.len()].copy_from_slice(data);
+    new_data[..data.len()].reverse();
+    ops::push(bctx, new_data)
+}
+
+/// Emits a block variant that abstract interpretation proved always faults.
+/// The instructions before the fault still run for their side effects, then
+/// the stack is trimmed to the fault height and the fault code is returned.
+fn build_symbolic_fault_exit<'ctx>(
+    bctx: &BuildCtx<'ctx, '_, SymbolicStackBackend<'ctx>>,
+    code_block: &CodeBlock<'ctx, '_>,
+    fault: PlannedFault,
+) -> Result<(), Error> {
+    for item in instructions::Iter::new(code_block.rom) {
+        match item {
+            IterItem::PushData(pc, _, _) | IterItem::Instr(pc, _) if pc >= fault.rel_pc => break,
+            IterItem::PushData(_, _, data) => build_push_data(bctx, data)?,
+            IterItem::Instr(pc, instr) => match instr {
+                Instruction::JUMP | Instruction::JUMPI => {
+                    return Err(Error::invariant_violation(
+                        "jump before planned stack fault",
+                    ));
+                }
+                _ => build_non_jump_instruction(bctx, code_block, pc, instr)?,
+            },
+            IterItem::Invalid(pc) => {
+                let absolute_pc = code_block.offset + pc;
+                return Err(InvalidOpcode {
+                    pc: absolute_pc,
+                    opcode: code_block.rom[pc],
+                }
+                .into());
+            }
+        }
+    }
+
+    let height = bctx.stack.snapshot().len();
+    let excess = height
+        .checked_sub(fault.fault_height)
+        .ok_or_else(|| Error::invariant_violation("symbolic stack below planned fault height"))?;
+    for _ in 0..excess {
+        bctx.stack.pop_word(bctx)?;
+    }
+    ops::build_return(bctx, fault.kind.return_code())
+}
+
 fn build_symbolic_code_block<'ctx>(
     bctx: &BuildCtx<'ctx, '_, SymbolicStackBackend<'ctx>>,
     block_index: usize,
@@ -1098,12 +1244,7 @@ fn build_symbolic_code_block<'ctx>(
 
     for item in instructions::Iter::new(code_block.rom) {
         match item {
-            IterItem::PushData(_, _, data) => {
-                let mut new_data = [0u8; 32];
-                new_data[..data.len()].copy_from_slice(data);
-                new_data[..data.len()].reverse();
-                ops::push(bctx, new_data)?;
-            }
+            IterItem::PushData(_, _, data) => build_push_data(bctx, data)?,
             IterItem::Instr(pc, instr) => match instr {
                 Instruction::JUMP => build_symbolic_jump(bctx, code_blocks, plan)?,
                 Instruction::JUMPI => {
@@ -1533,12 +1674,7 @@ fn build_code_block<'ctx, S: StackBackend<'ctx>>(
         match item {
             IterItem::PushData(_, _, data) => {
                 trace!("loop: Data: {:?}", data);
-
-                let mut new_data = [0u8; 32];
-                new_data[..data.len()].copy_from_slice(data);
-                new_data[..data.len()].reverse();
-
-                ops::push(bctx, new_data)
+                build_push_data(bctx, data)
             }
             IterItem::Instr(pc, instr) => {
                 trace!("loop: Instruction: {:?}", instr);

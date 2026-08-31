@@ -401,6 +401,8 @@ pub enum ReturnCode {
     InvalidJumpBlock = -1,
     /// A `POP`-style instruction was executed on an empty stack.
     StackUnderflow = -2,
+    /// A push-style instruction was executed on a full stack.
+    StackOverflow = -3,
 
     // EVM-level successes
     /// The contract ran to the end of its bytecode without a `RETURN` or `STOP`.

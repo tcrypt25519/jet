@@ -1931,3 +1931,149 @@ rom_tests! {
         },
     },
 }
+
+// Stack fault behavior must match between backends: statically reachable
+// faults compile and fail at runtime, never at build time.
+rom_tests! {
+    pop_on_empty_stack_underflows: Test {
+        roms: vec![bytecode![
+            POP!(),
+            STOP!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::StackUnderflow,
+            ..Default::default()
+        },
+    },
+
+    add_with_one_word_underflows_after_pop: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x01),
+            ADD!(),
+            STOP!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::StackUnderflow,
+            ..Default::default()
+        },
+    },
+
+    underflow_preserves_prior_memory_write: Test {
+        roms: vec![bytecode![
+            PUSH1!(0xFF),
+            PUSH1!(0x00),
+            MSTORE8!(),
+            POP!(),
+            STOP!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::StackUnderflow,
+            memory: Some(vec![0xFF]),
+            ..Default::default()
+        },
+    },
+
+    jump_with_empty_stack_underflows: Test {
+        roms: vec![bytecode![
+            JUMP!(),
+            JUMPDEST!(),
+            STOP!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::StackUnderflow,
+            ..Default::default()
+        },
+    },
+
+    return_with_one_word_underflows: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x05),
+            RETURN!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::StackUnderflow,
+            ..Default::default()
+        },
+    },
+
+    dynamic_jump_ignores_underflow_at_unrelated_jumpdest: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x06),
+            PUSH1!(0x00),
+            ADD!(),
+            JUMP!(),
+            JUMPDEST!(),
+            STOP!(),
+            JUMPDEST!(),
+            POP!(),
+            STOP!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::Stop,
+            jump_ptr: 6,
+            ..Default::default()
+        },
+    },
+
+    dynamic_jump_to_underflowing_jumpdest_faults_at_runtime: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x08),
+            PUSH1!(0x00),
+            ADD!(),
+            JUMP!(),
+            JUMPDEST!(),
+            STOP!(),
+            JUMPDEST!(),
+            POP!(),
+            STOP!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::StackUnderflow,
+            jump_ptr: 8,
+            ..Default::default()
+        },
+    },
+}
+
+// Symbolic-only fault tests. The runtime backend has no bounds checks on
+// push, peek, or swap, so these roms are memory-unsafe under it.
+#[test]
+fn test_symbolic_stack_overflow_from_straightline_pushes() -> Result<(), Error> {
+    let rom: Vec<u8> = std::iter::repeat_n(PUSH1!(0x01), 1025).flatten().collect();
+    let t = Test {
+        roms: vec![rom],
+        expected: TestContractRun {
+            result: ReturnCode::StackOverflow,
+            stack_ptr: 1024,
+            stack: vec![stack_word(&[0x01]); 1024],
+            ..Default::default()
+        },
+    };
+    _test_rom_body(t, jet::builder::env::StackMode::SymbolicPreferred)
+}
+
+#[test]
+fn test_symbolic_dup_on_empty_stack_underflows() -> Result<(), Error> {
+    let t = Test {
+        roms: vec![bytecode![DUP1!(), STOP!()]],
+        expected: TestContractRun {
+            result: ReturnCode::StackUnderflow,
+            ..Default::default()
+        },
+    };
+    _test_rom_body(t, jet::builder::env::StackMode::SymbolicPreferred)
+}
+
+#[test]
+fn test_symbolic_swap_beyond_stack_underflows() -> Result<(), Error> {
+    let t = Test {
+        roms: vec![bytecode![PUSH1!(0x01), SWAP1!(), STOP!()]],
+        expected: TestContractRun {
+            result: ReturnCode::StackUnderflow,
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x01])],
+            ..Default::default()
+        },
+    };
+    _test_rom_body(t, jet::builder::env::StackMode::SymbolicPreferred)
+}
