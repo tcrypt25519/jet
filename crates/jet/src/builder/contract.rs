@@ -1542,12 +1542,7 @@ fn build_jump_failure_block<'ctx, S: StackBackend<'ctx>>(
         .context()
         .append_basic_block(bctx.func, "jump_failure");
     bctx.builder.position_at_end(jump_failure_block);
-    let return_value = bctx
-        .env
-        .types()
-        .i8
-        .const_int(ReturnCode::JumpFailure as u64, false);
-    bctx.builder.build_return(Some(&return_value))?;
+    ops::build_return(bctx, ReturnCode::JumpFailure)?;
     Ok(jump_failure_block)
 }
 

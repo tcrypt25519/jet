@@ -2129,6 +2129,43 @@ rom_tests! {
         },
     },
 
+    failed_jump_preserves_remaining_stack: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x07),
+            PUSH1!(0x05),
+            JUMP!(),
+            STOP!(),
+            JUMPDEST!(),
+            STOP!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::JumpFailure,
+            jump_ptr: 5,
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x07])],
+            ..Default::default()
+        },
+    },
+
+    failed_dynamic_jump_preserves_remaining_stack: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x07),
+            PUSH1!(0x05),
+            PUSH1!(0x00),
+            ADD!(),
+            JUMP!(),
+            JUMPDEST!(),
+            STOP!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::JumpFailure,
+            jump_ptr: 5,
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x07])],
+            ..Default::default()
+        },
+    },
+
     dynamic_jump_to_underflowing_jumpdest_faults_at_runtime: Test {
         roms: vec![bytecode![
             PUSH1!(0x08),
