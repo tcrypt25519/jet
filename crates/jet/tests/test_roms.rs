@@ -2079,6 +2079,56 @@ rom_tests! {
         },
     },
 
+    // Targets above u32::MAX must fail the jump instead of wrapping onto a
+    // real jumpdest. Each rom below has a jumpdest exactly where the wrapped
+    // value would land; jump_ptr holds the u32::MAX sentinel on failure.
+    wide_jump_target_does_not_wrap: Test {
+        roms: vec![bytecode![
+            PUSH5!(0x01, 0x00, 0x00, 0x00, 0x08),
+            JUMP!(),
+            STOP!(),
+            JUMPDEST!(),
+            PUSH1!(42),
+            STOP!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::JumpFailure,
+            jump_ptr: u32::MAX,
+            ..Default::default()
+        },
+    },
+
+    wide_dynamic_jump_target_does_not_wrap: Test {
+        roms: vec![bytecode![
+            PUSH5!(0x01, 0x00, 0x00, 0x00, 0x0A),
+            PUSH1!(0x00),
+            ADD!(),
+            JUMP!(),
+            JUMPDEST!(),
+            STOP!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::JumpFailure,
+            jump_ptr: u32::MAX,
+            ..Default::default()
+        },
+    },
+
+    wide_jumpi_target_does_not_wrap: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x01),
+            PUSH5!(0x01, 0x00, 0x00, 0x00, 0x09),
+            JUMPI!(),
+            JUMPDEST!(),
+            STOP!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::JumpFailure,
+            jump_ptr: u32::MAX,
+            ..Default::default()
+        },
+    },
+
     dynamic_jump_to_underflowing_jumpdest_faults_at_runtime: Test {
         roms: vec![bytecode![
             PUSH1!(0x08),

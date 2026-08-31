@@ -459,7 +459,7 @@ pub(crate) fn jump<'ctx, S: StackBackend<'ctx>>(
     jump_block: BasicBlock<'ctx>,
 ) -> Result<(), Error> {
     let pc = bctx.stack.pop_word(bctx)?;
-    let pc = truncate_to_i32(bctx, pc, "jump_pc")?;
+    let pc = truncate_jump_target(bctx, pc, "jump_pc")?;
     bctx.builder.build_store(bctx.registers.jump_ptr, pc)?;
     bctx.builder.build_unconditional_branch(jump_block)?;
     Ok(())
@@ -471,7 +471,7 @@ pub(crate) fn jumpi<'ctx, S: StackBackend<'ctx>>(
     jump_else_block: BasicBlock<'ctx>,
 ) -> Result<(), Error> {
     let (pc, cond) = bctx.stack.pop_2(bctx)?;
-    let pc = truncate_to_i32(bctx, pc, "jumpi_pc")?;
+    let pc = truncate_jump_target(bctx, pc, "jumpi_pc")?;
     bctx.builder.build_store(bctx.registers.jump_ptr, pc)?;
     let cmp = bctx.builder.build_int_compare(
         inkwell::IntPredicate::EQ,
@@ -1067,6 +1067,35 @@ fn truncate_to_i32<'ctx, S: StackBackend<'ctx>>(
     Ok(bctx
         .builder
         .build_int_truncate(value, bctx.env.types().i32, name)?)
+}
+
+/// Narrows a 256-bit jump target to the i32 dispatch width. Targets above
+/// `u32::MAX` would otherwise wrap and could collide with a real jumpdest, so
+/// they map to `u32::MAX`, which no jumpdest pc can occupy, and dispatch
+/// falls through to the jump failure default.
+pub(crate) fn truncate_jump_target<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+    pc: IntValue<'ctx>,
+    name: &str,
+) -> Result<IntValue<'ctx>, Error> {
+    let bit_width = pc.get_type().get_bit_width();
+    if bit_width != 256 {
+        return Err(Error::InvalidBitWidth(bit_width));
+    }
+    let t = bctx.env.types();
+    let max = t.i256.const_int(u32::MAX as u64, false);
+    let is_wide = bctx.builder.build_int_compare(
+        inkwell::IntPredicate::UGT,
+        pc,
+        max,
+        &format!("{name}_is_wide"),
+    )?;
+    let truncated = bctx.builder.build_int_truncate(pc, t.i32, name)?;
+    let sentinel = t.i32.const_int(u32::MAX as u64, false);
+    Ok(bctx
+        .builder
+        .build_select(is_wide, sentinel, truncated, &format!("{name}_bounded"))?
+        .into_int_value())
 }
 
 fn shift_left_or_right<'ctx, S: StackBackend<'ctx>>(

@@ -1315,7 +1315,7 @@ fn build_symbolic_jump<'ctx>(
 ) -> Result<(), Error> {
     let target_pc = bctx.stack.peek_word_known_u64(0)?;
     let pc = bctx.stack.pop_word(bctx)?;
-    let pc = truncate_jump_pc(bctx, pc, "jump_pc")?;
+    let pc = ops::truncate_jump_target(bctx, pc, "jump_pc")?;
     bctx.builder.build_store(bctx.registers.jump_ptr, pc)?;
 
     match target_pc {
@@ -1349,7 +1349,7 @@ fn build_symbolic_jumpi<'ctx>(
 ) -> Result<(), Error> {
     let target_pc = bctx.stack.peek_word_known_u64(0)?;
     let (pc, cond) = bctx.stack.pop_2(bctx)?;
-    let pc = truncate_jump_pc(bctx, pc, "jumpi_pc")?;
+    let pc = ops::truncate_jump_target(bctx, pc, "jumpi_pc")?;
     bctx.builder.build_store(bctx.registers.jump_ptr, pc)?;
     let cmp = bctx.builder.build_int_compare(
         inkwell::IntPredicate::EQ,
@@ -1502,21 +1502,6 @@ fn build_jump_failure_block<'ctx, S: StackBackend<'ctx>>(
         .const_int(ReturnCode::JumpFailure as u64, false);
     bctx.builder.build_return(Some(&return_value))?;
     Ok(jump_failure_block)
-}
-
-fn truncate_jump_pc<'ctx>(
-    bctx: &BuildCtx<'ctx, '_, SymbolicStackBackend<'ctx>>,
-    pc: IntValue<'ctx>,
-    name: &str,
-) -> Result<IntValue<'ctx>, Error> {
-    let bit_width = pc.get_type().get_bit_width();
-    match bit_width {
-        32 => Ok(pc),
-        256 => Ok(bctx
-            .builder
-            .build_int_truncate(pc, bctx.env.types().i32, name)?),
-        _ => Err(Error::InvalidBitWidth(bit_width)),
-    }
 }
 
 fn build_non_jump_instruction<'ctx, S: StackBackend<'ctx>>(
