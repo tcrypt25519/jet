@@ -289,6 +289,10 @@ fn find_code_blocks<'ctx, 'b>(
     let mut blocks = CodeBlocks::new();
     let mut current_block: &mut CodeBlock = blocks.add(0, create_bb())?;
     let mut current_block_starting_pc = 0usize;
+    // Bytes between a terminator and the next JUMPDEST are unreachable. They
+    // are still scanned so push data cannot fake a JUMPDEST, but they belong
+    // to no block.
+    let mut dead = false;
 
     for item in instructions::Iter::new(bytecode) {
         match item {
@@ -301,17 +305,35 @@ fn find_code_blocks<'ctx, 'b>(
                     instr, pc
                 );
                 match instr {
+                    Instruction::JUMPDEST => {
+                        trace!("find_code_blocks: Found JUMPDEST");
+                        if current_block.rom.is_empty() {
+                            current_block.rom = &bytecode[current_block_starting_pc..pc];
+                        }
+
+                        current_block_starting_pc = pc + 1;
+                        current_block =
+                            blocks.add_jumpdest(current_block_starting_pc, create_bb())?;
+                        dead = false;
+                    }
+
+                    _ if dead => {
+                        trace!("find_code_blocks: instr {} is unreachable", instr);
+                    }
+
                     // Instructions that terminate a block
                     // When these appear we finish out the current block and mark it as
                     // terminating
                     Instruction::STOP
                     | Instruction::RETURN
                     | Instruction::REVERT
+                    | Instruction::INVALID
                     | Instruction::JUMP => {
                         trace!("find_code_blocks: Found terminator {}", instr);
                         current_block.rom = &bytecode[current_block_starting_pc..pc + 1];
                         current_block.set_terminates();
                         current_block_starting_pc = pc + 1;
+                        dead = true;
                     }
 
                     Instruction::JUMPI => {
@@ -322,16 +344,6 @@ fn find_code_blocks<'ctx, 'b>(
                         current_block = blocks.add(current_block_starting_pc, create_bb())?;
                     }
 
-                    Instruction::JUMPDEST => {
-                        trace!("find_code_blocks: Found JUMPDEST");
-                        if current_block.rom.is_empty() {
-                            current_block.rom = &bytecode[current_block_starting_pc..pc];
-                        }
-
-                        current_block_starting_pc = pc + 1;
-                        current_block =
-                            blocks.add_jumpdest(current_block_starting_pc, create_bb())?;
-                    }
                     _ => {
                         trace!("find_code_blocks: instr {} is uninteresting", instr);
                     }

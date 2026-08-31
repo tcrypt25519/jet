@@ -76,7 +76,8 @@ define_ops!(
     CHAINID,
     BASEFEE,
     BLOBBASEFEE,
-    MSIZE
+    MSIZE,
+    INVALID
 );
 
 rom_tests! {
@@ -2011,6 +2012,69 @@ rom_tests! {
         expected: TestContractRun {
             result: ReturnCode::Stop,
             jump_ptr: 6,
+            ..Default::default()
+        },
+    },
+
+    dead_code_after_jump_is_skipped: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x04),
+            JUMP!(),
+            STOP!(),
+            JUMPDEST!(),
+            PUSH1!(42),
+            STOP!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::Stop,
+            jump_ptr: 4,
+            stack_ptr: 1,
+            stack: vec![stack_word(&[42])],
+            ..Default::default()
+        },
+    },
+
+    dead_terminator_after_stop_is_ignored: Test {
+        roms: vec![bytecode![
+            PUSH1!(42),
+            STOP!(),
+            POP!(),
+            STOP!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::Stop,
+            stack_ptr: 1,
+            stack: vec![stack_word(&[42])],
+            ..Default::default()
+        },
+    },
+
+    invalid_terminates_the_block: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x01),
+            INVALID!(),
+            PUSH1!(0x02),
+            STOP!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::Invalid,
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x01])],
+            ..Default::default()
+        },
+    },
+
+    jumpdest_inside_dead_push_data_is_invalid: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x04),
+            JUMP!(),
+            PUSH1!(0x5B),
+            JUMPDEST!(),
+            STOP!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::JumpFailure,
+            jump_ptr: 4,
             ..Default::default()
         },
     },
