@@ -2304,6 +2304,78 @@ rom_tests! {
         },
     },
 
+    returndatasize_without_call: Test {
+        roms: vec![bytecode![RETURNDATASIZE!(), STOP!()]],
+        expected: TestContractRun {
+            result: ReturnCode::Stop,
+            stack_ptr: 1,
+            stack: vec![[0u8; 32]],
+            ..Default::default()
+        },
+    },
+
+    returndatacopy_without_call_zero_len: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x00),
+            PUSH1!(0x00),
+            PUSH1!(0x00),
+            RETURNDATACOPY!(),
+            STOP!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::Stop,
+            ..Default::default()
+        },
+    },
+
+    returndatacopy_without_call_nonzero_len: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x01),
+            PUSH1!(0x00),
+            PUSH1!(0x00),
+            RETURNDATACOPY!(),
+            STOP!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::Invalid,
+            ..Default::default()
+        },
+    },
+
+    returndatacopy_out_of_bounds: Test {
+        roms: vec![
+            bytecode![
+                PUSH1!(0x01),
+                PUSH1!(0x00),
+                PUSH1!(0x00),
+                PUSH1!(0x00),
+                PUSH1!(0x00),
+                PUSH20!(0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
+                PUSH1!(0x00),
+                CALL!(),
+                PUSH1!(0x02),
+                PUSH1!(0x00),
+                PUSH1!(0x00),
+                RETURNDATACOPY!(),
+                STOP!(),
+            ],
+            bytecode![
+                PUSH1!(0xAB),
+                PUSH1!(0x00),
+                MSTORE!(),
+                PUSH1!(0x01),
+                PUSH1!(0x00),
+                RETURN!(),
+            ],
+        ],
+        expected: TestContractRun {
+            result: ReturnCode::Invalid,
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x01])],
+            ..Default::default()
+        },
+    },
+
     swap_beyond_stack_underflows: Test {
         roms: vec![bytecode![PUSH1!(0x01), SWAP1!(), STOP!()]],
         expected: TestContractRun {

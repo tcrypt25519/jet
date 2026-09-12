@@ -220,24 +220,27 @@ unsafe fn return_data_copy_impl(
     src_offset: u32,
     requested_ret_len: u32,
 ) -> CopyError {
-    let ctx = match unsafe { ctx.as_mut() } {
-        Some(ctx) => ctx,
-        None => return CopyError::InvalidPtr,
-    };
-    let sub_ctx = match unsafe { sub_ctx.as_ref() } {
-        Some(ctx) => ctx,
-        None => return CopyError::InvalidPtr,
-    };
+    if requested_ret_len == 0 {
+        return CopyError::Success;
+    }
+    if ctx.is_null() || sub_ctx.is_null() {
+        return CopyError::InvalidPtr;
+    }
 
-    // Get return data from the callee
+    // Expand the destination so the write is safe.
+    let expand = unsafe { jet_mem_expand(ctx, dest_offset, requested_ret_len) };
+    if expand != 0 {
+        return CopyError::MemoryExpansionNeeded;
+    }
+
+    let ctx = unsafe { &mut *ctx };
+    let sub_ctx = unsafe { &*sub_ctx };
     let ret_len = sub_ctx.return_len();
 
     trace!(
         "jet_contracts_call_return_data_copy:\ndest_offset: {}\nrequested_ret_len: {}\n\nret_len: {}",
         dest_offset, requested_ret_len, ret_len
     );
-
-    // TODO: Validate ret_offset + ret_len <= memory_len once memory_len is tracked by MSTORE
 
     // Bounds check: validate src_offset + requested_ret_len doesn't overflow and is within ret_len
     let src_end = match src_offset.checked_add(requested_ret_len) {
@@ -248,28 +251,12 @@ unsafe fn return_data_copy_impl(
         return CopyError::BoundsCheckFailed;
     }
 
-    // Validate destination range doesn't overflow
-    let required_memory_len = match dest_offset.checked_add(requested_ret_len) {
-        Some(len) => len,
-        None => return CopyError::ArithmeticOverflow,
-    };
-
-    // Ensure memory is large enough for the write
-    if ctx.memory_len() < required_memory_len {
-        if required_memory_len > ctx.memory_cap() {
-            // TODO: Expand memory capacity
-            return CopyError::MemoryExpansionNeeded;
-        }
-        // Expand memory length to accommodate the write
-        ctx.memory_len = required_memory_len;
-    }
-
     // Copy the data - all bounds have been validated
     let src_start = src_offset as usize;
     let src_range = src_start..src_end as usize;
     let dest_start = dest_offset as usize;
-    let dest_range = dest_start..required_memory_len as usize;
-    let dest = &mut ctx.memory_mut()[dest_range];
+    let dest_end = dest_start + requested_ret_len as usize;
+    let dest = &mut ctx.memory_mut()[dest_start..dest_end];
     dest.copy_from_slice(&sub_ctx.return_data()[src_range]);
     CopyError::Success
 }

@@ -324,6 +324,22 @@ pub(crate) fn returndatasize<'ctx, S: StackBackend<'ctx>>(
         "sub_call_ctx_ptr",
     )?;
     let sub_call_ctx_ptr = unsafe { PointerValue::new(sub_call_ctx_ptr.as_value_ref()) };
+    let is_null = bctx
+        .builder
+        .build_is_null(sub_call_ctx_ptr, "sub_call_is_null")?;
+    let zero = bctx.env.types().i32.const_int(0, false);
+    let non_null_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "returndatasize_non_null");
+    let cont_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "returndatasize_cont");
+    let entry_block = bctx.builder.get_insert_block().unwrap();
+    bctx.builder
+        .build_conditional_branch(is_null, cont_block, non_null_block)?;
+    bctx.builder.position_at_end(non_null_block);
     let return_length_ptr = bctx.builder.build_struct_gep(
         bctx.env.types().exec_ctx,
         sub_call_ctx_ptr,
@@ -334,7 +350,14 @@ pub(crate) fn returndatasize<'ctx, S: StackBackend<'ctx>>(
         .builder
         .build_load(bctx.env.types().i32, return_length_ptr, "return_length")?
         .into_int_value();
-    bctx.stack.push_word(bctx, return_length)
+    bctx.builder.build_unconditional_branch(cont_block)?;
+    bctx.builder.position_at_end(cont_block);
+    let result = bctx
+        .builder
+        .build_phi(bctx.env.types().i32, "returndatasize_result")?;
+    result.add_incoming(&[(&zero, entry_block), (&return_length, non_null_block)]);
+    bctx.stack
+        .push_word(bctx, result.as_basic_value().into_int_value())
 }
 
 pub(crate) fn returndatacopy<'ctx, S: StackBackend<'ctx>>(
@@ -350,7 +373,7 @@ pub(crate) fn returndatacopy<'ctx, S: StackBackend<'ctx>>(
     let dest_off = truncate_to_i32(bctx, dest_off, "retcopy_dest")?;
     let src_off = truncate_to_i32(bctx, src_off, "retcopy_src")?;
     let len = truncate_to_i32(bctx, len, "retcopy_len")?;
-    bctx.builder.build_call(
+    let ret = bctx.builder.build_call(
         bctx.env.symbols().contract_call_return_data_copy(),
         &[
             bctx.registers.exec_ctx.into(),
@@ -361,7 +384,7 @@ pub(crate) fn returndatacopy<'ctx, S: StackBackend<'ctx>>(
         ],
         "return_data_copy",
     )?;
-    Ok(())
+    branch_on_i8_success(bctx, ret, "returndatacopy")
 }
 
 pub(crate) fn blockhash<'ctx, S: StackBackend<'ctx>>(
@@ -714,6 +737,7 @@ fn set_return_range<'ctx, S: StackBackend<'ctx>>(
     let (offset, size) = bctx.stack.pop_2(bctx)?;
     let offset = truncate_to_i32(bctx, offset, "return_offset")?;
     let size = truncate_to_i32(bctx, size, "return_length")?;
+    call_mem_expand_checked(bctx, offset, size, "return")?;
     bctx.builder
         .build_store(bctx.registers.return_offset, offset)?;
     bctx.builder
