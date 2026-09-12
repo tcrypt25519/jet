@@ -21,6 +21,7 @@ mod layout_verification_tests {
         MemoryPtr = 6,
         MemoryLen = 7,
         MemoryCap = 8,
+        CallInfo = 9,
     }
 
     #[derive(Debug, Clone, Copy)]
@@ -62,7 +63,7 @@ mod layout_verification_tests {
     }
 
     impl ExecCtxField {
-        const FIELD_COUNT: u32 = 9;
+        const FIELD_COUNT: u32 = 10;
 
         fn index(self) -> u32 {
             self as u32
@@ -79,6 +80,7 @@ mod layout_verification_tests {
                 ExecCtxField::MemoryPtr => TypeKind::Pointer,
                 ExecCtxField::MemoryLen => TypeKind::Int,
                 ExecCtxField::MemoryCap => TypeKind::Int,
+                ExecCtxField::CallInfo => TypeKind::Pointer,
             }
         }
     }
@@ -106,9 +108,9 @@ mod layout_verification_tests {
     fn test_context_struct_size() {
         let context_size = mem::size_of::<Context>();
 
-        // Expected: 4 + 4 + 4 + 4 + 8 + (1024 * 32) + 8 + 4 + 4 = 32,808 bytes
+        // Expected: 4 + 4 + 4 + 4 + 8 + (1024 * 32) + 8 + 4 + 4 + 8 = 32,816 bytes
         // Note: Actual size may be larger due to alignment padding
-        const MIN_EXPECTED_SIZE: usize = 32_808;
+        const MIN_EXPECTED_SIZE: usize = 32_816;
 
         assert!(
             context_size >= MIN_EXPECTED_SIZE,
@@ -149,6 +151,7 @@ mod layout_verification_tests {
             ExecCtxField::MemoryPtr,
             ExecCtxField::MemoryLen,
             ExecCtxField::MemoryCap,
+            ExecCtxField::CallInfo,
         ];
 
         for field in fields_to_test {

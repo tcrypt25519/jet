@@ -5,7 +5,7 @@ use simple_logger::SimpleLogger;
 use thiserror::Error;
 
 use jet::instructions::Instruction;
-use jet_runtime::{Address, exec};
+use jet_runtime::{Address, CallInfo, exec};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -136,7 +136,9 @@ fn build_cmd(args: BuildArgs) -> Result<(), Error> {
 
     // Run Alice's contract with a test block
     let block_info = new_test_block_info();
-    let run = engine.run_contract(alice_addr, &block_info)?;
+    let call_info = CallInfo::new(alice_addr, Address::ZERO, Address::ZERO, [0u8; 32], &[])
+        .expect("valid call info");
+    let run = engine.run_contract(call_info, &block_info)?;
     info!("{}", run);
 
     Ok(())

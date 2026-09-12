@@ -6,7 +6,7 @@ use inkwell::{
     values::{AsValueRef, CallSiteValue, IntValue, PointerValue},
 };
 
-use jet_runtime::exec::ReturnCode;
+use jet_runtime::{BLOCK_HASH_HISTORY_SIZE, exec::ReturnCode};
 
 use crate::{
     builder::{Error, contract::BuildCtx, stack::StackBackend},
@@ -367,7 +367,93 @@ pub(crate) fn returndatacopy<'ctx, S: StackBackend<'ctx>>(
 pub(crate) fn blockhash<'ctx, S: StackBackend<'ctx>>(
     bctx: &BuildCtx<'ctx, '_, S>,
 ) -> Result<(), Error> {
-    block_info_hash(bctx)
+    let requested = bctx.stack.pop_word(bctx)?;
+    let t = bctx.env.types();
+    let number_ptr = bctx.builder.build_struct_gep(
+        t.block_info,
+        bctx.registers.block_info,
+        0,
+        "block_info_number_ptr",
+    )?;
+    let number = bctx
+        .builder
+        .build_load(t.i64, number_ptr, "block_info_number")?
+        .into_int_value();
+    let number = bctx
+        .builder
+        .build_int_z_extend(number, t.i256, "block_info_number_i256")?;
+    let distance = bctx
+        .builder
+        .build_int_sub(number, requested, "blockhash_distance")?;
+    let before_current = bctx.builder.build_int_compare(
+        inkwell::IntPredicate::ULT,
+        requested,
+        number,
+        "blockhash_before_current",
+    )?;
+    let within_history = bctx.builder.build_int_compare(
+        inkwell::IntPredicate::ULE,
+        distance,
+        t.i256.const_int(BLOCK_HASH_HISTORY_SIZE as u64, false),
+        "blockhash_within_history",
+    )?;
+    let valid = bctx
+        .builder
+        .build_and(before_current, within_history, "blockhash_valid")?;
+    let valid_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "blockhash_valid");
+    let invalid_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "blockhash_invalid");
+    let cont_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "blockhash_cont");
+    bctx.builder
+        .build_conditional_branch(valid, valid_block, invalid_block)?;
+
+    bctx.builder.position_at_end(valid_block);
+    let history_ptr = bctx.builder.build_struct_gep(
+        t.block_info,
+        bctx.registers.block_info,
+        8,
+        "block_info_hash_history_ptr",
+    )?;
+    let history_index = bctx.builder.build_int_sub(
+        distance,
+        t.i256.const_int(1, false),
+        "blockhash_history_index",
+    )?;
+    let history_index =
+        bctx.builder
+            .build_int_truncate(history_index, t.i32, "blockhash_history_index_i32")?;
+    let history_type = t.word_bytes.array_type(BLOCK_HASH_HISTORY_SIZE as u32);
+    let hash_ptr = unsafe {
+        bctx.builder.build_gep(
+            history_type,
+            history_ptr,
+            &[t.i32.const_zero(), history_index],
+            "blockhash_ptr",
+        )
+    }?;
+    let hash = bctx
+        .builder
+        .build_load(t.i256, hash_ptr, "blockhash")?
+        .into_int_value();
+    bctx.builder.build_unconditional_branch(cont_block)?;
+
+    bctx.builder.position_at_end(invalid_block);
+    bctx.builder.build_unconditional_branch(cont_block)?;
+
+    bctx.builder.position_at_end(cont_block);
+    let result = bctx.builder.build_phi(t.i256, "blockhash_result")?;
+    let zero = t.i256.const_zero();
+    result.add_incoming(&[(&hash, valid_block), (&zero, invalid_block)]);
+    bctx.stack
+        .push_word(bctx, result.as_basic_value().into_int_value())
 }
 
 pub(crate) fn coinbase<'ctx, S: StackBackend<'ctx>>(
@@ -493,11 +579,94 @@ pub(crate) fn pc<'ctx, S: StackBackend<'ctx>>(
         .push_word_with_known_u64(bctx, pc_value, Some(pc as u64))
 }
 
+pub(crate) fn address<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<(), Error> {
+    push_call_info_i160_field(bctx, 2, "address")
+}
+
+pub(crate) fn origin<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<(), Error> {
+    push_call_info_i160_field(bctx, 3, "origin")
+}
+
+pub(crate) fn caller<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<(), Error> {
+    push_call_info_i160_field(bctx, 4, "caller")
+}
+
+pub(crate) fn callvalue<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<(), Error> {
+    let call_info = call_info_ptr(bctx)?;
+    let value_ptr =
+        bctx.builder
+            .build_struct_gep(bctx.env.types().call_info, call_info, 5, "callvalue_ptr")?;
+    let value = bctx
+        .builder
+        .build_load(bctx.env.types().i256, value_ptr, "callvalue")?
+        .into_int_value();
+    bctx.stack.push_word(bctx, value)
+}
+
+pub(crate) fn calldatasize<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<(), Error> {
+    let call_info = call_info_ptr(bctx)?;
+    let len_ptr = bctx.builder.build_struct_gep(
+        bctx.env.types().call_info,
+        call_info,
+        1,
+        "calldata_len_ptr",
+    )?;
+    let len = bctx
+        .builder
+        .build_load(bctx.env.types().i32, len_ptr, "calldata_len")?
+        .into_int_value();
+    let len = bctx
+        .builder
+        .build_int_z_extend(len, bctx.env.types().i256, "calldata_len_i256")?;
+    bctx.stack.push_word(bctx, len)
+}
+
+pub(crate) fn calldataload<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<(), Error> {
+    let offset = bctx.stack.pop_word(bctx)?;
+    let offset_ptr = bctx
+        .builder
+        .build_alloca(bctx.env.types().i256, "calldata_offset")?;
+    bctx.builder.build_store(offset_ptr, offset)?;
+    let out_ptr = bctx
+        .builder
+        .build_alloca(bctx.env.types().i256, "calldata_out")?;
+    bctx.builder.build_call(
+        bctx.env.symbols().call_data_load(),
+        &[
+            bctx.registers.exec_ctx.into(),
+            offset_ptr.into(),
+            out_ptr.into(),
+        ],
+        "calldataload",
+    )?;
+    let value = bctx
+        .builder
+        .build_load(bctx.env.types().i256, out_ptr, "calldata_word")?
+        .into_int_value();
+    bctx.stack.push_word(bctx, value)
+}
+
 pub(crate) fn call<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
-    let (_gas, to, _value, _in_off, _in_len, out_off, out_len) = bctx.stack.pop_7(bctx)?;
+    let (_gas, to, value, _in_off, _in_len, out_off, out_len) = bctx.stack.pop_7(bctx)?;
     let jit_engine = bctx.env.symbols().jit_engine();
     let jit_engine_ptr = jit_engine.as_pointer_value();
     let (addr_lo, addr_mid, addr_hi) = build_address_limbs(bctx, to)?;
+    let value_ptr = bctx
+        .builder
+        .build_alloca(bctx.env.types().i256, "call.value")?;
+    bctx.builder.build_store(value_ptr, value)?;
     let out_off = truncate_to_i32(bctx, out_off, "call.out_off")?;
     let out_len = truncate_to_i32(bctx, out_len, "call.out_len")?;
     let make_contract_call = bctx.builder.build_call(
@@ -509,16 +678,37 @@ pub(crate) fn call<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) ->
             addr_lo.into(),
             addr_mid.into(),
             addr_hi.into(),
+            value_ptr.into(),
             out_off.into(),
             out_len.into(),
         ],
         "contract_call",
     )?;
     let ret = unsafe { IntValue::new(make_contract_call.as_value_ref()) };
-    bctx.stack.push_word(bctx, ret)
+    let success = bctx.builder.build_int_compare(
+        inkwell::IntPredicate::EQ,
+        ret,
+        bctx.env.types().i8.const_zero(),
+        "contract_call_success",
+    )?;
+    bctx.stack.push_word(bctx, success)
 }
 
 pub(crate) fn _return<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<(), Error> {
+    set_return_range(bctx)?;
+    build_return(bctx, ReturnCode::ExplicitReturn)
+}
+
+pub(crate) fn revert<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<(), Error> {
+    set_return_range(bctx)?;
+    build_return(bctx, ReturnCode::Revert)
+}
+
+fn set_return_range<'ctx, S: StackBackend<'ctx>>(
     bctx: &BuildCtx<'ctx, '_, S>,
 ) -> Result<(), Error> {
     let (offset, size) = bctx.stack.pop_2(bctx)?;
@@ -528,13 +718,7 @@ pub(crate) fn _return<'ctx, S: StackBackend<'ctx>>(
         .build_store(bctx.registers.return_offset, offset)?;
     bctx.builder
         .build_store(bctx.registers.return_length, size)?;
-    build_return(bctx, ReturnCode::ExplicitReturn)
-}
-
-pub(crate) fn revert<'ctx, S: StackBackend<'ctx>>(
-    bctx: &BuildCtx<'ctx, '_, S>,
-) -> Result<(), Error> {
-    build_return(bctx, ReturnCode::Revert)
+    Ok(())
 }
 
 pub(crate) fn invalid<'ctx, S: StackBackend<'ctx>>(
@@ -605,20 +789,6 @@ fn normalize_to_i256<'ctx, S: StackBackend<'ctx>>(
     }
 }
 
-fn block_info_hash<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
-    let hash_ptr = bctx.builder.build_struct_gep(
-        bctx.env.types().block_info,
-        bctx.registers.block_info,
-        7,
-        "block_info_hash_ptr",
-    )?;
-    let hash = bctx
-        .builder
-        .build_load(bctx.env.types().i256, hash_ptr, "block_info_hash")?
-        .into_int_value();
-    bctx.stack.push_word(bctx, hash)
-}
-
 fn push_block_info_u64_field<'ctx, S: StackBackend<'ctx>>(
     bctx: &BuildCtx<'ctx, '_, S>,
     field_index: u32,
@@ -652,6 +822,37 @@ fn push_block_info_i160_field<'ctx, S: StackBackend<'ctx>>(
         .builder
         .build_load(bctx.env.types().i160, field_ptr, name)?
         .into_int_value();
+    bctx.stack.push_word(bctx, field)
+}
+
+fn call_info_ptr<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<PointerValue<'ctx>, Error> {
+    Ok(bctx
+        .builder
+        .build_load(bctx.env.types().ptr, bctx.registers.call_info, "call_info")?
+        .into_pointer_value())
+}
+
+fn push_call_info_i160_field<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+    field_index: u32,
+    name: &str,
+) -> Result<(), Error> {
+    let call_info = call_info_ptr(bctx)?;
+    let field_ptr = bctx.builder.build_struct_gep(
+        bctx.env.types().call_info,
+        call_info,
+        field_index,
+        &format!("{name}_ptr"),
+    )?;
+    let field = bctx
+        .builder
+        .build_load(bctx.env.types().i160, field_ptr, name)?
+        .into_int_value();
+    let field =
+        bctx.builder
+            .build_int_z_extend(field, bctx.env.types().i256, &format!("{name}_i256"))?;
     bctx.stack.push_word(bctx, field)
 }
 
@@ -1061,9 +1262,35 @@ fn truncate_to_i32<'ctx, S: StackBackend<'ctx>>(
     value: IntValue<'ctx>,
     name: &str,
 ) -> Result<IntValue<'ctx>, Error> {
-    if value.get_type().get_bit_width() == 32 {
+    let bit_width = value.get_type().get_bit_width();
+    if bit_width == 32 {
         return Ok(value);
     }
+    if bit_width < 32 {
+        return Ok(bctx
+            .builder
+            .build_int_z_extend(value, bctx.env.types().i32, name)?);
+    }
+
+    let is_too_wide = bctx.builder.build_int_compare(
+        inkwell::IntPredicate::UGT,
+        value,
+        value.get_type().const_int(u32::MAX as u64, false),
+        &format!("{name}_is_too_wide"),
+    )?;
+    let error_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, &format!("{name}_error"));
+    let valid_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, &format!("{name}_valid"));
+    bctx.builder
+        .build_conditional_branch(is_too_wide, error_block, valid_block)?;
+    bctx.builder.position_at_end(error_block);
+    build_return(bctx, ReturnCode::Invalid)?;
+    bctx.builder.position_at_end(valid_block);
     Ok(bctx
         .builder
         .build_int_truncate(value, bctx.env.types().i32, name)?)

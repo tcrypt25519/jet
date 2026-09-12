@@ -154,12 +154,18 @@ impl<'ctx> StackBackend<'ctx> for RuntimeStackBackend {
         value: IntValue<'ctx>,
     ) -> Result<(), Error> {
         let value = self.normalize(bctx, value)?;
-        bctx.builder.build_call(
+        let ret = bctx.builder.build_call(
             bctx.env.symbols().stack_push_word(),
             &[bctx.registers.exec_ctx.into(), value.into()],
             "stack_push_i256",
         )?;
-        Ok(())
+        let success = ret.try_as_basic_value().unwrap_basic().into_int_value();
+        branch_on_stack_failure(
+            bctx,
+            bctx.builder.build_not(success, "stack_push_failed")?,
+            ReturnCode::StackOverflow,
+            "stack_overflow",
+        )
     }
 
     fn pop_word<'b>(&self, bctx: &BuildCtx<'ctx, 'b, Self>) -> Result<IntValue<'ctx>, Error> {
@@ -209,12 +215,24 @@ impl<'ctx> StackBackend<'ctx> for RuntimeStackBackend {
             "stack_peek_word_result",
         )?;
         let ptr = ret.try_as_basic_value().unwrap_basic().into_pointer_value();
-        bctx.builder.build_call(
+        branch_on_stack_failure(
+            bctx,
+            bctx.builder.build_is_null(ptr, "stack_peek_failed")?,
+            ReturnCode::StackUnderflow,
+            "stack_underflow",
+        )?;
+        let ret = bctx.builder.build_call(
             bctx.env.symbols().stack_push_ptr(),
             &[bctx.registers.exec_ctx.into(), ptr.into()],
             "stack_push_ptr",
         )?;
-        Ok(())
+        let success = ret.try_as_basic_value().unwrap_basic().into_int_value();
+        branch_on_stack_failure(
+            bctx,
+            bctx.builder.build_not(success, "stack_push_failed")?,
+            ReturnCode::StackOverflow,
+            "stack_overflow",
+        )
     }
 
     fn swap<'b>(&self, bctx: &BuildCtx<'ctx, 'b, Self>, index: u8) -> Result<(), Error> {
@@ -222,13 +240,39 @@ impl<'ctx> StackBackend<'ctx> for RuntimeStackBackend {
             .checked_sub(1)
             .ok_or_else(|| Error::invariant_violation("swap index must be >= 1"))?;
         let index_value = bctx.env.types().i8.const_int(runtime_index as u64, false);
-        bctx.builder.build_call(
+        let ret = bctx.builder.build_call(
             bctx.env.symbols().stack_swap(),
             &[bctx.registers.exec_ctx.into(), index_value.into()],
             "stack_swap_ret",
         )?;
-        Ok(())
+        let success = ret.try_as_basic_value().unwrap_basic().into_int_value();
+        branch_on_stack_failure(
+            bctx,
+            bctx.builder.build_not(success, "stack_swap_failed")?,
+            ReturnCode::StackUnderflow,
+            "stack_underflow",
+        )
     }
+}
+
+fn branch_on_stack_failure<'ctx>(
+    bctx: &BuildCtx<'ctx, '_, RuntimeStackBackend>,
+    failed: IntValue<'ctx>,
+    return_code: ReturnCode,
+    name: &str,
+) -> Result<(), Error> {
+    let failure_block = bctx.env.context().append_basic_block(bctx.func, name);
+    let valid_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, &format!("{name}_valid"));
+    bctx.builder
+        .build_conditional_branch(failed, failure_block, valid_block)?;
+    bctx.builder.position_at_end(failure_block);
+    let code = bctx.env.types().i8.const_int(return_code as u64, false);
+    bctx.builder.build_return(Some(&code))?;
+    bctx.builder.position_at_end(valid_block);
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

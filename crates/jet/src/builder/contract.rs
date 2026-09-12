@@ -31,6 +31,7 @@ pub(crate) struct Registers<'ctx> {
     pub(crate) return_offset: inkwell::values::PointerValue<'ctx>,
     pub(crate) return_length: inkwell::values::PointerValue<'ctx>,
     pub(crate) sub_call: inkwell::values::PointerValue<'ctx>,
+    pub(crate) call_info: inkwell::values::PointerValue<'ctx>,
 }
 
 impl<'ctx> Registers<'ctx> {
@@ -55,6 +56,9 @@ impl<'ctx> Registers<'ctx> {
         let sub_call = builder
             .build_struct_gep(t.exec_ctx, exec_ctx, 4, "sub_call")
             .unwrap();
+        let call_info = builder
+            .build_struct_gep(t.exec_ctx, exec_ctx, 9, "call_info")
+            .unwrap();
 
         Self {
             exec_ctx,
@@ -64,6 +68,7 @@ impl<'ctx> Registers<'ctx> {
             return_offset,
             return_length,
             sub_call,
+            call_info,
         }
     }
 }
@@ -885,10 +890,10 @@ fn analyze_symbolic_successors(
                     successors.extend(symbolic_jump_successors(code_blocks, target_pc, state)?);
                     return Ok(AbstractBlockOutcome::Successors(successors));
                 }
-                Instruction::STOP | Instruction::REVERT | Instruction::INVALID => {
+                Instruction::STOP | Instruction::INVALID => {
                     return Ok(AbstractBlockOutcome::Successors(Vec::new()));
                 }
-                Instruction::RETURN => {
+                Instruction::RETURN | Instruction::REVERT => {
                     if let Err(kind) = state.pop_n(2) {
                         return Ok(fault_outcome(kind, pc, &state));
                     }
@@ -1019,8 +1024,13 @@ fn apply_abstract_instruction(
             stack.pop_n(7)?;
             Ok(stack.push_unknown()?)
         }
-        Instruction::RETURNDATASIZE
-        | Instruction::BLOCKHASH
+        Instruction::ADDRESS
+        | Instruction::ORIGIN
+        | Instruction::CALLER
+        | Instruction::CALLVALUE
+        | Instruction::CALLDATALOAD
+        | Instruction::CALLDATASIZE
+        | Instruction::RETURNDATASIZE
         | Instruction::COINBASE
         | Instruction::TIMESTAMP
         | Instruction::NUMBER
@@ -1033,6 +1043,10 @@ fn apply_abstract_instruction(
         Instruction::RETURNDATACOPY => {
             stack.pop_n(3)?;
             Ok(())
+        }
+        Instruction::BLOCKHASH => {
+            stack.pop()?;
+            Ok(stack.push_unknown()?)
         }
         Instruction::DUP1 => Ok(stack.dup(1)?),
         Instruction::DUP2 => Ok(stack.dup(2)?),
@@ -1066,14 +1080,8 @@ fn apply_abstract_instruction(
         Instruction::SWAP14 => Ok(stack.swap(14)?),
         Instruction::SWAP15 => Ok(stack.swap(15)?),
         Instruction::SWAP16 => Ok(stack.swap(16)?),
-        Instruction::ADDRESS
+        Instruction::CALLDATACOPY
         | Instruction::BALANCE
-        | Instruction::ORIGIN
-        | Instruction::CALLER
-        | Instruction::CALLVALUE
-        | Instruction::CALLDATALOAD
-        | Instruction::CALLDATASIZE
-        | Instruction::CALLDATACOPY
         | Instruction::CODESIZE
         | Instruction::CODECOPY
         | Instruction::GASPRICE
@@ -1601,6 +1609,12 @@ fn build_non_jump_instruction<'ctx, S: StackBackend<'ctx>>(
         Instruction::MSIZE => ops::msize(bctx),
         Instruction::PC => ops::pc(bctx, code_block.offset + pc),
         Instruction::CALL => ops::call(bctx),
+        Instruction::ADDRESS => ops::address(bctx),
+        Instruction::ORIGIN => ops::origin(bctx),
+        Instruction::CALLER => ops::caller(bctx),
+        Instruction::CALLVALUE => ops::callvalue(bctx),
+        Instruction::CALLDATALOAD => ops::calldataload(bctx),
+        Instruction::CALLDATASIZE => ops::calldatasize(bctx),
         Instruction::RETURN => ops::_return(bctx),
         Instruction::REVERT => ops::revert(bctx),
         Instruction::INVALID => ops::invalid(bctx),
@@ -1640,17 +1654,7 @@ fn build_non_jump_instruction<'ctx, S: StackBackend<'ctx>>(
         Instruction::SWAP15 => ops::swap(bctx, 15),
         Instruction::SWAP16 => ops::swap(bctx, 16),
 
-        Instruction::ADDRESS => Err(Error::UnimplementedInstruction(Instruction::ADDRESS)),
         Instruction::BALANCE => Err(Error::UnimplementedInstruction(Instruction::BALANCE)),
-        Instruction::ORIGIN => Err(Error::UnimplementedInstruction(Instruction::ORIGIN)),
-        Instruction::CALLER => Err(Error::UnimplementedInstruction(Instruction::CALLER)),
-        Instruction::CALLVALUE => Err(Error::UnimplementedInstruction(Instruction::CALLVALUE)),
-        Instruction::CALLDATALOAD => {
-            Err(Error::UnimplementedInstruction(Instruction::CALLDATALOAD))
-        }
-        Instruction::CALLDATASIZE => {
-            Err(Error::UnimplementedInstruction(Instruction::CALLDATASIZE))
-        }
         Instruction::CALLDATACOPY => {
             Err(Error::UnimplementedInstruction(Instruction::CALLDATACOPY))
         }

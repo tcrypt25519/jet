@@ -118,6 +118,7 @@ pub(crate) struct Symbols<'ctx> {
     contract_call: FunctionValue<'ctx>,
     contract_call_values: FunctionValue<'ctx>,
     contract_call_return_data_copy: FunctionValue<'ctx>,
+    call_data_load: FunctionValue<'ctx>,
 
     keccak256: FunctionValue<'ctx>,
     exp: FunctionValue<'ctx>,
@@ -143,6 +144,7 @@ impl<'ctx> Symbols<'ctx> {
             module.get_function(jet_runtime::symbols::FN_CONTRACT_CALL_VALUES)?;
         let contract_call_return_data_copy =
             module.get_function(jet_runtime::symbols::FN_CONTRACT_CALL_RETURN_DATA_COPY)?;
+        let call_data_load = module.get_function(jet_runtime::symbols::FN_CALL_DATA_LOAD)?;
 
         let keccak256 = module.get_function(jet_runtime::symbols::FN_KECCAK256)?;
         let exp = module.get_function(jet_runtime::symbols::FN_EXP)?;
@@ -164,6 +166,7 @@ impl<'ctx> Symbols<'ctx> {
             contract_call,
             contract_call_values,
             contract_call_return_data_copy,
+            call_data_load,
 
             keccak256,
             exp,
@@ -210,6 +213,10 @@ impl<'ctx> Symbols<'ctx> {
 
     pub(crate) fn contract_call_return_data_copy(&self) -> FunctionValue<'ctx> {
         self.contract_call_return_data_copy
+    }
+
+    pub(crate) fn call_data_load(&self) -> FunctionValue<'ctx> {
+        self.call_data_load
     }
 
     pub(crate) fn keccak256(&self) -> FunctionValue<'ctx> {

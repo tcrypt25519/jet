@@ -9,7 +9,7 @@ use log::{info, trace};
 use thiserror::Error;
 
 use jet_runtime::{
-    Address, RuntimeBuilder, builtins, exec,
+    Address, CallInfo, RuntimeBuilder, builtins, exec,
     exec::{BlockInfo, ContractFunc, ContractRun},
 };
 
@@ -77,7 +77,7 @@ impl<'ctx> Engine<'ctx> {
         Ok(())
     }
 
-    /// Executes the previously compiled contract at `addr`.
+    /// Executes the previously compiled contract described by `call_info`.
     ///
     /// Creates a fresh JIT execution engine, links in all runtime builtins,
     /// allocates a new [`exec::Context`], and invokes the compiled contract
@@ -87,10 +87,10 @@ impl<'ctx> Engine<'ctx> {
     /// # Errors
     ///
     /// Returns [`Error::FunctionLookup`] if no contract was compiled for
-    /// `addr`, or [`Error::LLVM`] if the JIT engine cannot be created.
+    /// `call_info.address()`, or [`Error::LLVM`] if the JIT engine cannot be created.
     pub fn run_contract(
         &self,
-        addr: Address,
+        call_info: CallInfo,
         block_info: &BlockInfo,
     ) -> Result<ContractRun, Error> {
         // Create a JIT execution engine
@@ -102,7 +102,7 @@ impl<'ctx> Engine<'ctx> {
         self.link_in_runtime(&jit);
 
         // Load and run the contract function
-        let contract_exec_fn = match self.get_contract_exec_fn(&jit, addr) {
+        let contract_exec_fn = match self.get_contract_exec_fn(&jit, call_info.address()) {
             Ok(f) => f,
             Err(e) => {
                 return Err(Error::FunctionLookup(e));
@@ -110,7 +110,8 @@ impl<'ctx> Engine<'ctx> {
         };
 
         trace!("Running function...");
-        let ctx = exec::Context::new().map_err(|e| Error::Build(builder::Error::Runtime(e)))?;
+        let ctx =
+            exec::Context::new(call_info).map_err(|e| Error::Build(builder::Error::Runtime(e)))?;
         let result =
             unsafe { contract_exec_fn.call(&ctx as *const exec::Context, block_info as *const _) };
         trace!("Function returned");
@@ -144,6 +145,10 @@ impl<'ctx> Engine<'ctx> {
         map_fn(
             sym.keccak256(),
             builtins::jet_ops_keccak256 as *const () as usize,
+        );
+        map_fn(
+            sym.call_data_load(),
+            builtins::jet_call_data_load as *const () as usize,
         );
         map_fn(sym.exp(), builtins::jet_ops_exp as *const () as usize);
         map_fn(sym.addmod(), builtins::jet_ops_addmod as *const () as usize);

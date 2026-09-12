@@ -2,7 +2,7 @@ use inkwell::execution_engine::ExecutionEngine;
 use log::error;
 
 use crate::{
-    address::Address,
+    Address, CallInfo,
     error::{Result, RuntimeError},
     symbols::FN_CONTRACT_PREFIX,
     *,
@@ -40,6 +40,9 @@ pub type ContractFunc = unsafe extern "C" fn(*const Context, *const BlockInfo) -
 /// the [`Drop`] implementation.  The capacity tracked by `memory_cap` is the
 /// true allocation size, while `memory_len` tracks the portion currently
 /// accessible to EVM instructions.
+///
+/// Every context owns its [`CallInfo`], which is also heap-allocated and freed
+/// when the context is dropped.
 #[repr(C)]
 pub struct Context {
     stack_ptr: u32,
@@ -52,23 +55,26 @@ pub struct Context {
     stack: [Word; STACK_SIZE_WORDS as usize],
 
     // Pointer-based memory layout as per ADR-002
-    // u32 is safe for offsets/sizes, see ADR-004 (EVM gas costs prevent >4GB)
+    // u32 is safe for offsets/sizes; values above u32::MAX are rejected explicitly
     pub(crate) memory_ptr: *mut u8,
     pub(crate) memory_len: u32,
     pub(crate) memory_cap: u32,
+
+    call_info: *mut CallInfo,
 }
 
 impl Context {
-    /// Allocates and initialises a new execution context.
+    /// Allocates and initialises a new execution context for the given call.
     ///
     /// Heap-allocates the EVM memory buffer (32-byte aligned) at an initial
     /// capacity of `MEMORY_INITIAL_SIZE_WORDS * WORD_SIZE_BYTES` bytes.
+    /// The supplied [`CallInfo`] is also boxed and owned by the context.
     ///
     /// # Errors
     ///
     /// Returns [`RuntimeError::MemoryLayout`] or [`RuntimeError::MemoryAllocation`]
-    /// if the memory buffer cannot be allocated.
-    pub fn new() -> Result<Self> {
+    /// if the memory buffer or call information cannot be allocated.
+    pub fn new(call_info: CallInfo) -> Result<Self> {
         // Allocate memory buffer on the heap
         let memory_size = (WORD_SIZE_BYTES * MEMORY_INITIAL_SIZE_WORDS) as usize;
         let memory_layout = std::alloc::Layout::from_size_align(memory_size, 32)
@@ -81,6 +87,8 @@ impl Context {
             ));
         }
 
+        let call_info = Box::into_raw(Box::new(call_info));
+
         Ok(Context {
             stack_ptr: 0,
             jump_ptr: 0,
@@ -91,6 +99,7 @@ impl Context {
             memory_ptr,
             memory_len: 0,
             memory_cap: memory_size as u32, // Use calculated memory_size
+            call_info,
         })
     }
 
@@ -174,6 +183,12 @@ impl Context {
         self.sub_call.as_mut().map(|ctx| ctx.as_mut())
     }
 
+    /// Returns the call information for this execution frame.
+    pub fn call_info(&self) -> &CallInfo {
+        // SAFETY: every Context is created with a valid, boxed CallInfo.
+        unsafe { &*self.call_info }
+    }
+
     // Mutators; internal-only
     //
     // These functions are not meant to be exposed to the outside world. They are used internally
@@ -226,21 +241,26 @@ impl Context {
         true
     }
 
-    /// Creates a new context and sets it as the sub context.
+    /// Creates a new context for a nested call and sets it as the sub context.
     ///
     /// Returns a mutable reference to the newly created sub-context.
     ///
     /// # Errors
     ///
     /// Returns an error if memory allocation for the sub-context fails.
-    pub(crate) fn init_sub_call(&mut self) -> Result<&mut Context> {
-        self.sub_call = Some(Box::new(Context::new()?));
+    pub(crate) fn init_sub_call(&mut self, call_info: CallInfo) -> Result<&mut Context> {
+        self.sub_call = Some(Box::new(Context::new(call_info)?));
         Ok(self.sub_call.as_deref_mut().expect("just assigned"))
     }
 }
 
 impl Drop for Context {
     fn drop(&mut self) {
+        // Deallocate call information
+        if !self.call_info.is_null() {
+            unsafe { drop(Box::from_raw(self.call_info)) };
+        }
+
         // Deallocate memory buffer
         if !self.memory_ptr.is_null() {
             let memory_size = self.memory_cap as usize;

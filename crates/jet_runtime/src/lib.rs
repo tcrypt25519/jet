@@ -18,6 +18,8 @@ pub mod address;
 mod binding;
 /// `extern "C"` builtin functions invoked by JIT-compiled contract code.
 pub mod builtins;
+/// Immutable call information for one execution frame.
+pub mod call_info;
 /// Runtime error type and [`Result`] alias.
 pub mod error;
 /// Execution context, block info, type aliases, and return codes.
@@ -31,6 +33,7 @@ pub mod symbols;
 mod layout_tests;
 
 pub use address::Address;
+pub use call_info::CallInfo;
 pub use error::{Result, RuntimeError};
 pub use jet_ir::*;
 pub use runtime_builder::RuntimeBuilder;

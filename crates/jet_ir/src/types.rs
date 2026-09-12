@@ -59,6 +59,8 @@ pub struct Types<'ctx> {
     pub exec_ctx: StructType<'ctx>,
     /// The LLVM struct type for [`jet_runtime::exec::BlockInfo`].
     pub block_info: StructType<'ctx>,
+    /// The LLVM struct type for [`jet_runtime::CallInfo`].
+    pub call_info: StructType<'ctx>,
     /// The LLVM function type for a compiled contract: `fn(*const Context, *const BlockInfo) -> i8`.
     pub contract_fn: FunctionType<'ctx>,
 }
@@ -105,6 +107,7 @@ impl<'ctx> Types<'ctx> {
         // 6: memory_ptr (ptr)
         // 7: memory_len (i32)
         // 8: memory_cap (i32)
+        // 9: call_info (ptr)
         let exec_ctx = context.struct_type(
             &[
                 stack_ptr.into(),
@@ -116,6 +119,7 @@ impl<'ctx> Types<'ctx> {
                 mem_ptr.into(),
                 mem_len.into(),
                 mem_cap.into(),
+                ptr.into(),
             ],
             PACK_STRUCTS,
         );
@@ -140,6 +144,26 @@ impl<'ctx> Types<'ctx> {
                 word_bytes.into(),    // hash
                 hash_history.into(),  // hash_history
                 address_bytes.into(), // coinbase
+            ],
+            PACK_STRUCTS,
+        );
+
+        // Call information structure
+        // Field order (packed, matches `#[repr(C)]` `jet_runtime::CallInfo`):
+        // 0: calldata_ptr (ptr)
+        // 1: calldata_len (i32)
+        // 2: address ([20 x i8])
+        // 3: origin ([20 x i8])
+        // 4: caller ([20 x i8])
+        // 5: value ([32 x i8])
+        let call_info = context.struct_type(
+            &[
+                ptr.into(),
+                i32.into(),
+                address_bytes.into(),
+                address_bytes.into(),
+                address_bytes.into(),
+                word_bytes.into(),
             ],
             PACK_STRUCTS,
         );
@@ -169,6 +193,7 @@ impl<'ctx> Types<'ctx> {
 
             exec_ctx,
             block_info,
+            call_info,
             contract_fn,
         }
     }

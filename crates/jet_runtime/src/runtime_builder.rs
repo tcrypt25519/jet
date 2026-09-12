@@ -73,14 +73,28 @@ impl<'ctx> RuntimeBuilder<'ctx> {
             crate::symbols::FN_CONTRACT_CALL_VALUES,
             self.types.i8.fn_type(
                 &[
-                    self.types.ptr.into(),
-                    self.types.ptr.into(),
-                    self.types.ptr.into(),
-                    self.types.i64.into(),
-                    self.types.i64.into(),
-                    self.types.i32.into(),
-                    self.types.i32.into(),
-                    self.types.i32.into(),
+                    self.types.ptr.into(), // ctx
+                    self.types.ptr.into(), // block_info
+                    self.types.ptr.into(), // jit_engine
+                    self.types.i64.into(), // addr_lo
+                    self.types.i64.into(), // addr_mid
+                    self.types.i32.into(), // addr_hi
+                    self.types.ptr.into(), // value (32 bytes)
+                    self.types.i32.into(), // ret_dest
+                    self.types.i32.into(), // ret_len
+                ],
+                false,
+            ),
+            None,
+        );
+
+        self.module.add_function(
+            crate::symbols::FN_CALL_DATA_LOAD,
+            self.context.void_type().fn_type(
+                &[
+                    self.types.ptr.into(), // ctx
+                    self.types.ptr.into(), // offset (32 bytes)
+                    self.types.ptr.into(), // out (32 bytes)
                 ],
                 false,
             ),
@@ -203,6 +217,27 @@ impl<'ctx> RuntimeBuilder<'ctx> {
             .build_load(self.types.i32, stack_ptr_addr, "stack.ptr")
             .unwrap()
             .into_int_value();
+        let is_full = self
+            .builder
+            .build_int_compare(
+                inkwell::IntPredicate::UGE,
+                stack_ptr,
+                self.types
+                    .i32
+                    .const_int(jet_ir::STACK_SIZE_WORDS as u64, false),
+                "stack.is_full",
+            )
+            .unwrap();
+        let overflow_block = self.context.append_basic_block(function, "overflow");
+        let valid_block = self.context.append_basic_block(function, "valid");
+        self.builder
+            .build_conditional_branch(is_full, overflow_block, valid_block)
+            .unwrap();
+        self.builder.position_at_end(overflow_block);
+        self.builder
+            .build_return(Some(&self.context.bool_type().const_zero()))
+            .unwrap();
+        self.builder.position_at_end(valid_block);
 
         // Get address of stack[stack_ptr] (field 5 is stack array)
         let stack_field_ptr = self
@@ -268,13 +303,6 @@ impl<'ctx> RuntimeBuilder<'ctx> {
         let ctx_ptr = function.get_nth_param(0).unwrap().into_pointer_value();
         let word_ptr = function.get_nth_param(1).unwrap().into_pointer_value();
 
-        // Load the word value from the pointer
-        let word_value = self
-            .builder
-            .build_load(self.types.i256, word_ptr, "word.value")
-            .unwrap()
-            .into_int_value();
-
         // Load stack pointer (field 0)
         let stack_ptr_addr = self
             .builder
@@ -283,6 +311,40 @@ impl<'ctx> RuntimeBuilder<'ctx> {
         let stack_ptr = self
             .builder
             .build_load(self.types.i32, stack_ptr_addr, "stack.ptr")
+            .unwrap()
+            .into_int_value();
+        let is_null = self
+            .builder
+            .build_is_null(word_ptr, "word.is_null")
+            .unwrap();
+        let is_full = self
+            .builder
+            .build_int_compare(
+                inkwell::IntPredicate::UGE,
+                stack_ptr,
+                self.types
+                    .i32
+                    .const_int(jet_ir::STACK_SIZE_WORDS as u64, false),
+                "stack.is_full",
+            )
+            .unwrap();
+        let invalid = self
+            .builder
+            .build_or(is_null, is_full, "stack.push.invalid")
+            .unwrap();
+        let invalid_block = self.context.append_basic_block(function, "invalid");
+        let valid_block = self.context.append_basic_block(function, "valid");
+        self.builder
+            .build_conditional_branch(invalid, invalid_block, valid_block)
+            .unwrap();
+        self.builder.position_at_end(invalid_block);
+        self.builder
+            .build_return(Some(&self.context.bool_type().const_zero()))
+            .unwrap();
+        self.builder.position_at_end(valid_block);
+        let word_value = self
+            .builder
+            .build_load(self.types.i256, word_ptr, "word.value")
             .unwrap()
             .into_int_value();
 
@@ -452,6 +514,26 @@ impl<'ctx> RuntimeBuilder<'ctx> {
             .unwrap()
             .into_int_value();
 
+        let is_underflow = self
+            .builder
+            .build_int_compare(
+                inkwell::IntPredicate::UGE,
+                peek_idx_32,
+                stack_ptr,
+                "peek.is_underflow",
+            )
+            .unwrap();
+        let underflow_block = self.context.append_basic_block(function, "underflow");
+        let valid_block = self.context.append_basic_block(function, "valid");
+        self.builder
+            .build_conditional_branch(is_underflow, underflow_block, valid_block)
+            .unwrap();
+        self.builder.position_at_end(underflow_block);
+        self.builder
+            .build_return(Some(&self.types.ptr.const_null()))
+            .unwrap();
+        self.builder.position_at_end(valid_block);
+
         // Calculate index: stack_ptr - peek_idx - 1
         let idx_temp = self
             .builder
@@ -514,6 +596,34 @@ impl<'ctx> RuntimeBuilder<'ctx> {
             .build_load(self.types.i32, stack_ptr_addr, "stack.ptr")
             .unwrap()
             .into_int_value();
+
+        let required_depth = self
+            .builder
+            .build_int_add(
+                swap_idx_32,
+                self.types.i32.const_int(2, false),
+                "swap.required_depth",
+            )
+            .unwrap();
+        let is_underflow = self
+            .builder
+            .build_int_compare(
+                inkwell::IntPredicate::ULT,
+                stack_ptr,
+                required_depth,
+                "swap.is_underflow",
+            )
+            .unwrap();
+        let underflow_block = self.context.append_basic_block(function, "underflow");
+        let valid_block = self.context.append_basic_block(function, "valid");
+        self.builder
+            .build_conditional_branch(is_underflow, underflow_block, valid_block)
+            .unwrap();
+        self.builder.position_at_end(underflow_block);
+        self.builder
+            .build_return(Some(&self.context.bool_type().const_zero()))
+            .unwrap();
+        self.builder.position_at_end(valid_block);
 
         // Calculate top_idx: stack_ptr - 1
         let top_idx = self

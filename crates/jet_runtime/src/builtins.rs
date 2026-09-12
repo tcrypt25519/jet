@@ -2,7 +2,7 @@ use inkwell::execution_engine::ExecutionEngine;
 use log::trace;
 
 use crate::{
-    ADDRESS_SIZE_BYTES,
+    ADDRESS_SIZE_BYTES, Address, CallInfo,
     exec::{BlockInfo, Context, ContractFunc, ReturnCode, jet_contract_fn_lookup},
 };
 
@@ -55,7 +55,17 @@ pub unsafe extern "C" fn jet_contract_call(
     let addr_slice = unsafe { std::slice::from_raw_parts(addr, ADDRESS_SIZE_BYTES) };
     let ret_dest = unsafe { *ret_dest };
     let ret_len = unsafe { *ret_len };
-    unsafe { jet_contract_call_impl(ctx, block_info, jit_engine, addr_slice, ret_dest, ret_len) }
+    unsafe {
+        jet_contract_call_impl(
+            ctx,
+            block_info,
+            jit_engine,
+            addr_slice,
+            std::ptr::null(),
+            ret_dest,
+            ret_len,
+        )
+    }
 }
 
 /// Calls a contract using value arguments instead of stack-word pointers.
@@ -74,6 +84,7 @@ pub unsafe extern "C" fn jet_contract_call_values(
     addr_lo: u64,
     addr_mid: u64,
     addr_hi: u32,
+    value: *const u8,
     ret_dest: u32,
     ret_len: u32,
 ) -> i8 {
@@ -82,7 +93,7 @@ pub unsafe extern "C" fn jet_contract_call_values(
     addr[8..16].copy_from_slice(&addr_mid.to_le_bytes());
     addr[16..20].copy_from_slice(&addr_hi.to_le_bytes());
 
-    unsafe { jet_contract_call_impl(ctx, block_info, jit_engine, &addr, ret_dest, ret_len) }
+    unsafe { jet_contract_call_impl(ctx, block_info, jit_engine, &addr, value, ret_dest, ret_len) }
 }
 
 unsafe fn jet_contract_call_impl(
@@ -90,6 +101,7 @@ unsafe fn jet_contract_call_impl(
     block_info: *const BlockInfo,
     jit_engine: *const ExecutionEngine,
     addr_slice: &[u8],
+    value: *const u8,
     ret_dest: u32,
     ret_len: u32,
 ) -> i8 {
@@ -109,7 +121,33 @@ unsafe fn jet_contract_call_impl(
         None => return ContractCallError::InvalidCtx as i8,
     };
 
-    let callee_ctx = match caller_ctx.init_sub_call() {
+    let caller = caller_ctx.call_info();
+    let mut value_word = [0u8; 32];
+    if !value.is_null() {
+        value_word.copy_from_slice(unsafe { std::slice::from_raw_parts(value, 32) });
+    }
+    let address_bytes: [u8; ADDRESS_SIZE_BYTES] =
+        addr_slice.try_into().unwrap_or([0u8; ADDRESS_SIZE_BYTES]);
+    // The address on the JIT stack is little-endian; the canonical
+    // CallInfo address uses the same byte order as the Address newtype.
+    let mut canonical_address = address_bytes;
+    canonical_address.reverse();
+    let calldata = CallInfo::new(
+        Address::new(canonical_address),
+        caller.origin(),
+        caller.address(),
+        value_word,
+        &[],
+    );
+    let calldata = match calldata {
+        Ok(c) => c,
+        Err(e) => {
+            log::error!("Failed to create sub-call info: {}", e);
+            return ContractCallError::SubCtxCreationFailed as i8;
+        }
+    };
+
+    let callee_ctx = match caller_ctx.init_sub_call(calldata) {
         Ok(ctx) => ctx,
         Err(e) => {
             log::error!("Failed to create sub-context: {}", e);
@@ -504,4 +542,35 @@ pub unsafe extern "C" fn jet_mem_expand(ctx: *mut Context, offset: u32, size: u3
     ctx.memory_len = required_len;
 
     MemoryExpansionError::Success as i8
+}
+
+/// Loads a 32-byte calldata word at the given 256-bit offset, padding with
+/// zeros for out-of-range bytes.
+///
+/// # Safety
+///
+/// `ctx`, `offset`, and `out` must be valid, non-null pointers. `offset` must
+/// point to at least 32 bytes and `out` to at least 32 bytes of writable memory.
+pub unsafe extern "C" fn jet_call_data_load(ctx: *const Context, offset: *const u8, out: *mut u8) {
+    if ctx.is_null() || offset.is_null() || out.is_null() {
+        return;
+    }
+    let ctx = unsafe { &*ctx };
+    let offset = unsafe { std::slice::from_raw_parts(offset, 32) };
+    let len = ctx.call_info().calldata_len();
+
+    let mut result = [0u8; 32];
+    let offset_low = u32::from_le_bytes(offset[0..4].try_into().unwrap_or([0u8; 4]));
+    let is_narrow = offset[4..32].iter().all(|&b| b == 0);
+    if is_narrow && offset_low < len {
+        let offset = offset_low as usize;
+        let calldata = ctx.call_info().calldata();
+        let available = calldata.len() - offset;
+        let n = available.min(32);
+        if n > 0 {
+            result[..n].copy_from_slice(&calldata[offset..offset + n]);
+        }
+    }
+
+    unsafe { std::slice::from_raw_parts_mut(out, 32).copy_from_slice(&result) };
 }

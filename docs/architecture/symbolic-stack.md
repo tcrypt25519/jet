@@ -148,6 +148,5 @@ The current implementation covers:
 
 Contract exits, planned fault exits, and jump failures all materialize the
 symbolic stack into `Context.stack`, so the observable execution context is
-identical between backends for every path the runtime backend can execute
-safely. The runtime backend's own gaps (no bounds checks on push, peek, or
-swap) are tracked in the completion plan as D9.
+identical between backends. Runtime push, peek and swap helpers enforce the
+same overflow and underflow limits used by symbolic planning.

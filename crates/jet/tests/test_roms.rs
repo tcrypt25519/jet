@@ -1,6 +1,6 @@
-use jet::instructions::Instruction;
+use jet::{builder::env::StackMode, instructions::Instruction};
 use jet_push_macros::generate_push_macros;
-use jet_runtime::exec::ReturnCode;
+use jet_runtime::{Address, CallInfo, exec::ReturnCode};
 use roms::*;
 
 mod roms;
@@ -27,6 +27,12 @@ macro_rules! define_ops {
 generate_push_macros!(0..=32);
 
 define_ops!(
+    ADDRESS,
+    ORIGIN,
+    CALLER,
+    CALLVALUE,
+    CALLDATALOAD,
+    CALLDATASIZE,
     STOP,
     ADD,
     MUL,
@@ -68,6 +74,7 @@ define_ops!(
     CALL,
     RETURNDATASIZE,
     RETURNDATACOPY,
+    BLOCKHASH,
     COINBASE,
     TIMESTAMP,
     NUMBER,
@@ -77,6 +84,7 @@ define_ops!(
     BASEFEE,
     BLOBBASEFEE,
     MSIZE,
+    REVERT,
     INVALID
 );
 
@@ -125,6 +133,17 @@ rom_tests! {
         expected: TestContractRun {
             stack_ptr: 2,
             stack: vec![stack_word(&[0x00, 0x00, 0xFF]), stack_word(&[0xFF, 0x00, 0xFF])],
+            ..Default::default()
+        },
+    },
+
+    memory_offset_above_u32_max_is_rejected: Test {
+        roms: vec![bytecode![
+            PUSH5!(0x01, 0x00, 0x00, 0x00, 0x00),
+            MLOAD!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::Invalid,
             ..Default::default()
         },
     },
@@ -387,6 +406,47 @@ rom_tests! {
         },
     },
 
+    revert_sets_offset_and_length: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x20),
+            PUSH1!(0x03),
+            REVERT!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::Revert,
+            return_offset: 0x03,
+            return_length: 0x20,
+            ..Default::default()
+        },
+    },
+
+    blockhash_consumes_number_and_reads_history: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x28),
+            BLOCKHASH!(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![[
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+            ]],
+            ..Default::default()
+        },
+    },
+
+    blockhash_returns_zero_outside_history: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x2A),
+            BLOCKHASH!(),
+        ]],
+        expected: TestContractRun {
+            stack_ptr: 1,
+            stack: vec![stack_word(&[])],
+            ..Default::default()
+        },
+    },
+
     basic_call_with_return_data: Test {
         roms: vec![bytecode![
             PUSH1!(0x0A),
@@ -416,7 +476,7 @@ rom_tests! {
         expected: TestContractRun {
             stack_ptr: 2,
             stack: vec![
-                stack_word(&[0x00]),
+                stack_word(&[0x01]),
                 stack_word(&[0x0A])
             ],
             memory: Some(vec![0x00, 0xFF, 0x00, 0xFF]),
@@ -622,7 +682,7 @@ rom_tests! {
         ]],
         expected: TestContractRun {
             stack_ptr: 2,
-            stack: vec![stack_word(&[0x00]), stack_word(&[0x2A])],
+            stack: vec![stack_word(&[0x01]), stack_word(&[0x2A])],
             ..Default::default()
         },
     },
@@ -2225,38 +2285,26 @@ rom_tests! {
     },
 }
 
-// Symbolic-only fault tests. The runtime backend has no bounds checks on
-// push, peek, or swap, so these roms are memory-unsafe under it.
-#[test]
-fn test_symbolic_stack_overflow_from_straightline_pushes() -> Result<(), Error> {
-    let rom: Vec<u8> = std::iter::repeat_n(PUSH1!(0x01), 1025).flatten().collect();
-    let t = Test {
-        roms: vec![rom],
+rom_tests! {
+    stack_overflow_from_straightline_pushes: Test {
+        roms: vec![std::iter::repeat_n(PUSH1!(0x01), 1025).flatten().collect()],
         expected: TestContractRun {
             result: ReturnCode::StackOverflow,
             stack_ptr: 1024,
             stack: vec![stack_word(&[0x01]); 1024],
             ..Default::default()
         },
-    };
-    _test_rom_body(t, jet::builder::env::StackMode::SymbolicPreferred)
-}
+    },
 
-#[test]
-fn test_symbolic_dup_on_empty_stack_underflows() -> Result<(), Error> {
-    let t = Test {
+    dup_on_empty_stack_underflows: Test {
         roms: vec![bytecode![DUP1!(), STOP!()]],
         expected: TestContractRun {
             result: ReturnCode::StackUnderflow,
             ..Default::default()
         },
-    };
-    _test_rom_body(t, jet::builder::env::StackMode::SymbolicPreferred)
-}
+    },
 
-#[test]
-fn test_symbolic_swap_beyond_stack_underflows() -> Result<(), Error> {
-    let t = Test {
+    swap_beyond_stack_underflows: Test {
         roms: vec![bytecode![PUSH1!(0x01), SWAP1!(), STOP!()]],
         expected: TestContractRun {
             result: ReturnCode::StackUnderflow,
@@ -2264,6 +2312,368 @@ fn test_symbolic_swap_beyond_stack_underflows() -> Result<(), Error> {
             stack: vec![stack_word(&[0x01])],
             ..Default::default()
         },
+    },
+}
+
+fn addr_byte(b: u8) -> Address {
+    let mut a = [0u8; 20];
+    a[0] = b;
+    Address::new(a)
+}
+
+fn value_word(low: u8) -> [u8; 32] {
+    let mut w = [0u8; 32];
+    w[0] = low;
+    w
+}
+
+fn stack_byte(b: u8) -> [u8; 32] {
+    let mut w = [0u8; 32];
+    w[0] = b;
+    w
+}
+
+fn push20_addr(addr: u8) -> Vec<u8> {
+    let mut v = vec![0x73, addr];
+    v.resize(1 + 20, 0);
+    v
+}
+
+fn make_call_info(
+    address: u8,
+    origin: u8,
+    caller: u8,
+    value: u8,
+    calldata: &[u8],
+) -> impl Fn() -> CallInfo + '_ {
+    move || {
+        CallInfo::new(
+            addr_byte(address),
+            addr_byte(origin),
+            addr_byte(caller),
+            value_word(value),
+            calldata,
+        )
+        .unwrap()
+    }
+}
+
+fn run_both_modes(
+    make_call_info: impl Fn() -> CallInfo,
+    contracts: &[(Address, Vec<u8>)],
+    expected: &TestContractRun,
+) -> Result<(), Error> {
+    _test_contracts_with_call_info(&make_call_info, contracts, expected, StackMode::RuntimeOnly)?;
+    _test_contracts_with_call_info(
+        &make_call_info,
+        contracts,
+        expected,
+        StackMode::SymbolicPreferred,
+    )
+}
+
+#[test]
+fn address_reads_call_info() -> Result<(), Error> {
+    let contracts = [(addr_byte(0x01), bytecode![ADDRESS!()])];
+    let expected = TestContractRun {
+        stack_ptr: 1,
+        stack: vec![stack_byte(0x01)],
+        ..Default::default()
     };
-    _test_rom_body(t, jet::builder::env::StackMode::SymbolicPreferred)
+    run_both_modes(make_call_info(0x01, 0, 0, 0, &[]), &contracts, &expected)
+}
+
+#[test]
+fn origin_reads_call_info() -> Result<(), Error> {
+    let contracts = [(addr_byte(0x01), bytecode![ORIGIN!()])];
+    let expected = TestContractRun {
+        stack_ptr: 1,
+        stack: vec![stack_byte(0x03)],
+        ..Default::default()
+    };
+    run_both_modes(make_call_info(0x01, 0x03, 0, 0, &[]), &contracts, &expected)
+}
+
+#[test]
+fn caller_reads_call_info() -> Result<(), Error> {
+    let contracts = [(addr_byte(0x01), bytecode![CALLER!()])];
+    let expected = TestContractRun {
+        stack_ptr: 1,
+        stack: vec![stack_byte(0x02)],
+        ..Default::default()
+    };
+    run_both_modes(make_call_info(0x01, 0, 0x02, 0, &[]), &contracts, &expected)
+}
+
+#[test]
+fn callvalue_reads_call_info() -> Result<(), Error> {
+    let contracts = [(addr_byte(0x01), bytecode![CALLVALUE!(), STOP!()])];
+    let expected = TestContractRun {
+        result: ReturnCode::Stop,
+        stack_ptr: 1,
+        stack: vec![value_word(0xAB)],
+        ..Default::default()
+    };
+    run_both_modes(make_call_info(0x01, 0, 0, 0xAB, &[]), &contracts, &expected)
+}
+
+#[test]
+fn calldatasize_reads_length() -> Result<(), Error> {
+    let data = [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF];
+    let contracts = [(addr_byte(0x01), bytecode![CALLDATASIZE!(), STOP!()])];
+    let expected = TestContractRun {
+        result: ReturnCode::Stop,
+        stack_ptr: 1,
+        stack: vec![stack_byte(0x06)],
+        ..Default::default()
+    };
+    run_both_modes(make_call_info(0x01, 0, 0, 0, &data), &contracts, &expected)
+}
+
+#[test]
+fn calldataload_reads_first_word() -> Result<(), Error> {
+    let data = [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF];
+    let mut want = [0u8; 32];
+    want[..data.len()].copy_from_slice(&data);
+    let contracts = [(
+        addr_byte(0x01),
+        bytecode![PUSH1!(0x00), CALLDATALOAD!(), STOP!()],
+    )];
+    let expected = TestContractRun {
+        result: ReturnCode::Stop,
+        stack_ptr: 1,
+        stack: vec![want],
+        ..Default::default()
+    };
+    run_both_modes(make_call_info(0x01, 0, 0, 0, &data), &contracts, &expected)
+}
+
+#[test]
+fn calldataload_partial_word() -> Result<(), Error> {
+    let data = [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF];
+    let mut want = [0u8; 32];
+    want[..data.len() - 1].copy_from_slice(&data[1..]);
+    let contracts = [(
+        addr_byte(0x01),
+        bytecode![PUSH1!(0x01), CALLDATALOAD!(), STOP!()],
+    )];
+    let expected = TestContractRun {
+        result: ReturnCode::Stop,
+        stack_ptr: 1,
+        stack: vec![want],
+        ..Default::default()
+    };
+    run_both_modes(make_call_info(0x01, 0, 0, 0, &data), &contracts, &expected)
+}
+
+#[test]
+fn calldataload_beyond_length_is_zero() -> Result<(), Error> {
+    let data = [0xAA, 0xBB, 0xCC];
+    let contracts = [(
+        addr_byte(0x01),
+        bytecode![PUSH1!(0x40), CALLDATALOAD!(), STOP!()],
+    )];
+    let expected = TestContractRun {
+        result: ReturnCode::Stop,
+        stack_ptr: 1,
+        stack: vec![[0u8; 32]],
+        ..Default::default()
+    };
+    run_both_modes(make_call_info(0x01, 0, 0, 0, &data), &contracts, &expected)
+}
+
+#[test]
+fn calldatasize_empty_is_zero() -> Result<(), Error> {
+    let contracts = [(addr_byte(0x01), bytecode![CALLDATASIZE!(), STOP!()])];
+    let expected = TestContractRun {
+        result: ReturnCode::Stop,
+        stack_ptr: 1,
+        stack: vec![[0u8; 32]],
+        ..Default::default()
+    };
+    run_both_modes(make_call_info(0x01, 0, 0, 0, &[]), &contracts, &expected)
+}
+
+#[test]
+fn calldataload_full_word() -> Result<(), Error> {
+    let data = [0xAB; 32];
+    let contracts = [(
+        addr_byte(0x01),
+        bytecode![PUSH1!(0x00), CALLDATALOAD!(), STOP!()],
+    )];
+    let expected = TestContractRun {
+        result: ReturnCode::Stop,
+        stack_ptr: 1,
+        stack: vec![[0xAB; 32]],
+        ..Default::default()
+    };
+    run_both_modes(make_call_info(0x01, 0, 0, 0, &data), &contracts, &expected)
+}
+
+#[test]
+fn nested_address_propagates() -> Result<(), Error> {
+    let data = [];
+    let caller = bytecode![
+        PUSH1!(0x20),
+        PUSH1!(0x00),
+        PUSH1!(0x00),
+        PUSH1!(0x00),
+        PUSH1!(0x00),
+        push20_addr(0x01),
+        PUSH1!(0x00),
+        CALL!(),
+        PUSH1!(0x00),
+        PUSH1!(0x00),
+        PUSH1!(0x20),
+        RETURNDATACOPY!(),
+        PUSH1!(0x00),
+        MLOAD!(),
+        STOP!(),
+    ];
+    let callee = bytecode![
+        ADDRESS!(),
+        PUSH1!(0x00),
+        MSTORE!(),
+        PUSH1!(0x20),
+        PUSH1!(0x00),
+        RETURN!(),
+    ];
+    let contracts = [(addr_byte(0x02), caller), (addr_byte(0x01), callee)];
+    let expected = TestContractRun {
+        result: ReturnCode::Stop,
+        stack_ptr: 2,
+        stack: vec![stack_byte(0x01), stack_byte(0x01)],
+        ..Default::default()
+    };
+    run_both_modes(
+        make_call_info(0x02, 0x03, 0x04, 0, &data),
+        &contracts,
+        &expected,
+    )
+}
+
+#[test]
+fn nested_origin_propagates() -> Result<(), Error> {
+    let data = [];
+    let caller = bytecode![
+        PUSH1!(0x20),
+        PUSH1!(0x00),
+        PUSH1!(0x00),
+        PUSH1!(0x00),
+        PUSH1!(0x00),
+        push20_addr(0x01),
+        PUSH1!(0x00),
+        CALL!(),
+        PUSH1!(0x00),
+        PUSH1!(0x00),
+        PUSH1!(0x20),
+        RETURNDATACOPY!(),
+        PUSH1!(0x00),
+        MLOAD!(),
+        STOP!(),
+    ];
+    let callee = bytecode![
+        ORIGIN!(),
+        PUSH1!(0x00),
+        MSTORE!(),
+        PUSH1!(0x20),
+        PUSH1!(0x00),
+        RETURN!(),
+    ];
+    let contracts = [(addr_byte(0x02), caller), (addr_byte(0x01), callee)];
+    let expected = TestContractRun {
+        result: ReturnCode::Stop,
+        stack_ptr: 2,
+        stack: vec![stack_byte(0x01), stack_byte(0x03)],
+        ..Default::default()
+    };
+    run_both_modes(
+        make_call_info(0x02, 0x03, 0x04, 0, &data),
+        &contracts,
+        &expected,
+    )
+}
+
+#[test]
+fn nested_caller_propagates() -> Result<(), Error> {
+    let data = [];
+    let caller = bytecode![
+        PUSH1!(0x20),
+        PUSH1!(0x00),
+        PUSH1!(0x00),
+        PUSH1!(0x00),
+        PUSH1!(0x00),
+        push20_addr(0x01),
+        PUSH1!(0x00),
+        CALL!(),
+        PUSH1!(0x00),
+        PUSH1!(0x00),
+        PUSH1!(0x20),
+        RETURNDATACOPY!(),
+        PUSH1!(0x00),
+        MLOAD!(),
+        STOP!(),
+    ];
+    let callee = bytecode![
+        CALLER!(),
+        PUSH1!(0x00),
+        MSTORE!(),
+        PUSH1!(0x20),
+        PUSH1!(0x00),
+        RETURN!(),
+    ];
+    let contracts = [(addr_byte(0x02), caller), (addr_byte(0x01), callee)];
+    let expected = TestContractRun {
+        result: ReturnCode::Stop,
+        stack_ptr: 2,
+        stack: vec![stack_byte(0x01), stack_byte(0x02)],
+        ..Default::default()
+    };
+    run_both_modes(
+        make_call_info(0x02, 0x03, 0x04, 0, &data),
+        &contracts,
+        &expected,
+    )
+}
+
+#[test]
+fn nested_callvalue_propagates() -> Result<(), Error> {
+    let data = [];
+    let caller = bytecode![
+        PUSH1!(0x20),
+        PUSH1!(0x00),
+        PUSH1!(0x00),
+        PUSH1!(0x00),
+        PUSH1!(0x0A),
+        push20_addr(0x01),
+        PUSH1!(0x00),
+        CALL!(),
+        PUSH1!(0x00),
+        PUSH1!(0x00),
+        PUSH1!(0x20),
+        RETURNDATACOPY!(),
+        PUSH1!(0x00),
+        MLOAD!(),
+        STOP!(),
+    ];
+    let callee = bytecode![
+        CALLVALUE!(),
+        PUSH1!(0x00),
+        MSTORE!(),
+        PUSH1!(0x20),
+        PUSH1!(0x00),
+        RETURN!(),
+    ];
+    let contracts = [(addr_byte(0x02), caller), (addr_byte(0x01), callee)];
+    let expected = TestContractRun {
+        result: ReturnCode::Stop,
+        stack_ptr: 2,
+        stack: vec![stack_byte(0x01), value_word(0x0A)],
+        ..Default::default()
+    };
+    run_both_modes(
+        make_call_info(0x02, 0x03, 0x04, 0, &data),
+        &contracts,
+        &expected,
+    )
 }

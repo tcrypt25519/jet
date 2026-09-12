@@ -8,7 +8,7 @@ use jet::{
     engine,
     engine::Engine,
 };
-use jet_runtime::{self, Address, exec, exec::ReturnCode};
+use jet_runtime::{self, Address, CallInfo, exec, exec::ReturnCode};
 
 #[derive(Error, Debug)]
 #[error(transparent)]
@@ -112,7 +112,56 @@ pub(crate) fn _test_rom_body(t: Test, stack_mode: StackMode) -> Result<(), Error
         engine.build_contract(addr, rom.as_slice())?;
     }
 
-    let run = engine.run_contract(Address::ZERO, &block_info)?;
+    let call_info = new_test_call_info();
+    let run = engine.run_contract(call_info, &block_info)?;
+    t.expected.assert_eq(&run);
+
+    Ok(())
+}
+
+pub(crate) fn _test_contracts_with_call_info(
+    make_call_info: &impl Fn() -> CallInfo,
+    contracts: &[(Address, Vec<u8>)],
+    expected: &TestContractRun,
+    stack_mode: StackMode,
+) -> Result<(), Error> {
+    let call_info = make_call_info();
+    let llvm_ctx = Context::create();
+    let opts = Options::new(Debug, false, true).with_stack_mode(stack_mode);
+    let block_info = new_test_block_info();
+
+    let mut engine = Engine::new(&llvm_ctx, opts)?;
+    for (addr, rom) in contracts {
+        trace!("Building contract at address {}", addr);
+        engine.build_contract(*addr, rom.as_slice())?;
+    }
+
+    let run = engine.run_contract(call_info, &block_info)?;
+    expected.assert_eq(&run);
+
+    Ok(())
+}
+
+pub(crate) fn _test_rom_with_call_info(
+    call_info: CallInfo,
+    t: Test,
+    stack_mode: StackMode,
+) -> Result<(), Error> {
+    let llvm_ctx = Context::create();
+    let opts = Options::new(Debug, false, true).with_stack_mode(stack_mode);
+    let block_info = new_test_block_info();
+
+    let mut engine = Engine::new(&llvm_ctx, opts)?;
+
+    assert_ne!(t.roms.len(), 0);
+    for (i, rom) in t.roms.iter().enumerate() {
+        let mut addr = Address::ZERO;
+        addr.as_bytes_mut()[Address::LEN - 1] = i as u8;
+        trace!("Building contract at address {}", addr);
+        engine.build_contract(addr, rom.as_slice())?;
+    }
+
+    let run = engine.run_contract(call_info, &block_info)?;
     t.expected.assert_eq(&run);
 
     Ok(())
@@ -124,7 +173,7 @@ pub(crate) fn stack_word(bytes: &[u8]) -> [u8; 32] {
     word
 }
 
-fn new_test_block_info() -> exec::BlockInfo {
+pub(crate) fn new_test_block_info() -> exec::BlockInfo {
     let hash = [
         0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
         25, 26, 27, 28, 29, 30, 31,
@@ -143,6 +192,10 @@ fn new_test_block_info() -> exec::BlockInfo {
         hash_history,
         coinbase,
     )
+}
+
+pub(crate) fn new_test_call_info() -> CallInfo {
+    CallInfo::new(Address::ZERO, Address::ZERO, Address::ZERO, [0u8; 32], &[]).unwrap()
 }
 
 fn new_test_block_info_hash_history() -> exec::HashHistory {
