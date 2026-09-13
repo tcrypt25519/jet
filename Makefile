@@ -44,11 +44,11 @@ check: ## Run Cargo check
 
 .PHONY: fmt
 fmt: ## Format code with rustfmt
-	cargo fmt --all
+	cargo +nightly fmt --all
 
 .PHONY: fmt-check
 fmt-check: ## Check code formatting with rustfmt
-	cargo fmt --all -- --check
+	cargo +nightly fmt --all -- --check
 
 .PHONY: clippy
 clippy: ## Run clippy

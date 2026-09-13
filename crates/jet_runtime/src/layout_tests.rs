@@ -2,41 +2,42 @@
 /// Ensures consistency between Rust Context struct and LLVM IR exec_ctx type.
 #[cfg(test)]
 mod layout_verification_tests {
-    use crate::exec::{BlockInfo, Context};
-    use inkwell::context::Context as LLVMContext;
-    use inkwell::types::AnyTypeEnum;
-    use jet_ir::Types;
     use std::mem;
+
+    use inkwell::{context::Context as LLVMContext, types::AnyTypeEnum};
+    use jet_ir::Types;
+
+    use crate::exec::{BlockInfo, Context};
 
     /// Field indices for exec_ctx structure
     #[derive(Debug, Clone, Copy)]
     #[repr(u32)]
     enum ExecCtxField {
-        StackPtr = 0,
-        JumpPtr = 1,
+        StackPtr     = 0,
+        JumpPtr      = 1,
         ReturnOffset = 2,
         ReturnLength = 3,
-        SubCall = 4,
-        Stack = 5,
-        MemoryPtr = 6,
-        MemoryLen = 7,
-        MemoryCap = 8,
-        CallInfo = 9,
+        SubCall      = 4,
+        Stack        = 5,
+        MemoryPtr    = 6,
+        MemoryLen    = 7,
+        MemoryCap    = 8,
+        CallInfo     = 9,
     }
 
     #[derive(Debug, Clone, Copy)]
     #[repr(u32)]
     enum BlockInfoField {
-        Number = 0,
-        Difficulty = 1,
-        GasLimit = 2,
-        Timestamp = 3,
-        BaseFee = 4,
+        Number      = 0,
+        Difficulty  = 1,
+        GasLimit    = 2,
+        Timestamp   = 3,
+        BaseFee     = 4,
         BlobBaseFee = 5,
-        ChainId = 6,
-        Hash = 7,
+        ChainId     = 6,
+        Hash        = 7,
         HashHistory = 8,
-        Coinbase = 9,
+        Coinbase    = 9,
     }
 
     impl BlockInfoField {
@@ -55,9 +56,7 @@ mod layout_verification_tests {
                 | BlockInfoField::BaseFee
                 | BlockInfoField::BlobBaseFee
                 | BlockInfoField::ChainId => TypeKind::Int,
-                BlockInfoField::Hash | BlockInfoField::HashHistory | BlockInfoField::Coinbase => {
-                    TypeKind::Array
-                }
+                BlockInfoField::Hash | BlockInfoField::HashHistory | BlockInfoField::Coinbase => TypeKind::Array,
             }
         }
     }
@@ -188,31 +187,18 @@ mod layout_verification_tests {
         let llvm_context = LLVMContext::create();
         let types = Types::new(&llvm_context);
 
-        let stack_field = types
-            .exec_ctx
-            .get_field_type_at_index(ExecCtxField::Stack.index())
-            .unwrap();
+        let stack_field = types.exec_ctx.get_field_type_at_index(ExecCtxField::Stack.index()).unwrap();
 
-        assert!(
-            stack_field.is_array_type(),
-            "Stack field should be array type"
-        );
+        assert!(stack_field.is_array_type(), "Stack field should be array type");
 
         let stack_array = stack_field.into_array_type();
         assert_eq!(stack_array.len(), 1024, "Stack should have 1024 elements");
 
         let element_type = stack_array.get_element_type();
-        assert!(
-            element_type.is_int_type(),
-            "Stack elements should be int type"
-        );
+        assert!(element_type.is_int_type(), "Stack elements should be int type");
 
         let element_int = element_type.into_int_type();
-        assert_eq!(
-            element_int.get_bit_width(),
-            256,
-            "Stack elements should be i256"
-        );
+        assert_eq!(element_int.get_bit_width(), 256, "Stack elements should be i256");
     }
 
     #[test]

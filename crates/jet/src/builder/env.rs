@@ -5,7 +5,6 @@ use inkwell::{
     module::Module,
     values::{FunctionValue, GlobalValue},
 };
-
 use jet_ir::Types;
 use jet_runtime;
 
@@ -15,9 +14,9 @@ use jet_runtime;
 /// behaviour such as the optimisation level and diagnostic output.
 #[derive(serde::Serialize, Clone, Debug, Default)]
 pub struct Options {
-    mode: Mode,
-    emit_llvm: bool,
-    assert: bool,
+    mode:       Mode,
+    emit_llvm:  bool,
+    assert:     bool,
     stack_mode: StackMode,
 }
 
@@ -27,10 +26,8 @@ impl Options {
     /// # Parameters
     ///
     /// - `mode` — Compilation mode ([`Mode::Debug`] or [`Mode::Release`]).
-    /// - `emit_llvm` — When `true`, the generated LLVM IR is printed to stdout
-    ///   after each contract is compiled.
-    /// - `assert` — When `true`, the LLVM IR is verified after each contract
-    ///   is compiled, returning an error if verification fails.
+    /// - `emit_llvm` — When `true`, the generated LLVM IR is printed to stdout after each contract is compiled.
+    /// - `assert` — When `true`, the LLVM IR is verified after each contract is compiled, returning an error if verification fails.
     ///
     /// The stack mode defaults to [`StackMode::RuntimeOnly`]; use
     /// [`Options::with_stack_mode`] to select symbolic lowering.
@@ -75,7 +72,7 @@ impl Options {
 pub enum Mode {
     /// Debug mode: no optimisations, additional diagnostics.
     #[default]
-    Debug = 0,
+    Debug   = 0,
     /// Release mode: standard optimisations enabled.
     Release = 1,
 }
@@ -107,23 +104,23 @@ pub(crate) struct Symbols<'ctx> {
     jit_engine: GlobalValue<'ctx>,
 
     stack_push_word: FunctionValue<'ctx>,
-    stack_push_ptr: FunctionValue<'ctx>,
+    stack_push_ptr:  FunctionValue<'ctx>,
 
-    stack_pop: FunctionValue<'ctx>,
+    stack_pop:  FunctionValue<'ctx>,
     stack_peek: FunctionValue<'ctx>,
     stack_swap: FunctionValue<'ctx>,
 
     mem_expand: FunctionValue<'ctx>,
 
-    contract_call: FunctionValue<'ctx>,
-    contract_call_values: FunctionValue<'ctx>,
+    contract_call:                  FunctionValue<'ctx>,
+    contract_call_values:           FunctionValue<'ctx>,
     contract_call_return_data_copy: FunctionValue<'ctx>,
-    call_data_load: FunctionValue<'ctx>,
+    call_data_load:                 FunctionValue<'ctx>,
 
     keccak256: FunctionValue<'ctx>,
-    exp: FunctionValue<'ctx>,
-    addmod: FunctionValue<'ctx>,
-    mulmod: FunctionValue<'ctx>,
+    exp:       FunctionValue<'ctx>,
+    addmod:    FunctionValue<'ctx>,
+    mulmod:    FunctionValue<'ctx>,
 }
 
 impl<'ctx> Symbols<'ctx> {
@@ -140,10 +137,8 @@ impl<'ctx> Symbols<'ctx> {
         let mem_expand = module.get_function(jet_runtime::symbols::FN_MEM_EXPAND)?;
 
         let contract_call = module.get_function(jet_runtime::symbols::FN_CONTRACT_CALL)?;
-        let contract_call_values =
-            module.get_function(jet_runtime::symbols::FN_CONTRACT_CALL_VALUES)?;
-        let contract_call_return_data_copy =
-            module.get_function(jet_runtime::symbols::FN_CONTRACT_CALL_RETURN_DATA_COPY)?;
+        let contract_call_values = module.get_function(jet_runtime::symbols::FN_CONTRACT_CALL_VALUES)?;
+        let contract_call_return_data_copy = module.get_function(jet_runtime::symbols::FN_CONTRACT_CALL_RETURN_DATA_COPY)?;
         let call_data_load = module.get_function(jet_runtime::symbols::FN_CALL_DATA_LOAD)?;
 
         let keccak256 = module.get_function(jet_runtime::symbols::FN_KECCAK256)?;
@@ -248,9 +243,9 @@ pub struct Env<'ctx> {
     opts: Options,
 
     context: &'ctx Context,
-    module: Module<'ctx>,
+    module:  Module<'ctx>,
 
-    types: Types<'ctx>,
+    types:   Types<'ctx>,
     symbols: Symbols<'ctx>,
 }
 
@@ -260,15 +255,10 @@ impl<'ctx> Env<'ctx> {
     /// The `module` must already have all runtime function declarations present
     /// (use [`jet_runtime::RuntimeBuilder`] to produce such a module). Returns
     /// an error if any expected runtime symbol cannot be found in the module.
-    pub fn new(
-        context: &'ctx Context,
-        module: Module<'ctx>,
-        opts: Options,
-    ) -> Result<Self, super::Error> {
+    pub fn new(context: &'ctx Context, module: Module<'ctx>, opts: Options) -> Result<Self, super::Error> {
         let types = Types::new(context);
-        let runtime_fns = Symbols::new(&module).ok_or_else(|| {
-            super::Error::InvariantViolation("Failed to load all runtime functions".to_string())
-        })?;
+        let runtime_fns =
+            Symbols::new(&module).ok_or_else(|| super::Error::InvariantViolation("Failed to load all runtime functions".to_string()))?;
 
         Ok(Self {
             opts,

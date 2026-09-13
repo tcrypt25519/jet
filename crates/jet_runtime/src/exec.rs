@@ -46,13 +46,13 @@ pub type ContractFunc = unsafe extern "C" fn(*const Context, *const BlockInfo) -
 #[repr(C)]
 pub struct Context {
     stack_ptr: u32,
-    jump_ptr: u32,
+    jump_ptr:  u32,
 
     return_off: u32,
     return_len: u32,
 
     sub_call: Option<Box<Context>>,
-    stack: [Word; STACK_SIZE_WORDS as usize],
+    stack:    [Word; STACK_SIZE_WORDS as usize],
 
     // Pointer-based memory layout as per ADR-002
     // u32 is safe for offsets/sizes; values above u32::MAX are rejected explicitly
@@ -77,14 +77,11 @@ impl Context {
     pub fn new(call_info: CallInfo) -> Result<Self> {
         // Allocate memory buffer on the heap
         let memory_size = (WORD_SIZE_BYTES * MEMORY_INITIAL_SIZE_WORDS) as usize;
-        let memory_layout = std::alloc::Layout::from_size_align(memory_size, 32)
-            .map_err(|e| RuntimeError::MemoryLayout(e.to_string()))?;
+        let memory_layout = std::alloc::Layout::from_size_align(memory_size, 32).map_err(|e| RuntimeError::MemoryLayout(e.to_string()))?;
         let memory_ptr = unsafe { std::alloc::alloc_zeroed(memory_layout) };
 
         if memory_ptr.is_null() {
-            return Err(RuntimeError::MemoryAllocation(
-                "Failed to allocate memory for EVM context".to_string(),
-            ));
+            return Err(RuntimeError::MemoryAllocation("Failed to allocate memory for EVM context".to_string()));
         }
 
         let call_info = Box::into_raw(Box::new(call_info));
@@ -271,7 +268,7 @@ impl Drop for Context {
                 Err(e) => {
                     // Log the error but don't panic in drop
                     log::error!("Failed to create memory layout during dealloc: {}", e);
-                }
+                },
             }
         }
     }
@@ -280,7 +277,7 @@ impl Drop for Context {
 /// Represents the result of a contract execution.
 pub struct ContractRun {
     result: ReturnCode,
-    ctx: Context,
+    ctx:    Context,
 }
 
 impl ContractRun {
@@ -306,16 +303,16 @@ impl ContractRun {
 /// Information about the current block that gets exposed to the EVM.
 #[repr(C)]
 pub struct BlockInfo {
-    number: u64,
-    difficulty: u64,
-    gas_limit: u64,
-    timestamp: u64,
-    base_fee: u64,
+    number:        u64,
+    difficulty:    u64,
+    gas_limit:     u64,
+    timestamp:     u64,
+    base_fee:      u64,
     blob_base_fee: u64,
-    chain_id: u64,
-    hash: Hash,
-    hash_history: HashHistory,
-    coinbase: Address,
+    chain_id:      u64,
+    hash:          Hash,
+    hash_history:  HashHistory,
+    coinbase:      Address,
 }
 
 impl BlockInfo {
@@ -420,26 +417,26 @@ pub enum ReturnCode {
     /// The jump-dispatch table was given a block index with no corresponding `JUMPDEST`.
     InvalidJumpBlock = -1,
     /// A `POP`-style instruction was executed on an empty stack.
-    StackUnderflow = -2,
+    StackUnderflow   = -2,
     /// A push-style instruction was executed on a full stack.
-    StackOverflow = -3,
+    StackOverflow    = -3,
 
     // EVM-level successes
     /// The contract ran to the end of its bytecode without a `RETURN` or `STOP`.
     #[default]
-    ImplicitReturn = 0,
+    ImplicitReturn   = 0,
     /// The contract executed a `RETURN` instruction.
-    ExplicitReturn = 1,
+    ExplicitReturn   = 1,
     /// The contract executed a `STOP` instruction.
-    Stop = 2,
+    Stop             = 2,
 
     // EVM-level failures
     /// The contract executed a `REVERT` instruction.
-    Revert = 64,
+    Revert           = 64,
     /// The contract executed an `INVALID` instruction.
-    Invalid = 65,
+    Invalid          = 65,
     /// A `JUMP` or `JUMPI` targeted a byte that is not a `JUMPDEST`.
-    JumpFailure = 66,
+    JumpFailure      = 66,
 }
 
 /// Mangles the given address into a contract function name.
@@ -471,6 +468,6 @@ pub fn jet_contract_fn_lookup(jit_engine: &ExecutionEngine, addr_slice: &[u8]) -
         Err(e) => {
             error!("Error looking up contract function {}: {}", fn_name, e);
             0
-        }
+        },
     }
 }

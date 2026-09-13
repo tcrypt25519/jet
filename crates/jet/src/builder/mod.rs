@@ -7,6 +7,7 @@ use crate::instructions::Instruction;
 pub mod contract;
 /// Build-time configuration and LLVM environment setup.
 pub mod env;
+pub(crate) mod gas;
 /// Manages multiple contract compilations within a shared LLVM module.
 pub mod manager;
 pub(crate) mod ops;

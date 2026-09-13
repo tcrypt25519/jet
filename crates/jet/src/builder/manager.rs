@@ -1,3 +1,4 @@
+use jet_runtime::{Address, exec};
 use log::info;
 use syntect::{
     easy::HighlightLines,
@@ -5,8 +6,6 @@ use syntect::{
     parsing::SyntaxSet,
     util::{LinesWithEndings, as_24_bit_terminal_escaped},
 };
-
-use jet_runtime::{Address, exec};
 
 use crate::builder::{Error, contract, env::Env};
 

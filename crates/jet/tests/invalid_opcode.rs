@@ -1,11 +1,10 @@
 use inkwell::context::Context;
-use jet_runtime::Address;
-
 use jet::{
     builder,
     builder::env::{Mode::Debug, Options},
     engine::Engine,
 };
+use jet_runtime::Address;
 
 #[test]
 fn invalid_opcode_returns_error() {

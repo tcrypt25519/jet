@@ -1,12 +1,13 @@
+/// Unified LLVM type system.
+/// Defines all LLVM types used by both runtime and contract builders
+/// to ensure consistent memory layouts.
+use std::num::NonZeroU32;
+
 use inkwell::{
     AddressSpace,
     context::Context,
     types::{ArrayType, FunctionType, IntType, PointerType, StructType},
 };
-/// Unified LLVM type system.
-/// Defines all LLVM types used by both runtime and contract builders
-/// to ensure consistent memory layouts.
-use std::num::NonZeroU32;
 
 use crate::constants::*;
 
@@ -18,17 +19,17 @@ const PACK_STRUCTS: bool = true;
 pub struct Types<'ctx> {
     // Primitives
     /// 8-bit integer type (`i8`).
-    pub i8: IntType<'ctx>,
+    pub i8:         IntType<'ctx>,
     /// 32-bit integer type (`i32`).
-    pub i32: IntType<'ctx>,
+    pub i32:        IntType<'ctx>,
     /// 64-bit integer type (`i64`).
-    pub i64: IntType<'ctx>,
+    pub i64:        IntType<'ctx>,
     /// 160-bit integer type used for EVM addresses (`i160`).
-    pub i160: IntType<'ctx>,
+    pub i160:       IntType<'ctx>,
     /// 256-bit integer type used for EVM stack words (`i256`).
-    pub i256: IntType<'ctx>,
+    pub i256:       IntType<'ctx>,
     /// Opaque pointer type (`ptr`).
-    pub ptr: PointerType<'ctx>,
+    pub ptr:        PointerType<'ctx>,
     /// A 32-byte array type (`[32 x i8]`) representing one EVM word in memory.
     pub word_bytes: ArrayType<'ctx>,
 
@@ -46,9 +47,9 @@ pub struct Types<'ctx> {
 
     // Runtime registers
     /// `i32` type used for the stack depth register.
-    pub stack_ptr: IntType<'ctx>,
+    pub stack_ptr:     IntType<'ctx>,
     /// `i32` type used for the jump-target register.
-    pub jump_ptr: IntType<'ctx>,
+    pub jump_ptr:      IntType<'ctx>,
     /// `i32` type used for the return-data byte offset register.
     pub return_offset: IntType<'ctx>,
     /// `i32` type used for the return-data byte length register.
@@ -56,11 +57,11 @@ pub struct Types<'ctx> {
 
     // Complex types
     /// The LLVM struct type for [`jet_runtime::exec::Context`].
-    pub exec_ctx: StructType<'ctx>,
+    pub exec_ctx:    StructType<'ctx>,
     /// The LLVM struct type for [`jet_runtime::exec::BlockInfo`].
-    pub block_info: StructType<'ctx>,
+    pub block_info:  StructType<'ctx>,
     /// The LLVM struct type for [`jet_runtime::CallInfo`].
-    pub call_info: StructType<'ctx>,
+    pub call_info:   StructType<'ctx>,
     /// The LLVM function type for a compiled contract: `fn(*const Context, *const BlockInfo) -> i8`.
     pub contract_fn: FunctionType<'ctx>,
 }
@@ -124,11 +125,7 @@ impl<'ctx> Types<'ctx> {
             PACK_STRUCTS,
         );
 
-        let hash_history = word_bytes.array_type(
-            BLOCK_HASH_HISTORY_SIZE
-                .try_into()
-                .expect("block hash history size fits in u32"),
-        );
+        let hash_history = word_bytes.array_type(BLOCK_HASH_HISTORY_SIZE.try_into().expect("block hash history size fits in u32"));
         let address_bytes = i8.array_type(20);
 
         // Block information structure
