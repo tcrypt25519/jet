@@ -167,6 +167,12 @@ unsafe fn jet_contract_call_impl(
         return ContractCallError::Success as i8;
     }
 
+    let expand = unsafe { jet_mem_expand(ctx, ret_dest, ret_len) };
+    if expand != 0 {
+        log::error!("Failed to expand memory for return data copy");
+        return ContractCallError::CopyFailed as i8;
+    }
+
     let copy_result = unsafe { return_data_copy_impl(ctx, callee_ctx, ret_dest, 0, ret_len) };
 
     match copy_result {
@@ -191,10 +197,13 @@ enum CopyError {
 
 /// Copies return data from the sub context to the parent context.
 ///
+/// The caller must ensure the destination memory region has already been
+/// expanded via `jet_mem_expand` before calling this function.
+///
 /// # Safety
 ///
 /// This function is unsafe because it dereferences the given pointers. The caller must ensure
-/// that all the pointers are valid.
+/// that all the pointers are valid and that the destination region is expanded.
 ///
 /// # Returns
 ///
@@ -202,7 +211,7 @@ enum CopyError {
 /// - `1`: Invalid context or sub-context pointer
 /// - `2`: Bounds check failed
 /// - `3`: Arithmetic overflow in offset calculations
-/// - `4`: Memory expansion needed but not implemented
+/// - `4`: Destination memory was not expanded by the caller
 pub unsafe extern "C" fn jet_contract_call_return_data_copy(
     ctx: *mut Context,
     sub_ctx: *const Context,
@@ -227,12 +236,6 @@ unsafe fn return_data_copy_impl(
         return CopyError::InvalidPtr;
     }
 
-    // Expand the destination so the write is safe.
-    let expand = unsafe { jet_mem_expand(ctx, dest_offset, requested_ret_len) };
-    if expand != 0 {
-        return CopyError::MemoryExpansionNeeded;
-    }
-
     let ctx = unsafe { &mut *ctx };
     let sub_ctx = unsafe { &*sub_ctx };
     let ret_len = sub_ctx.return_len();
@@ -241,6 +244,15 @@ unsafe fn return_data_copy_impl(
         "jet_contracts_call_return_data_copy:\ndest_offset: {}\nrequested_ret_len: {}\n\nret_len: {}",
         dest_offset, requested_ret_len, ret_len
     );
+
+    // The destination must already be expanded by the caller.
+    let dest_end = match dest_offset.checked_add(requested_ret_len) {
+        Some(end) => end,
+        None => return CopyError::ArithmeticOverflow,
+    };
+    if dest_end > ctx.memory_len() {
+        return CopyError::MemoryExpansionNeeded;
+    }
 
     // Bounds check: validate src_offset + requested_ret_len doesn't overflow and is within ret_len
     let src_end = match src_offset.checked_add(requested_ret_len) {
@@ -560,4 +572,77 @@ pub unsafe extern "C" fn jet_call_data_load(ctx: *const Context, offset: *const 
     }
 
     unsafe { std::slice::from_raw_parts_mut(out, 32).copy_from_slice(&result) };
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{Address, CallInfo, exec::Context};
+
+    fn test_context() -> Context {
+        let call_info = CallInfo::new(
+            Address::default(),
+            Address::default(),
+            Address::default(),
+            [0u8; 32],
+            &[],
+        )
+        .expect("test call info");
+        Context::new(call_info).expect("test context")
+    }
+
+    #[test]
+    fn mem_expand_zero_size_is_noop() {
+        let mut ctx = test_context();
+        let ret = unsafe { super::jet_mem_expand(&mut ctx, u32::MAX, 0) };
+        assert_eq!(ret, 0);
+        assert_eq!(ctx.memory_len(), 0);
+    }
+
+    #[test]
+    fn mem_expand_null_pointer_fails() {
+        let ret = unsafe { super::jet_mem_expand(std::ptr::null_mut(), 0, 1) };
+        assert_eq!(ret, -1);
+    }
+
+    #[test]
+    fn mem_expand_offset_zero_size_one_rounds_to_word() {
+        let mut ctx = test_context();
+        let ret = unsafe { super::jet_mem_expand(&mut ctx, 0, 1) };
+        assert_eq!(ret, 0);
+        assert_eq!(ctx.memory_len(), 32);
+    }
+
+    #[test]
+    fn mem_expand_at_word_boundary_grows_to_next_word() {
+        let mut ctx = test_context();
+        let ret = unsafe { super::jet_mem_expand(&mut ctx, 32, 1) };
+        assert_eq!(ret, 0);
+        assert_eq!(ctx.memory_len(), 64);
+    }
+
+    #[test]
+    fn mem_expand_is_monotonic() {
+        let mut ctx = test_context();
+        unsafe {
+            let _ = super::jet_mem_expand(&mut ctx, 0, 64);
+            let _ = super::jet_mem_expand(&mut ctx, 0, 32);
+        }
+        assert_eq!(ctx.memory_len(), 64);
+    }
+
+    #[test]
+    fn mem_expand_overflow_returns_error() {
+        let mut ctx = test_context();
+        let ret = unsafe { super::jet_mem_expand(&mut ctx, u32::MAX, 1) };
+        assert_eq!(ret, -2);
+    }
+
+    #[test]
+    fn mem_expand_zeroes_new_memory() {
+        let mut ctx = test_context();
+        unsafe {
+            let _ = super::jet_mem_expand(&mut ctx, 0, 32);
+        }
+        assert!(ctx.memory().iter().all(|&b| b == 0));
+    }
 }

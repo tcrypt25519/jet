@@ -784,6 +784,96 @@ rom_tests! {
         },
     },
 
+    mload_offset_plus_size_overflow_returns_invalid: Test {
+        roms: vec![bytecode![
+            PUSH4!(0xFF, 0xFF, 0xFF, 0xFF),
+            MLOAD!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::Invalid,
+            ..Default::default()
+        },
+    },
+
+    mstore_offset_plus_size_overflow_returns_invalid: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x42),
+            PUSH4!(0xFF, 0xFF, 0xFF, 0xFF),
+            MSTORE!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::Invalid,
+            ..Default::default()
+        },
+    },
+
+    keccak256_offset_plus_size_overflow_returns_invalid: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x02),
+            PUSH4!(0xFF, 0xFF, 0xFF, 0xFF),
+            KECCAK256!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::Invalid,
+            ..Default::default()
+        },
+    },
+
+    return_zero_size_with_max_offset_succeeds: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x00),
+            PUSH4!(0xFF, 0xFF, 0xFF, 0xFF),
+            RETURN!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::ExplicitReturn,
+            return_offset: 0xFFFFFFFF,
+            return_length: 0,
+            ..Default::default()
+        },
+    },
+
+    return_offset_plus_size_overflow_returns_invalid: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x02),
+            PUSH4!(0xFF, 0xFF, 0xFF, 0xFF),
+            RETURN!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::Invalid,
+            ..Default::default()
+        },
+    },
+
+    call_output_expands_memory: Test {
+        roms: vec![bytecode![
+            PUSH1!(0x01),
+            PUSH1!(0x00),
+            PUSH1!(0x00),
+            PUSH1!(0x00),
+            PUSH1!(0x00),
+            PUSH20!(0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
+            PUSH1!(0x00),
+            CALL!(),
+            STOP!(),
+        ], bytecode![
+            PUSH1!(0xAB),
+            PUSH1!(0x00),
+            MSTORE8!(),
+            PUSH1!(0x01),
+            PUSH1!(0x00),
+            RETURN!(),
+        ]],
+        expected: TestContractRun {
+            result: ReturnCode::Stop,
+            stack_ptr: 1,
+            stack: vec![stack_word(&[0x01])],
+            memory: Some(vec![0xAB]),
+            memory_len: Some(32),
+            ..Default::default()
+        },
+    },
+
     // MUL: basic multiplication
     mul_basic: Test {
         roms: vec![bytecode![

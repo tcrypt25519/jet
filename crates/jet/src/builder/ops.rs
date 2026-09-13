@@ -13,6 +13,36 @@ use crate::{
     instructions::Instruction,
 };
 
+/// A memory region that has already been expanded by `jet_mem_expand`.
+///
+/// Only [`expand_memory_region`] can construct this type, so any helper that
+/// accepts a `MemoryRegion` cannot be reached without first expanding memory.
+#[derive(Copy, Clone)]
+struct MemoryRegion<'ctx> {
+    offset: IntValue<'ctx>,
+    size: IntValue<'ctx>,
+}
+
+impl<'ctx> MemoryRegion<'ctx> {
+    fn offset(&self) -> IntValue<'ctx> {
+        self.offset
+    }
+
+    fn size(&self) -> IntValue<'ctx> {
+        self.size
+    }
+}
+
+fn expand_memory_region<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+    offset: IntValue<'ctx>,
+    size: IntValue<'ctx>,
+    label: &str,
+) -> Result<MemoryRegion<'ctx>, Error> {
+    call_mem_expand_checked(bctx, offset, size, label)?;
+    Ok(MemoryRegion { offset, size })
+}
+
 pub(crate) fn build_return<'ctx, S: StackBackend<'ctx>>(
     bctx: &BuildCtx<'ctx, '_, S>,
     return_value: ReturnCode,
@@ -293,7 +323,7 @@ pub(crate) fn keccak256<'ctx, S: StackBackend<'ctx>>(
     let (offset, size) = bctx.stack.pop_2(bctx)?;
     let offset_i32 = truncate_to_i32(bctx, offset, "keccak_offset")?;
     let size_i32 = truncate_to_i32(bctx, size, "keccak_size")?;
-    call_mem_expand_checked(bctx, offset_i32, size_i32, "keccak256")?;
+    let region = expand_memory_region(bctx, offset_i32, size_i32, "keccak256")?;
     let result_ptr = bctx
         .builder
         .build_alloca(bctx.env.types().i256, "keccak_result")?;
@@ -301,8 +331,8 @@ pub(crate) fn keccak256<'ctx, S: StackBackend<'ctx>>(
         bctx.env.symbols().keccak256(),
         &[
             bctx.registers.exec_ctx.into(),
-            offset_i32.into(),
-            size_i32.into(),
+            region.offset().into(),
+            region.size().into(),
             result_ptr.into(),
         ],
         "keccak256",
@@ -373,14 +403,15 @@ pub(crate) fn returndatacopy<'ctx, S: StackBackend<'ctx>>(
     let dest_off = truncate_to_i32(bctx, dest_off, "retcopy_dest")?;
     let src_off = truncate_to_i32(bctx, src_off, "retcopy_src")?;
     let len = truncate_to_i32(bctx, len, "retcopy_len")?;
+    let region = expand_memory_region(bctx, dest_off, len, "returndatacopy")?;
     let ret = bctx.builder.build_call(
         bctx.env.symbols().contract_call_return_data_copy(),
         &[
             bctx.registers.exec_ctx.into(),
             sub_call_ctx_ptr.into(),
-            dest_off.into(),
+            region.offset().into(),
             src_off.into(),
-            len.into(),
+            region.size().into(),
         ],
         "return_data_copy",
     )?;
@@ -538,8 +569,8 @@ pub(crate) fn mload<'ctx, S: StackBackend<'ctx>>(
     let loc = bctx.stack.pop_word(bctx)?;
     let loc_i32 = truncate_to_i32(bctx, loc, "mload_loc")?;
     let size = bctx.env.types().i32.const_int(32, false);
-    call_mem_expand_checked(bctx, loc_i32, size, "mload")?;
-    let value = build_mem_load_value(bctx, loc_i32)?;
+    let region = expand_memory_region(bctx, loc_i32, size, "mload")?;
+    let value = build_mem_load_value(bctx, &region)?;
     bctx.stack.push_word(bctx, value)
 }
 
@@ -549,8 +580,8 @@ pub(crate) fn mstore<'ctx, S: StackBackend<'ctx>>(
     let (loc, val) = bctx.stack.pop_2(bctx)?;
     let loc_i32 = truncate_to_i32(bctx, loc, "mstore_loc")?;
     let size = bctx.env.types().i32.const_int(32, false);
-    call_mem_expand_checked(bctx, loc_i32, size, "mstore")?;
-    build_mem_store_value(bctx, loc_i32, val)
+    let region = expand_memory_region(bctx, loc_i32, size, "mstore")?;
+    build_mem_store_value(bctx, &region, val)
 }
 
 pub(crate) fn mstore8<'ctx, S: StackBackend<'ctx>>(
@@ -559,8 +590,8 @@ pub(crate) fn mstore8<'ctx, S: StackBackend<'ctx>>(
     let (loc, val) = bctx.stack.pop_2(bctx)?;
     let loc_i32 = truncate_to_i32(bctx, loc, "mstore8_loc")?;
     let size = bctx.env.types().i32.const_int(1, false);
-    call_mem_expand_checked(bctx, loc_i32, size, "mstore8")?;
-    build_mem_store_byte_value(bctx, loc_i32, val)
+    let region = expand_memory_region(bctx, loc_i32, size, "mstore8")?;
+    build_mem_store_byte_value(bctx, &region, val)
 }
 
 pub(crate) fn jump<'ctx, S: StackBackend<'ctx>>(
@@ -692,6 +723,7 @@ pub(crate) fn call<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) ->
     bctx.builder.build_store(value_ptr, value)?;
     let out_off = truncate_to_i32(bctx, out_off, "call.out_off")?;
     let out_len = truncate_to_i32(bctx, out_len, "call.out_len")?;
+    let out_region = expand_memory_region(bctx, out_off, out_len, "call")?;
     let make_contract_call = bctx.builder.build_call(
         bctx.env.symbols().contract_call_values(),
         &[
@@ -702,8 +734,8 @@ pub(crate) fn call<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) ->
             addr_mid.into(),
             addr_hi.into(),
             value_ptr.into(),
-            out_off.into(),
-            out_len.into(),
+            out_region.offset().into(),
+            out_region.size().into(),
         ],
         "contract_call",
     )?;
@@ -737,11 +769,11 @@ fn set_return_range<'ctx, S: StackBackend<'ctx>>(
     let (offset, size) = bctx.stack.pop_2(bctx)?;
     let offset = truncate_to_i32(bctx, offset, "return_offset")?;
     let size = truncate_to_i32(bctx, size, "return_length")?;
-    call_mem_expand_checked(bctx, offset, size, "return")?;
+    let region = expand_memory_region(bctx, offset, size, "return")?;
     bctx.builder
-        .build_store(bctx.registers.return_offset, offset)?;
+        .build_store(bctx.registers.return_offset, region.offset())?;
     bctx.builder
-        .build_store(bctx.registers.return_length, size)?;
+        .build_store(bctx.registers.return_length, region.size())?;
     Ok(())
 }
 
@@ -1172,10 +1204,10 @@ fn build_exp_value<'ctx, S: StackBackend<'ctx>>(
 
 fn build_mem_load_value<'ctx, S: StackBackend<'ctx>>(
     bctx: &BuildCtx<'ctx, '_, S>,
-    loc: IntValue<'ctx>,
+    region: &MemoryRegion<'ctx>,
 ) -> Result<IntValue<'ctx>, Error> {
     let mem_ptr = load_memory_ptr(bctx)?;
-    let loc = memory_gep_index(bctx, loc, "mem.load.index")?;
+    let loc = memory_gep_index(bctx, region.offset(), "mem.load.index")?;
     let byte_ptr = unsafe {
         bctx.builder
             .build_gep(bctx.env.types().i8, mem_ptr, &[loc], "mem.byte.ptr")
@@ -1188,11 +1220,11 @@ fn build_mem_load_value<'ctx, S: StackBackend<'ctx>>(
 
 fn build_mem_store_value<'ctx, S: StackBackend<'ctx>>(
     bctx: &BuildCtx<'ctx, '_, S>,
-    loc: IntValue<'ctx>,
+    region: &MemoryRegion<'ctx>,
     value: IntValue<'ctx>,
 ) -> Result<(), Error> {
     let mem_ptr = load_memory_ptr(bctx)?;
-    let loc = memory_gep_index(bctx, loc, "mem.store.index")?;
+    let loc = memory_gep_index(bctx, region.offset(), "mem.store.index")?;
     let byte_ptr = unsafe {
         bctx.builder
             .build_gep(bctx.env.types().i8, mem_ptr, &[loc], "mem.byte.ptr")
@@ -1204,11 +1236,11 @@ fn build_mem_store_value<'ctx, S: StackBackend<'ctx>>(
 
 fn build_mem_store_byte_value<'ctx, S: StackBackend<'ctx>>(
     bctx: &BuildCtx<'ctx, '_, S>,
-    loc: IntValue<'ctx>,
+    region: &MemoryRegion<'ctx>,
     value: IntValue<'ctx>,
 ) -> Result<(), Error> {
     let mem_ptr = load_memory_ptr(bctx)?;
-    let loc = memory_gep_index(bctx, loc, "mem.store8.index")?;
+    let loc = memory_gep_index(bctx, region.offset(), "mem.store8.index")?;
     let byte_ptr = unsafe {
         bctx.builder
             .build_gep(bctx.env.types().i8, mem_ptr, &[loc], "mem.byte.ptr")
