@@ -40,25 +40,31 @@ macro_rules! rom_tests {
 
 macro_rules! assert_eq_named {
     ($name:expr, $left:expr, $right:expr) => {
-        assert_eq!($left, $right, concat!("Checking ", $name, " want={:?}, got={:?}"), $right, $left);
+        assert_eq!(
+            $left, $right,
+            concat!("Checking ", $name, " want={:?}, got={:?}"),
+            $right, $left
+        );
     };
 }
 
 pub(crate) struct Test {
-    pub(crate) roms:     Vec<Vec<u8>>,
+    pub(crate) roms: Vec<Vec<u8>>,
     pub(crate) expected: TestContractRun,
 }
 
 #[derive(Default)]
 pub(crate) struct TestContractRun {
-    pub(crate) result:        ReturnCode,
-    pub(crate) stack_ptr:     u32,
-    pub(crate) jump_ptr:      u32,
+    pub(crate) result: ReturnCode,
+    pub(crate) stack_ptr: u32,
+    pub(crate) jump_ptr: u32,
     pub(crate) return_offset: u32,
     pub(crate) return_length: u32,
-    pub(crate) stack:         Vec<[u8; 32]>,
-    pub(crate) memory:        Option<Vec<u8>>,
-    pub(crate) memory_len:    Option<u32>,
+    pub(crate) stack: Vec<[u8; 32]>,
+    pub(crate) memory: Option<Vec<u8>>,
+    pub(crate) memory_len: Option<u32>,
+    pub(crate) gas_remaining: Option<u64>,
+    pub(crate) gas_failure: Option<(u32, u64, u64)>,
 }
 
 impl TestContractRun {
@@ -72,14 +78,36 @@ impl TestContractRun {
         assert_eq_named!("return_len", ctx.return_len(), self.return_length);
         assert_eq_named!("stack_len", ctx.stack_ptr(), self.stack.len() as u32);
 
-        assert_eq_named!("stack", &ctx.stack()[..self.stack.len()], self.stack.as_slice());
+        assert_eq_named!(
+            "stack",
+            &ctx.stack()[..self.stack.len()],
+            self.stack.as_slice()
+        );
 
         if let Some(expected_memory) = &self.memory {
-            assert_eq_named!("memory", &ctx.memory()[..expected_memory.len()], expected_memory.as_slice());
+            assert_eq_named!(
+                "memory",
+                &ctx.memory()[..expected_memory.len()],
+                expected_memory.as_slice()
+            );
         }
 
         if let Some(expected_memory_len) = self.memory_len {
             assert_eq_named!("memory_len", ctx.memory_len(), expected_memory_len);
+        }
+        if let Some(expected_gas) = self.gas_remaining {
+            assert_eq_named!("gas_remaining", ctx.gas_remaining(), expected_gas);
+        }
+        if let Some((pc, available, required)) = self.gas_failure {
+            let failure = ctx.gas_failure().expect("expected gas failure diagnostics");
+            assert_eq!(
+                (
+                    failure.pc(),
+                    failure.available_gas(),
+                    failure.required_gas()
+                ),
+                (pc, available, required)
+            );
         }
     }
 }
@@ -129,7 +157,11 @@ pub(crate) fn _test_contracts_with_call_info(
     Ok(())
 }
 
-pub(crate) fn _test_rom_with_call_info(call_info: CallInfo, t: Test, stack_mode: StackMode) -> Result<(), Error> {
+pub(crate) fn _test_rom_with_call_info(
+    call_info: CallInfo,
+    t: Test,
+    stack_mode: StackMode,
+) -> Result<(), Error> {
     let llvm_ctx = Context::create();
     let opts = Options::new(Debug, false, true).with_stack_mode(stack_mode);
     let block_info = new_test_block_info();
@@ -158,15 +190,35 @@ pub(crate) fn stack_word(bytes: &[u8]) -> [u8; 32] {
 
 pub(crate) fn new_test_block_info() -> exec::BlockInfo {
     let hash = [
-        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+        25, 26, 27, 28, 29, 30, 31,
     ];
     let hash_history = new_test_block_info_hash_history();
     let coinbase = Address::new([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-    exec::BlockInfo::new(42, 100, 100, 1717354173, 5_000_000, 1_000_000, 1, hash, hash_history, coinbase)
+    exec::BlockInfo::new(
+        42,
+        100,
+        100,
+        1717354173,
+        5_000_000,
+        1_000_000,
+        1,
+        hash,
+        hash_history,
+        coinbase,
+    )
 }
 
 pub(crate) fn new_test_call_info() -> CallInfo {
-    CallInfo::new(Address::ZERO, Address::ZERO, Address::ZERO, [0u8; 32], &[]).unwrap()
+    CallInfo::new(
+        Address::ZERO,
+        Address::ZERO,
+        Address::ZERO,
+        [0u8; 32],
+        &[],
+        u64::MAX,
+    )
+    .unwrap()
 }
 
 fn new_test_block_info_hash_history() -> exec::HashHistory {

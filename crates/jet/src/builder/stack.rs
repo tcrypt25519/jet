@@ -45,10 +45,19 @@ pub(crate) trait StackBackend<'ctx>: Sized {
     ///
     /// Values narrower than 256 bits must be zero-extended by the
     /// implementation before being stored.
-    fn push_word<'b>(&self, bctx: &BuildCtx<'ctx, 'b, Self>, value: IntValue<'ctx>) -> Result<(), Error>;
+    fn push_word<'b>(
+        &self,
+        bctx: &BuildCtx<'ctx, 'b, Self>,
+        value: IntValue<'ctx>,
+    ) -> Result<(), Error>;
 
     /// Push a word with optional compile-time known-u64 metadata.
-    fn push_word_with_known_u64<'b>(&self, bctx: &BuildCtx<'ctx, 'b, Self>, value: IntValue<'ctx>, _known_u64: Option<u64>) -> Result<(), Error> {
+    fn push_word_with_known_u64<'b>(
+        &self,
+        bctx: &BuildCtx<'ctx, 'b, Self>,
+        value: IntValue<'ctx>,
+        _known_u64: Option<u64>,
+    ) -> Result<(), Error> {
         self.push_word(bctx, value)
     }
 
@@ -56,6 +65,20 @@ pub(crate) trait StackBackend<'ctx>: Sized {
     ///
     /// Returns an error (or emits a terminal IR path) on underflow.
     fn pop_word<'b>(&self, bctx: &BuildCtx<'ctx, 'b, Self>) -> Result<IntValue<'ctx>, Error>;
+
+    /// Returns a word without changing the stack.
+    fn peek_word<'b>(
+        &self,
+        bctx: &BuildCtx<'ctx, 'b, Self>,
+        depth_from_top: u8,
+    ) -> Result<IntValue<'ctx>, Error>;
+
+    /// Returns whether at least `count` words are available.
+    fn has_words<'b>(
+        &self,
+        bctx: &BuildCtx<'ctx, 'b, Self>,
+        count: u32,
+    ) -> Result<IntValue<'ctx>, Error>;
 
     /// Duplicate the word at depth `index` (1 = top) and push the copy.
     fn dup<'b>(&self, bctx: &BuildCtx<'ctx, 'b, Self>, index: u8) -> Result<(), Error>;
@@ -69,14 +92,20 @@ pub(crate) trait StackBackend<'ctx>: Sized {
     }
 
     /// Pop two words. Returns `(top, second)` matching EVM stack order.
-    fn pop_2<'b>(&self, bctx: &BuildCtx<'ctx, 'b, Self>) -> Result<(IntValue<'ctx>, IntValue<'ctx>), Error> {
+    fn pop_2<'b>(
+        &self,
+        bctx: &BuildCtx<'ctx, 'b, Self>,
+    ) -> Result<(IntValue<'ctx>, IntValue<'ctx>), Error> {
         let a = self.pop_word(bctx)?;
         let b = self.pop_word(bctx)?;
         Ok((a, b))
     }
 
     /// Pop three words. Returns `(top, second, third)` matching EVM stack order.
-    fn pop_3<'b>(&self, bctx: &BuildCtx<'ctx, 'b, Self>) -> Result<(IntValue<'ctx>, IntValue<'ctx>, IntValue<'ctx>), Error> {
+    fn pop_3<'b>(
+        &self,
+        bctx: &BuildCtx<'ctx, 'b, Self>,
+    ) -> Result<(IntValue<'ctx>, IntValue<'ctx>, IntValue<'ctx>), Error> {
         let a = self.pop_word(bctx)?;
         let b = self.pop_word(bctx)?;
         let c = self.pop_word(bctx)?;
@@ -111,10 +140,18 @@ pub(crate) struct RuntimeStackBackend;
 
 impl RuntimeStackBackend {
     /// Zero-extend a value narrower than 256 bits to i256.
-    fn normalize<'ctx, 'b>(&self, bctx: &BuildCtx<'ctx, 'b, Self>, value: IntValue<'ctx>) -> Result<IntValue<'ctx>, Error> {
+    fn normalize<'ctx, 'b>(
+        &self,
+        bctx: &BuildCtx<'ctx, 'b, Self>,
+        value: IntValue<'ctx>,
+    ) -> Result<IntValue<'ctx>, Error> {
         let bit_width = value.get_type().get_bit_width();
         match bit_width {
-            1 | 8 | 32 | 64 | 160 => Ok(bctx.builder.build_int_z_extend(value, bctx.env.types().i256, "int_to_word")?),
+            1 | 8 | 32 | 64 | 160 => {
+                Ok(bctx
+                    .builder
+                    .build_int_z_extend(value, bctx.env.types().i256, "int_to_word")?)
+            }
             256 => Ok(value),
             _ => Err(Error::InvalidBitWidth(bit_width)),
         }
@@ -122,7 +159,11 @@ impl RuntimeStackBackend {
 }
 
 impl<'ctx> StackBackend<'ctx> for RuntimeStackBackend {
-    fn push_word<'b>(&self, bctx: &BuildCtx<'ctx, 'b, Self>, value: IntValue<'ctx>) -> Result<(), Error> {
+    fn push_word<'b>(
+        &self,
+        bctx: &BuildCtx<'ctx, 'b, Self>,
+        value: IntValue<'ctx>,
+    ) -> Result<(), Error> {
         let value = self.normalize(bctx, value)?;
         let ret = bctx.builder.build_call(
             bctx.env.symbols().stack_push_word(),
@@ -139,28 +180,97 @@ impl<'ctx> StackBackend<'ctx> for RuntimeStackBackend {
     }
 
     fn pop_word<'b>(&self, bctx: &BuildCtx<'ctx, 'b, Self>) -> Result<IntValue<'ctx>, Error> {
-        let ret = bctx
-            .builder
-            .build_call(bctx.env.symbols().stack_pop(), &[bctx.registers.exec_ctx.into()], "word_ptr")?;
+        let ret = bctx.builder.build_call(
+            bctx.env.symbols().stack_pop(),
+            &[bctx.registers.exec_ctx.into()],
+            "word_ptr",
+        )?;
         let ptr = ret.try_as_basic_value().unwrap_basic().into_pointer_value();
 
         let is_null = bctx.builder.build_is_null(ptr, "is_stack_underflow")?;
-        let underflow_block = bctx.env.context().append_basic_block(bctx.func, "stack_underflow");
-        let valid_block = bctx.env.context().append_basic_block(bctx.func, "stack_valid");
-        bctx.builder.build_conditional_branch(is_null, underflow_block, valid_block)?;
+        let underflow_block = bctx
+            .env
+            .context()
+            .append_basic_block(bctx.func, "stack_underflow");
+        let valid_block = bctx
+            .env
+            .context()
+            .append_basic_block(bctx.func, "stack_valid");
+        bctx.builder
+            .build_conditional_branch(is_null, underflow_block, valid_block)?;
 
         bctx.builder.position_at_end(underflow_block);
-        let underflow_code = bctx.env.types().i8.const_int(ReturnCode::StackUnderflow as u64, false);
+        bctx.builder
+            .build_store(bctx.registers.gas_remaining, bctx.gas_remaining()?)?;
+        let underflow_code = bctx
+            .env
+            .types()
+            .i8
+            .const_int(ReturnCode::StackUnderflow as u64, false);
         bctx.builder.build_return(Some(&underflow_code))?;
 
         bctx.builder.position_at_end(valid_block);
-        let loaded = bctx.builder.build_load(bctx.env.types().i256, ptr, "load_int")?;
+        let loaded = bctx
+            .builder
+            .build_load(bctx.env.types().i256, ptr, "load_int")?;
         let word = loaded.into_int_value();
         Ok(word)
     }
 
+    fn peek_word<'b>(
+        &self,
+        bctx: &BuildCtx<'ctx, 'b, Self>,
+        depth_from_top: u8,
+    ) -> Result<IntValue<'ctx>, Error> {
+        let index = bctx.env.types().i8.const_int(depth_from_top as u64, false);
+        let ret = bctx.builder.build_call(
+            bctx.env.symbols().stack_peek(),
+            &[bctx.registers.exec_ctx.into(), index.into()],
+            "stack_peek_gas",
+        )?;
+        let ptr = ret.try_as_basic_value().unwrap_basic().into_pointer_value();
+        branch_on_stack_failure(
+            bctx,
+            bctx.builder.build_is_null(ptr, "stack_peek_gas_failed")?,
+            ReturnCode::StackUnderflow,
+            "stack_underflow",
+        )?;
+        Ok(bctx
+            .builder
+            .build_load(bctx.env.types().i256, ptr, "stack_peek_gas_word")?
+            .into_int_value())
+    }
+
+    fn has_words<'b>(
+        &self,
+        bctx: &BuildCtx<'ctx, 'b, Self>,
+        count: u32,
+    ) -> Result<IntValue<'ctx>, Error> {
+        let stack_ptr = bctx
+            .builder
+            .build_load(
+                bctx.env.types().i32,
+                bctx.builder.build_struct_gep(
+                    bctx.env.types().exec_ctx,
+                    bctx.registers.exec_ctx,
+                    0,
+                    "gas.stack_ptr",
+                )?,
+                "gas.stack_depth",
+            )?
+            .into_int_value();
+        Ok(bctx.builder.build_int_compare(
+            inkwell::IntPredicate::UGE,
+            stack_ptr,
+            bctx.env.types().i32.const_int(count as u64, false),
+            "gas.stack_available",
+        )?)
+    }
+
     fn dup<'b>(&self, bctx: &BuildCtx<'ctx, 'b, Self>, index: u8) -> Result<(), Error> {
-        let runtime_index = index.checked_sub(1).ok_or_else(|| Error::invariant_violation("dup index must be >= 1"))?;
+        let runtime_index = index
+            .checked_sub(1)
+            .ok_or_else(|| Error::invariant_violation("dup index must be >= 1"))?;
         let index_value = bctx.env.types().i8.const_int(runtime_index as u64, false);
         let ret = bctx.builder.build_call(
             bctx.env.symbols().stack_peek(),
@@ -174,9 +284,11 @@ impl<'ctx> StackBackend<'ctx> for RuntimeStackBackend {
             ReturnCode::StackUnderflow,
             "stack_underflow",
         )?;
-        let ret = bctx
-            .builder
-            .build_call(bctx.env.symbols().stack_push_ptr(), &[bctx.registers.exec_ctx.into(), ptr.into()], "stack_push_ptr")?;
+        let ret = bctx.builder.build_call(
+            bctx.env.symbols().stack_push_ptr(),
+            &[bctx.registers.exec_ctx.into(), ptr.into()],
+            "stack_push_ptr",
+        )?;
         let success = ret.try_as_basic_value().unwrap_basic().into_int_value();
         branch_on_stack_failure(
             bctx,
@@ -187,7 +299,9 @@ impl<'ctx> StackBackend<'ctx> for RuntimeStackBackend {
     }
 
     fn swap<'b>(&self, bctx: &BuildCtx<'ctx, 'b, Self>, index: u8) -> Result<(), Error> {
-        let runtime_index = index.checked_sub(1).ok_or_else(|| Error::invariant_violation("swap index must be >= 1"))?;
+        let runtime_index = index
+            .checked_sub(1)
+            .ok_or_else(|| Error::invariant_violation("swap index must be >= 1"))?;
         let index_value = bctx.env.types().i8.const_int(runtime_index as u64, false);
         let ret = bctx.builder.build_call(
             bctx.env.symbols().stack_swap(),
@@ -211,9 +325,15 @@ fn branch_on_stack_failure<'ctx>(
     name: &str,
 ) -> Result<(), Error> {
     let failure_block = bctx.env.context().append_basic_block(bctx.func, name);
-    let valid_block = bctx.env.context().append_basic_block(bctx.func, &format!("{name}_valid"));
-    bctx.builder.build_conditional_branch(failed, failure_block, valid_block)?;
+    let valid_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, &format!("{name}_valid"));
+    bctx.builder
+        .build_conditional_branch(failed, failure_block, valid_block)?;
     bctx.builder.position_at_end(failure_block);
+    bctx.builder
+        .build_store(bctx.registers.gas_remaining, bctx.gas_remaining()?)?;
     let code = bctx.env.types().i8.const_int(return_code as u64, false);
     bctx.builder.build_return(Some(&code))?;
     bctx.builder.position_at_end(valid_block);
@@ -258,10 +378,18 @@ impl<'ctx> SymbolicStackBackend<'ctx> {
     }
 
     /// Zero-extend a value narrower than 256 bits to i256.
-    fn normalize<'b>(&self, bctx: &BuildCtx<'ctx, 'b, Self>, value: IntValue<'ctx>) -> Result<IntValue<'ctx>, Error> {
+    fn normalize<'b>(
+        &self,
+        bctx: &BuildCtx<'ctx, 'b, Self>,
+        value: IntValue<'ctx>,
+    ) -> Result<IntValue<'ctx>, Error> {
         let bit_width = value.get_type().get_bit_width();
         match bit_width {
-            1 | 8 | 32 | 64 | 160 => Ok(bctx.builder.build_int_z_extend(value, bctx.env.types().i256, "int_to_word")?),
+            1 | 8 | 32 | 64 | 160 => {
+                Ok(bctx
+                    .builder
+                    .build_int_z_extend(value, bctx.env.types().i256, "int_to_word")?)
+            }
             256 => Ok(value),
             _ => Err(Error::InvalidBitWidth(bit_width)),
         }
@@ -269,20 +397,50 @@ impl<'ctx> SymbolicStackBackend<'ctx> {
 }
 
 impl<'ctx> StackBackend<'ctx> for SymbolicStackBackend<'ctx> {
-    fn push_word<'b>(&self, bctx: &BuildCtx<'ctx, 'b, Self>, value: IntValue<'ctx>) -> Result<(), Error> {
+    fn push_word<'b>(
+        &self,
+        bctx: &BuildCtx<'ctx, 'b, Self>,
+        value: IntValue<'ctx>,
+    ) -> Result<(), Error> {
         let value = self.normalize(bctx, value)?;
         self.stack.borrow_mut().push_word(value);
         Ok(())
     }
 
-    fn push_word_with_known_u64<'b>(&self, bctx: &BuildCtx<'ctx, 'b, Self>, value: IntValue<'ctx>, known_u64: Option<u64>) -> Result<(), Error> {
+    fn push_word_with_known_u64<'b>(
+        &self,
+        bctx: &BuildCtx<'ctx, 'b, Self>,
+        value: IntValue<'ctx>,
+        known_u64: Option<u64>,
+    ) -> Result<(), Error> {
         let value = self.normalize(bctx, value)?;
-        self.stack.borrow_mut().push_word_with_known_u64(value, known_u64);
+        self.stack
+            .borrow_mut()
+            .push_word_with_known_u64(value, known_u64);
         Ok(())
     }
 
     fn pop_word<'b>(&self, _bctx: &BuildCtx<'ctx, 'b, Self>) -> Result<IntValue<'ctx>, Error> {
         self.stack.borrow_mut().pop_word()
+    }
+
+    fn peek_word<'b>(
+        &self,
+        _bctx: &BuildCtx<'ctx, 'b, Self>,
+        depth_from_top: u8,
+    ) -> Result<IntValue<'ctx>, Error> {
+        self.stack.borrow().peek_word(depth_from_top as usize)
+    }
+
+    fn has_words<'b>(
+        &self,
+        bctx: &BuildCtx<'ctx, 'b, Self>,
+        count: u32,
+    ) -> Result<IntValue<'ctx>, Error> {
+        Ok(bctx.env.context().bool_type().const_int(
+            u64::from(self.stack.borrow().len() >= count as usize),
+            false,
+        ))
     }
 
     fn dup<'b>(&self, _bctx: &BuildCtx<'ctx, 'b, Self>, index: u8) -> Result<(), Error> {

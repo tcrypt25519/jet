@@ -15,23 +15,35 @@ use crate::{
 pub struct CallInfo {
     calldata_ptr: *mut u8,
     calldata_len: u32,
-    address:      Address,
-    origin:       Address,
-    caller:       Address,
-    value:        Word,
+    address: Address,
+    origin: Address,
+    caller: Address,
+    value: Word,
+    gas_limit: u64,
 }
 
 impl CallInfo {
     /// Creates call information and copies the supplied calldata.
-    pub fn new(address: Address, origin: Address, caller: Address, value: Word, calldata: &[u8]) -> Result<Self> {
-        let calldata_len = u32::try_from(calldata.len()).map_err(|_| RuntimeError::MemoryLayout("calldata exceeds u32::MAX".to_string()))?;
+    pub fn new(
+        address: Address,
+        origin: Address,
+        caller: Address,
+        value: Word,
+        calldata: &[u8],
+        gas_limit: u64,
+    ) -> Result<Self> {
+        let calldata_len = u32::try_from(calldata.len())
+            .map_err(|_| RuntimeError::MemoryLayout("calldata exceeds u32::MAX".to_string()))?;
         let calldata_ptr = if calldata.is_empty() {
             std::ptr::null_mut()
         } else {
-            let layout = Layout::array::<u8>(calldata.len()).map_err(|e| RuntimeError::MemoryLayout(e.to_string()))?;
+            let layout = Layout::array::<u8>(calldata.len())
+                .map_err(|e| RuntimeError::MemoryLayout(e.to_string()))?;
             let ptr = unsafe { alloc(layout) };
             if ptr.is_null() {
-                return Err(RuntimeError::MemoryAllocation("Failed to allocate calldata".to_string()));
+                return Err(RuntimeError::MemoryAllocation(
+                    "Failed to allocate calldata".to_string(),
+                ));
             }
             unsafe { std::ptr::copy_nonoverlapping(calldata.as_ptr(), ptr, calldata.len()) };
             ptr
@@ -43,6 +55,7 @@ impl CallInfo {
             origin,
             caller,
             value,
+            gas_limit,
         })
     }
 
@@ -65,6 +78,10 @@ impl CallInfo {
     /// Returns the calldata length.
     pub fn calldata_len(&self) -> u32 {
         self.calldata_len
+    }
+    /// Returns the gas granted to this call frame.
+    pub fn gas_limit(&self) -> u64 {
+        self.gas_limit
     }
     /// Returns the calldata.
     pub fn calldata(&self) -> &[u8] {

@@ -7,37 +7,73 @@ mod layout_verification_tests {
     use inkwell::{context::Context as LLVMContext, types::AnyTypeEnum};
     use jet_ir::Types;
 
-    use crate::exec::{BlockInfo, Context};
+    use crate::{
+        CallInfo,
+        exec::{BlockInfo, Context},
+    };
 
     /// Field indices for exec_ctx structure
     #[derive(Debug, Clone, Copy)]
     #[repr(u32)]
     enum ExecCtxField {
-        StackPtr     = 0,
-        JumpPtr      = 1,
+        StackPtr = 0,
+        JumpPtr = 1,
         ReturnOffset = 2,
         ReturnLength = 3,
-        SubCall      = 4,
-        Stack        = 5,
-        MemoryPtr    = 6,
-        MemoryLen    = 7,
-        MemoryCap    = 8,
-        CallInfo     = 9,
+        SubCall = 4,
+        Stack = 5,
+        MemoryPtr = 6,
+        MemoryLen = 7,
+        MemoryCap = 8,
+        CallInfo = 9,
+        GasRemaining = 10,
+        GasFailure = 11,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    #[repr(u32)]
+    enum CallInfoField {
+        CalldataPtr = 0,
+        CalldataLen = 1,
+        Address = 2,
+        Origin = 3,
+        Caller = 4,
+        Value = 5,
+        GasLimit = 6,
     }
 
     #[derive(Debug, Clone, Copy)]
     #[repr(u32)]
     enum BlockInfoField {
-        Number      = 0,
-        Difficulty  = 1,
-        GasLimit    = 2,
-        Timestamp   = 3,
-        BaseFee     = 4,
+        Number = 0,
+        Difficulty = 1,
+        GasLimit = 2,
+        Timestamp = 3,
+        BaseFee = 4,
         BlobBaseFee = 5,
-        ChainId     = 6,
-        Hash        = 7,
+        ChainId = 6,
+        Hash = 7,
         HashHistory = 8,
-        Coinbase    = 9,
+        Coinbase = 9,
+    }
+
+    impl CallInfoField {
+        const FIELD_COUNT: u32 = 7;
+
+        fn index(self) -> u32 {
+            self as u32
+        }
+
+        fn expected_type_kind(self) -> TypeKind {
+            match self {
+                CallInfoField::CalldataPtr => TypeKind::Pointer,
+                CallInfoField::CalldataLen | CallInfoField::GasLimit => TypeKind::Int,
+                CallInfoField::Address
+                | CallInfoField::Origin
+                | CallInfoField::Caller
+                | CallInfoField::Value => TypeKind::Array,
+            }
+        }
     }
 
     impl BlockInfoField {
@@ -56,13 +92,15 @@ mod layout_verification_tests {
                 | BlockInfoField::BaseFee
                 | BlockInfoField::BlobBaseFee
                 | BlockInfoField::ChainId => TypeKind::Int,
-                BlockInfoField::Hash | BlockInfoField::HashHistory | BlockInfoField::Coinbase => TypeKind::Array,
+                BlockInfoField::Hash | BlockInfoField::HashHistory | BlockInfoField::Coinbase => {
+                    TypeKind::Array
+                }
             }
         }
     }
 
     impl ExecCtxField {
-        const FIELD_COUNT: u32 = 10;
+        const FIELD_COUNT: u32 = 12;
 
         fn index(self) -> u32 {
             self as u32
@@ -78,8 +116,8 @@ mod layout_verification_tests {
                 ExecCtxField::Stack => TypeKind::Array,
                 ExecCtxField::MemoryPtr => TypeKind::Pointer,
                 ExecCtxField::MemoryLen => TypeKind::Int,
-                ExecCtxField::MemoryCap => TypeKind::Int,
-                ExecCtxField::CallInfo => TypeKind::Pointer,
+                ExecCtxField::MemoryCap | ExecCtxField::GasRemaining => TypeKind::Int,
+                ExecCtxField::CallInfo | ExecCtxField::GasFailure => TypeKind::Pointer,
             }
         }
     }
@@ -151,6 +189,8 @@ mod layout_verification_tests {
             ExecCtxField::MemoryLen,
             ExecCtxField::MemoryCap,
             ExecCtxField::CallInfo,
+            ExecCtxField::GasRemaining,
+            ExecCtxField::GasFailure,
         ];
 
         for field in fields_to_test {
@@ -187,18 +227,75 @@ mod layout_verification_tests {
         let llvm_context = LLVMContext::create();
         let types = Types::new(&llvm_context);
 
-        let stack_field = types.exec_ctx.get_field_type_at_index(ExecCtxField::Stack.index()).unwrap();
+        let stack_field = types
+            .exec_ctx
+            .get_field_type_at_index(ExecCtxField::Stack.index())
+            .unwrap();
 
-        assert!(stack_field.is_array_type(), "Stack field should be array type");
+        assert!(
+            stack_field.is_array_type(),
+            "Stack field should be array type"
+        );
 
         let stack_array = stack_field.into_array_type();
         assert_eq!(stack_array.len(), 1024, "Stack should have 1024 elements");
 
         let element_type = stack_array.get_element_type();
-        assert!(element_type.is_int_type(), "Stack elements should be int type");
+        assert!(
+            element_type.is_int_type(),
+            "Stack elements should be int type"
+        );
 
         let element_int = element_type.into_int_type();
-        assert_eq!(element_int.get_bit_width(), 256, "Stack elements should be i256");
+        assert_eq!(
+            element_int.get_bit_width(),
+            256,
+            "Stack elements should be i256"
+        );
+    }
+
+    #[test]
+    fn test_call_info_struct_size() {
+        assert_eq!(mem::size_of::<CallInfo>(), 112);
+    }
+
+    #[test]
+    fn test_llvm_call_info_field_count() {
+        let llvm_context = LLVMContext::create();
+        let types = Types::new(&llvm_context);
+        assert_eq!(types.call_info.count_fields(), CallInfoField::FIELD_COUNT);
+    }
+
+    #[test]
+    fn test_call_info_field_types() {
+        let llvm_context = LLVMContext::create();
+        let types = Types::new(&llvm_context);
+        let fields = [
+            CallInfoField::CalldataPtr,
+            CallInfoField::CalldataLen,
+            CallInfoField::Address,
+            CallInfoField::Origin,
+            CallInfoField::Caller,
+            CallInfoField::Value,
+            CallInfoField::GasLimit,
+        ];
+
+        for field in fields {
+            let field_type = types
+                .call_info
+                .get_field_type_at_index(field.index())
+                .unwrap();
+            let actual_kind = get_type_kind(match field_type {
+                inkwell::types::BasicTypeEnum::ArrayType(t) => t.into(),
+                inkwell::types::BasicTypeEnum::FloatType(t) => t.into(),
+                inkwell::types::BasicTypeEnum::IntType(t) => t.into(),
+                inkwell::types::BasicTypeEnum::PointerType(t) => t.into(),
+                inkwell::types::BasicTypeEnum::StructType(t) => t.into(),
+                inkwell::types::BasicTypeEnum::VectorType(t) => t.into(),
+                inkwell::types::BasicTypeEnum::ScalableVectorType(t) => t.into(),
+            });
+            assert_eq!(actual_kind, field.expected_type_kind());
+        }
     }
 
     #[test]

@@ -13,13 +13,13 @@ use crate::{
 #[repr(i8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ContractCallError {
-    Success              = 0,
-    LookupFailed         = 1,
-    InvocationFailed     = 2,
-    CopyFailed           = 3,
-    InvalidJitEngine     = -1,
-    InvalidCtx           = -2,
-    InvalidPointer       = -3,
+    Success = 0,
+    LookupFailed = 1,
+    InvocationFailed = 2,
+    CopyFailed = 3,
+    InvalidJitEngine = -1,
+    InvalidCtx = -2,
+    InvalidPointer = -3,
     SubCtxCreationFailed = -4,
 }
 
@@ -55,7 +55,17 @@ pub unsafe extern "C" fn jet_contract_call(
     let addr_slice = unsafe { std::slice::from_raw_parts(addr, ADDRESS_SIZE_BYTES) };
     let ret_dest = unsafe { *ret_dest };
     let ret_len = unsafe { *ret_len };
-    unsafe { jet_contract_call_impl(ctx, block_info, jit_engine, addr_slice, std::ptr::null(), ret_dest, ret_len) }
+    unsafe {
+        jet_contract_call_impl(
+            ctx,
+            block_info,
+            jit_engine,
+            addr_slice,
+            std::ptr::null(),
+            ret_dest,
+            ret_len,
+        )
+    }
 }
 
 /// Calls a contract using value arguments instead of stack-word pointers.
@@ -116,18 +126,26 @@ unsafe fn jet_contract_call_impl(
     if !value.is_null() {
         value_word.copy_from_slice(unsafe { std::slice::from_raw_parts(value, 32) });
     }
-    let address_bytes: [u8; ADDRESS_SIZE_BYTES] = addr_slice.try_into().unwrap_or([0u8; ADDRESS_SIZE_BYTES]);
+    let address_bytes: [u8; ADDRESS_SIZE_BYTES] =
+        addr_slice.try_into().unwrap_or([0u8; ADDRESS_SIZE_BYTES]);
     // The address on the JIT stack is little-endian; the canonical
     // CallInfo address uses the same byte order as the Address newtype.
     let mut canonical_address = address_bytes;
     canonical_address.reverse();
-    let calldata = CallInfo::new(Address::new(canonical_address), caller.origin(), caller.address(), value_word, &[]);
+    let calldata = CallInfo::new(
+        Address::new(canonical_address),
+        caller.origin(),
+        caller.address(),
+        value_word,
+        &[],
+        u64::MAX,
+    );
     let calldata = match calldata {
         Ok(c) => c,
         Err(e) => {
             log::error!("Failed to create sub-call info: {}", e);
             return ContractCallError::SubCtxCreationFailed as i8;
-        },
+        }
     };
 
     let callee_ctx = match caller_ctx.init_sub_call(calldata) {
@@ -135,7 +153,7 @@ unsafe fn jet_contract_call_impl(
         Err(e) => {
             log::error!("Failed to create sub-context: {}", e);
             return ContractCallError::SubCtxCreationFailed as i8;
-        },
+        }
     };
 
     // Execute the contract function
@@ -163,7 +181,7 @@ unsafe fn jet_contract_call_impl(
         err => {
             log::error!("Return data copy failed: {:?}", err);
             ContractCallError::CopyFailed as i8
-        },
+        }
     }
 }
 
@@ -171,9 +189,9 @@ unsafe fn jet_contract_call_impl(
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CopyError {
-    Success            = 0,
-    InvalidPtr         = 1,
-    BoundsCheckFailed  = 2,
+    Success = 0,
+    InvalidPtr = 1,
+    BoundsCheckFailed = 2,
     ArithmeticOverflow = 3,
     MemoryExpansionNeeded = 4,
 }
@@ -205,7 +223,13 @@ pub unsafe extern "C" fn jet_contract_call_return_data_copy(
     unsafe { return_data_copy_impl(ctx, sub_ctx, dest_offset, src_offset, requested_ret_len) as u8 }
 }
 
-unsafe fn return_data_copy_impl(ctx: *mut Context, sub_ctx: *const Context, dest_offset: u32, src_offset: u32, requested_ret_len: u32) -> CopyError {
+unsafe fn return_data_copy_impl(
+    ctx: *mut Context,
+    sub_ctx: *const Context,
+    dest_offset: u32,
+    src_offset: u32,
+    requested_ret_len: u32,
+) -> CopyError {
     if requested_ret_len == 0 {
         return CopyError::Success;
     }
@@ -301,7 +325,12 @@ fn u512_to_u256_low(val: bnum::types::U512) -> bnum::types::U256 {
 /// Computes (a + b) % n using 512-bit intermediate arithmetic to prevent overflow.
 /// Note: result and a may point to the same buffer, but this is safe because
 /// all inputs are read into local variables before result is written.
-pub extern "C" fn jet_ops_addmod(result: &mut [u8; 32], a: &[u8; 32], b: &[u8; 32], n: &[u8; 32]) -> i8 {
+pub extern "C" fn jet_ops_addmod(
+    result: &mut [u8; 32],
+    a: &[u8; 32],
+    b: &[u8; 32],
+    n: &[u8; 32],
+) -> i8 {
     // Read all inputs into local variables before writing to result
     let a_u256 = read_u256(a);
     let b_u256 = read_u256(b);
@@ -335,7 +364,12 @@ pub extern "C" fn jet_ops_addmod(result: &mut [u8; 32], a: &[u8; 32], b: &[u8; 3
 /// Computes (a * b) % n using 512-bit intermediate arithmetic to prevent overflow.
 /// Note: result and a may point to the same buffer, but this is safe because
 /// all inputs are read into local variables before result is written.
-pub extern "C" fn jet_ops_mulmod(result: &mut [u8; 32], a: &[u8; 32], b: &[u8; 32], n: &[u8; 32]) -> i8 {
+pub extern "C" fn jet_ops_mulmod(
+    result: &mut [u8; 32],
+    a: &[u8; 32],
+    b: &[u8; 32],
+    n: &[u8; 32],
+) -> i8 {
     // Read all inputs into local variables before writing to result
     let a_u256 = read_u256(a);
     let b_u256 = read_u256(b);
@@ -378,7 +412,12 @@ pub extern "C" fn jet_ops_mulmod(result: &mut [u8; 32], a: &[u8; 32], b: &[u8; 3
 /// `ctx` must be a valid pointer if non-null (null check is performed and handled).
 /// `result` must point to a valid, non-null 32-byte aligned output buffer. If `result`
 /// is null, this function will cause undefined behavior.
-pub unsafe extern "C" fn jet_ops_keccak256(ctx: *mut Context, offset: u32, size: u32, result: *mut [u8; 32]) -> i8 {
+pub unsafe extern "C" fn jet_ops_keccak256(
+    ctx: *mut Context,
+    offset: u32,
+    size: u32,
+    result: *mut [u8; 32],
+) -> i8 {
     use sha3::{Digest, Keccak256};
 
     // Check for null context pointer
@@ -417,10 +456,10 @@ pub unsafe extern "C" fn jet_ops_keccak256(ctx: *mut Context, offset: u32, size:
 #[repr(i8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MemoryExpansionError {
-    Success            = 0,
-    InvalidPointer     = -1,
+    Success = 0,
+    InvalidPointer = -1,
     ArithmeticOverflow = -2,
-    AllocationFailed   = -3,
+    AllocationFailed = -3,
 }
 
 /// Expands memory to accommodate an access at offset with given size.
@@ -487,7 +526,8 @@ pub unsafe extern "C" fn jet_mem_expand(ctx: *mut Context, offset: u32, size: u3
 
         // Free old allocation
         if !ctx.memory_ptr.is_null() && ctx.memory_cap > 0 {
-            let old_layout = std::alloc::Layout::from_size_align(ctx.memory_cap as usize, 32).expect("old layout should be valid");
+            let old_layout = std::alloc::Layout::from_size_align(ctx.memory_cap as usize, 32)
+                .expect("old layout should be valid");
             unsafe {
                 std::alloc::dealloc(ctx.memory_ptr, old_layout);
             }
@@ -535,12 +575,36 @@ pub unsafe extern "C" fn jet_call_data_load(ctx: *const Context, offset: *const 
     unsafe { std::slice::from_raw_parts_mut(out, 32).copy_from_slice(&result) };
 }
 
+/// Records diagnostics for a failed static gas region.
+///
+/// # Safety
+///
+/// `ctx` must be null or point to a valid execution context.
+pub unsafe extern "C" fn jet_gas_failure_static(
+    ctx: *mut Context,
+    pc: u32,
+    available_gas: u64,
+    required_gas: u64,
+) {
+    if let Some(ctx) = unsafe { ctx.as_mut() } {
+        ctx.record_static_gas_failure(pc, available_gas, required_gas);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{Address, CallInfo, exec::Context};
 
     fn test_context() -> Context {
-        let call_info = CallInfo::new(Address::default(), Address::default(), Address::default(), [0u8; 32], &[]).expect("test call info");
+        let call_info = CallInfo::new(
+            Address::default(),
+            Address::default(),
+            Address::default(),
+            [0u8; 32],
+            &[],
+            u64::MAX,
+        )
+        .expect("test call info");
         Context::new(call_info).expect("test context")
     }
 

@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::{
+    cell::Cell,
+    collections::{HashMap, HashSet, VecDeque},
+};
 
 use inkwell::{
     basic_block::BasicBlock,
@@ -22,28 +25,46 @@ use crate::{
 
 pub(crate) struct Registers<'ctx> {
     // Function parameters
-    pub(crate) exec_ctx:   inkwell::values::PointerValue<'ctx>,
+    pub(crate) exec_ctx: inkwell::values::PointerValue<'ctx>,
     pub(crate) block_info: inkwell::values::PointerValue<'ctx>,
 
     // Pointers into the exec context
-    pub(crate) jump_ptr:      inkwell::values::PointerValue<'ctx>,
+    pub(crate) jump_ptr: inkwell::values::PointerValue<'ctx>,
     pub(crate) return_offset: inkwell::values::PointerValue<'ctx>,
     pub(crate) return_length: inkwell::values::PointerValue<'ctx>,
-    pub(crate) sub_call:      inkwell::values::PointerValue<'ctx>,
-    pub(crate) call_info:     inkwell::values::PointerValue<'ctx>,
+    pub(crate) sub_call: inkwell::values::PointerValue<'ctx>,
+    pub(crate) call_info: inkwell::values::PointerValue<'ctx>,
+    pub(crate) gas_remaining: inkwell::values::PointerValue<'ctx>,
 }
 
 impl<'ctx> Registers<'ctx> {
-    pub fn new(env: &Env<'ctx>, builder: &inkwell::builder::Builder<'ctx>, func: FunctionValue<'ctx>) -> Self {
+    pub fn new(
+        env: &Env<'ctx>,
+        builder: &inkwell::builder::Builder<'ctx>,
+        func: FunctionValue<'ctx>,
+    ) -> Self {
         let t = env.types();
         let exec_ctx = func.get_nth_param(0).unwrap().into_pointer_value();
         let block_info = func.get_nth_param(1).unwrap().into_pointer_value();
 
-        let jump_ptr = builder.build_struct_gep(t.exec_ctx, exec_ctx, 1, "jump_ptr").unwrap();
-        let return_offset = builder.build_struct_gep(t.exec_ctx, exec_ctx, 2, "return_offset").unwrap();
-        let return_length = builder.build_struct_gep(t.exec_ctx, exec_ctx, 3, "return_length").unwrap();
-        let sub_call = builder.build_struct_gep(t.exec_ctx, exec_ctx, 4, "sub_call").unwrap();
-        let call_info = builder.build_struct_gep(t.exec_ctx, exec_ctx, 9, "call_info").unwrap();
+        let jump_ptr = builder
+            .build_struct_gep(t.exec_ctx, exec_ctx, 1, "jump_ptr")
+            .unwrap();
+        let return_offset = builder
+            .build_struct_gep(t.exec_ctx, exec_ctx, 2, "return_offset")
+            .unwrap();
+        let return_length = builder
+            .build_struct_gep(t.exec_ctx, exec_ctx, 3, "return_length")
+            .unwrap();
+        let sub_call = builder
+            .build_struct_gep(t.exec_ctx, exec_ctx, 4, "sub_call")
+            .unwrap();
+        let call_info = builder
+            .build_struct_gep(t.exec_ctx, exec_ctx, 9, "call_info")
+            .unwrap();
+        let gas_remaining = builder
+            .build_struct_gep(t.exec_ctx, exec_ctx, 10, "gas_remaining")
+            .unwrap();
 
         Self {
             exec_ctx,
@@ -54,37 +75,56 @@ impl<'ctx> Registers<'ctx> {
             return_length,
             sub_call,
             call_info,
+            gas_remaining,
         }
     }
 }
 
 pub(crate) struct BuildCtx<'ctx, 'b, S: StackBackend<'ctx>> {
-    pub(crate) env:       &'b Env<'ctx>,
-    pub(crate) builder:   &'b inkwell::builder::Builder<'ctx>,
+    pub(crate) env: &'b Env<'ctx>,
+    pub(crate) builder: &'b inkwell::builder::Builder<'ctx>,
     pub(crate) registers: Registers<'ctx>,
-    pub(crate) func:      FunctionValue<'ctx>,
-    pub(crate) stack:     S,
+    pub(crate) func: FunctionValue<'ctx>,
+    pub(crate) stack: S,
+    gas_remaining: Cell<Option<IntValue<'ctx>>>,
 }
 
 impl<'ctx, 'b, S: StackBackend<'ctx>> BuildCtx<'ctx, 'b, S> {
-    fn new(env: &'b Env<'ctx>, builder: &'b inkwell::builder::Builder<'ctx>, func: FunctionValue<'ctx>, stack: S) -> Self {
+    fn new(
+        env: &'b Env<'ctx>,
+        builder: &'b inkwell::builder::Builder<'ctx>,
+        func: FunctionValue<'ctx>,
+        stack: S,
+    ) -> Self {
         Self {
             env,
             builder,
             func,
             registers: Registers::new(env, builder, func),
             stack,
+            gas_remaining: Cell::new(None),
         }
+    }
+
+    pub(crate) fn gas_remaining(&self) -> Result<IntValue<'ctx>, Error> {
+        self.gas_remaining
+            .get()
+            .ok_or_else(|| Error::invariant_violation("gas SSA value is not set"))
+    }
+
+    pub(crate) fn set_gas_remaining(&self, gas_remaining: IntValue<'ctx>) {
+        self.gas_remaining.set(Some(gas_remaining));
     }
 }
 
 #[derive(Debug)]
 struct CodeBlock<'ctx, 'b> {
-    offset:      usize,
-    rom:         &'b [u8],
+    offset: usize,
+    rom: &'b [u8],
     entry_block: BasicBlock<'ctx>,
+    gas_phi: Option<PhiValue<'ctx>>,
     is_jumpdest: bool,
-    terminates:  bool,
+    terminates: bool,
 }
 
 impl CodeBlock<'_, '_> {
@@ -102,45 +142,57 @@ impl CodeBlock<'_, '_> {
 }
 
 struct CodeBlocks<'ctx, 'b> {
-    blocks:           Vec<CodeBlock<'ctx, 'b>>,
+    blocks: Vec<CodeBlock<'ctx, 'b>>,
     jumpdest_offsets: HashMap<u64, usize>,
 }
 
 impl<'ctx, 'b> CodeBlocks<'ctx, 'b> {
     pub(crate) fn new() -> Self {
         Self {
-            blocks:           Vec::new(),
+            blocks: Vec::new(),
             jumpdest_offsets: HashMap::new(),
         }
     }
 
-    pub(crate) fn add(&mut self, offset: usize, entry_block: BasicBlock<'ctx>) -> Result<&mut CodeBlock<'ctx, 'b>, Error> {
+    pub(crate) fn add(
+        &mut self,
+        offset: usize,
+        entry_block: BasicBlock<'ctx>,
+    ) -> Result<&mut CodeBlock<'ctx, 'b>, Error> {
         self.blocks.push(CodeBlock {
             offset,
             rom: &[],
             entry_block,
+            gas_phi: None,
             is_jumpdest: false,
             terminates: false,
         });
-        self.blocks
-            .last_mut()
-            .ok_or_else(|| Error::InvariantViolation("CodeBlocks::add: no block after push".to_string()))
+        self.blocks.last_mut().ok_or_else(|| {
+            Error::InvariantViolation("CodeBlocks::add: no block after push".to_string())
+        })
     }
 
-    pub(crate) fn add_jumpdest(&mut self, offset: usize, entry_block: BasicBlock<'ctx>) -> Result<&mut CodeBlock<'ctx, 'b>, Error> {
+    pub(crate) fn add_jumpdest(
+        &mut self,
+        offset: usize,
+        entry_block: BasicBlock<'ctx>,
+    ) -> Result<&mut CodeBlock<'ctx, 'b>, Error> {
         let index = self.blocks.len();
-        let jumpdest_pc = offset.checked_sub(1).ok_or_else(|| Error::invariant_violation("Jump destination at offset 0"))?;
+        let jumpdest_pc = offset
+            .checked_sub(1)
+            .ok_or_else(|| Error::invariant_violation("Jump destination at offset 0"))?;
         self.blocks.push(CodeBlock {
             offset,
             rom: &[],
             entry_block,
+            gas_phi: None,
             is_jumpdest: true,
             terminates: false,
         });
         self.jumpdest_offsets.insert(jumpdest_pc as u64, index);
-        self.blocks
-            .last_mut()
-            .ok_or_else(|| Error::InvariantViolation("CodeBlocks::add_jumpdest: no block after push".to_string()))
+        self.blocks.last_mut().ok_or_else(|| {
+            Error::InvariantViolation("CodeBlocks::add_jumpdest: no block after push".to_string())
+        })
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -186,7 +238,11 @@ pub fn build(env: &'_ Env<'_>, name: &str, rom: &[u8]) -> Result<(), Error> {
 const MAX_SYMBOLIC_VARIANTS_PER_BLOCK: usize = 64;
 const MAX_SYMBOLIC_VARIANTS_TOTAL: usize = 4096;
 
-fn build_with_symbolic_stack<'ctx>(env: &'_ Env<'ctx>, name: &str, rom: &[u8]) -> Result<(), Error> {
+fn build_with_symbolic_stack<'ctx>(
+    env: &'_ Env<'ctx>,
+    name: &str,
+    rom: &[u8],
+) -> Result<(), Error> {
     let builder = env.context().create_builder();
 
     let func_type = env.types().contract_fn;
@@ -194,13 +250,16 @@ fn build_with_symbolic_stack<'ctx>(env: &'_ Env<'ctx>, name: &str, rom: &[u8]) -
     info!(
         "Created function {} in module {}",
         name,
-        env.module().get_name().to_str().unwrap_or("<invalid UTF-8>")
+        env.module()
+            .get_name()
+            .to_str()
+            .unwrap_or("<invalid UTF-8>")
     );
 
     let preamble_block = env.context().append_basic_block(func, "preamble");
     builder.position_at_end(preamble_block);
 
-    let code_blocks = find_code_blocks(env, func, rom)?;
+    let mut code_blocks = find_code_blocks(env, func, rom)?;
     match build_symbolic_plan(env, func, &code_blocks)? {
         Some(mut plan) => {
             let bctx = BuildCtx::new(env, &builder, func, SymbolicStackBackend::new());
@@ -208,22 +267,45 @@ fn build_with_symbolic_stack<'ctx>(env: &'_ Env<'ctx>, name: &str, rom: &[u8]) -
             build_symbolic_contract_body(&bctx, &code_blocks, &plan)?;
 
             bctx.builder.position_at_end(preamble_block);
-            bctx.builder.build_unconditional_branch(plan.entry_block())?;
-        },
+            let initial_gas = load_context_gas(&bctx)?;
+            plan.variants[plan.entry_variant]
+                .gas_phi
+                .ok_or_else(|| Error::invariant_violation("missing symbolic entry gas phi"))?
+                .add_incoming(&[(&initial_gas, preamble_block)]);
+            bctx.builder
+                .build_unconditional_branch(plan.entry_block())?;
+        }
         None => {
-            info!("Symbolic plan for {} exceeds size limits; using the runtime stack backend", name);
+            info!(
+                "Symbolic plan for {} exceeds size limits; using the runtime stack backend",
+                name
+            );
             let bctx = BuildCtx::new(env, &builder, func, RuntimeStackBackend);
+            create_code_block_gas_phis(&bctx, &mut code_blocks)?;
             build_contract_body(&bctx, &code_blocks)?;
 
-            let entry_block = code_blocks.first().ok_or_else(|| Error::InvariantViolation("No code blocks found".to_string()))?;
+            let entry_block = code_blocks
+                .first()
+                .ok_or_else(|| Error::InvariantViolation("No code blocks found".to_string()))?;
             bctx.builder.position_at_end(preamble_block);
-            bctx.builder.build_unconditional_branch(entry_block.entry_block)?;
-        },
+            let initial_gas = load_context_gas(&bctx)?;
+            entry_block
+                .gas_phi
+                .ok_or_else(|| Error::invariant_violation("missing entry gas phi"))?
+                .add_incoming(&[(&initial_gas, preamble_block)]);
+            bctx.builder
+                .build_unconditional_branch(entry_block.entry_block)?;
+        }
     }
     Ok(())
 }
 
-fn build_with_stack<'ctx, S: StackBackend<'ctx>>(env: &'_ Env<'ctx>, name: &str, rom: &[u8], stack: S) -> Result<(), Error> {
+fn build_with_stack<'ctx, S: StackBackend<'ctx>>(
+    env: &'_ Env<'ctx>,
+    name: &str,
+    rom: &[u8],
+    stack: S,
+) -> Result<(), Error> {
     let builder = env.context().create_builder();
 
     // Declare the function in the module
@@ -232,7 +314,10 @@ fn build_with_stack<'ctx, S: StackBackend<'ctx>>(env: &'_ Env<'ctx>, name: &str,
     info!(
         "Created function {} in module {}",
         name,
-        env.module().get_name().to_str().unwrap_or("<invalid UTF-8>")
+        env.module()
+            .get_name()
+            .to_str()
+            .unwrap_or("<invalid UTF-8>")
     );
 
     // Create the preamble block
@@ -241,17 +326,57 @@ fn build_with_stack<'ctx, S: StackBackend<'ctx>>(env: &'_ Env<'ctx>, name: &str,
 
     // Build ROM into IR
     let bctx = BuildCtx::new(env, &builder, func, stack);
-    let code_blocks = find_code_blocks(env, func, rom)?;
+    let mut code_blocks = find_code_blocks(env, func, rom)?;
+    create_code_block_gas_phis(&bctx, &mut code_blocks)?;
     build_contract_body(&bctx, &code_blocks)?;
 
     // Connect the preamble block to the entry block
-    let entry_block = code_blocks.first().ok_or_else(|| Error::InvariantViolation("No code blocks found".to_string()))?;
+    let entry_block = code_blocks
+        .first()
+        .ok_or_else(|| Error::InvariantViolation("No code blocks found".to_string()))?;
     bctx.builder.position_at_end(preamble_block);
-    bctx.builder.build_unconditional_branch(entry_block.entry_block)?;
+    let initial_gas = load_context_gas(&bctx)?;
+    entry_block
+        .gas_phi
+        .ok_or_else(|| Error::invariant_violation("missing entry gas phi"))?
+        .add_incoming(&[(&initial_gas, preamble_block)]);
+    bctx.builder
+        .build_unconditional_branch(entry_block.entry_block)?;
     Ok(())
 }
 
-fn find_code_blocks<'ctx, 'b>(env: &Env<'ctx>, func: FunctionValue<'ctx>, bytecode: &'b [u8]) -> Result<CodeBlocks<'ctx, 'b>, Error> {
+fn load_context_gas<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<IntValue<'ctx>, Error> {
+    Ok(bctx
+        .builder
+        .build_load(
+            bctx.env.types().i64,
+            bctx.registers.gas_remaining,
+            "gas.initial",
+        )?
+        .into_int_value())
+}
+
+fn create_code_block_gas_phis<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+    code_blocks: &mut CodeBlocks<'ctx, '_>,
+) -> Result<(), Error> {
+    for block in &mut code_blocks.blocks {
+        bctx.builder.position_at_end(block.entry_block);
+        block.gas_phi = Some(
+            bctx.builder
+                .build_phi(bctx.env.types().i64, "gas.remaining")?,
+        );
+    }
+    Ok(())
+}
+
+fn find_code_blocks<'ctx, 'b>(
+    env: &Env<'ctx>,
+    func: FunctionValue<'ctx>,
+    bytecode: &'b [u8],
+) -> Result<CodeBlocks<'ctx, 'b>, Error> {
     trace!("find_code_blocks: Creating code blocks");
     trace!("find_code_blocks: ROM: {:?}", bytecode);
 
@@ -269,9 +394,12 @@ fn find_code_blocks<'ctx, 'b>(env: &Env<'ctx>, func: FunctionValue<'ctx>, byteco
         match item {
             IterItem::PushData(pc, _, data) => {
                 trace!("find_code_blocks: Found push data {:?} at PC {}", data, pc);
-            },
+            }
             IterItem::Instr(pc, instr) => {
-                trace!("find_code_blocks: Found instruction {:?} at PC {}", instr, pc);
+                trace!(
+                    "find_code_blocks: Found instruction {:?} at PC {}",
+                    instr, pc
+                );
                 match instr {
                     Instruction::JUMPDEST => {
                         trace!("find_code_blocks: Found JUMPDEST");
@@ -280,24 +408,29 @@ fn find_code_blocks<'ctx, 'b>(env: &Env<'ctx>, func: FunctionValue<'ctx>, byteco
                         }
 
                         current_block_starting_pc = pc + 1;
-                        current_block = blocks.add_jumpdest(current_block_starting_pc, create_bb())?;
+                        current_block =
+                            blocks.add_jumpdest(current_block_starting_pc, create_bb())?;
                         dead = false;
-                    },
+                    }
 
                     _ if dead => {
                         trace!("find_code_blocks: instr {} is unreachable", instr);
-                    },
+                    }
 
                     // Instructions that terminate a block
                     // When these appear we finish out the current block and mark it as
                     // terminating
-                    Instruction::STOP | Instruction::RETURN | Instruction::REVERT | Instruction::INVALID | Instruction::JUMP => {
+                    Instruction::STOP
+                    | Instruction::RETURN
+                    | Instruction::REVERT
+                    | Instruction::INVALID
+                    | Instruction::JUMP => {
                         trace!("find_code_blocks: Found terminator {}", instr);
                         current_block.rom = &bytecode[current_block_starting_pc..pc + 1];
                         current_block.set_terminates();
                         current_block_starting_pc = pc + 1;
                         dead = true;
-                    },
+                    }
 
                     Instruction::JUMPI => {
                         trace!("find_code_blocks: Found JUMPI");
@@ -305,22 +438,29 @@ fn find_code_blocks<'ctx, 'b>(env: &Env<'ctx>, func: FunctionValue<'ctx>, byteco
                         current_block.set_terminates();
                         current_block_starting_pc = pc + 1;
                         current_block = blocks.add(current_block_starting_pc, create_bb())?;
-                    },
+                    }
 
                     _ => {
                         trace!("find_code_blocks: instr {} is uninteresting", instr);
-                    },
+                    }
                 }
-            },
+            }
             IterItem::Invalid(pc) => {
                 trace!("find_code_blocks: Found invalid instruction at PC {}", pc);
-                return Err(InvalidOpcode { pc, opcode: bytecode[pc] }.into());
-            },
+                return Err(InvalidOpcode {
+                    pc,
+                    opcode: bytecode[pc],
+                }
+                .into());
+            }
         }
     }
 
     if current_block.rom.is_empty() {
-        trace!("find_code_blocks: Setting code block ROM from {} to end", current_block_starting_pc);
+        trace!(
+            "find_code_blocks: Setting code block ROM from {} to end",
+            current_block_starting_pc
+        );
         current_block.rom = &bytecode[current_block_starting_pc..];
     } else {
         trace!("find_code_blocks: Block has ROM {:?}", current_block.rom);
@@ -335,13 +475,39 @@ fn find_code_blocks<'ctx, 'b>(env: &Env<'ctx>, func: FunctionValue<'ctx>, byteco
     Ok(blocks)
 }
 
-fn build_contract_body<'ctx, 'b, S: StackBackend<'ctx>>(bctx: &'b BuildCtx<'ctx, 'b, S>, code_blocks: &CodeBlocks<'ctx, 'b>) -> Result<(), Error> {
+fn record_code_block_gas_incoming<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+    target: &CodeBlock<'ctx, '_>,
+    pred: BasicBlock<'ctx>,
+) -> Result<(), Error> {
+    let gas = bctx.gas_remaining()?;
+    target
+        .gas_phi
+        .ok_or_else(|| Error::invariant_violation("missing target gas phi"))?
+        .add_incoming(&[(&gas, pred)]);
+    Ok(())
+}
+
+fn build_contract_body<'ctx, 'b, S: StackBackend<'ctx>>(
+    bctx: &'b BuildCtx<'ctx, 'b, S>,
+    code_blocks: &CodeBlocks<'ctx, 'b>,
+) -> Result<(), Error> {
     let t = bctx.env.types();
 
     let mut jump_cases = Vec::new();
 
     let jump_block = match code_blocks.has_jumpdest() {
-        true => Some(bctx.env.context().append_basic_block(bctx.func, "jump_block")),
+        true => {
+            let block = bctx
+                .env
+                .context()
+                .append_basic_block(bctx.func, "jump_block");
+            bctx.builder.position_at_end(block);
+            let gas_phi = bctx
+                .builder
+                .build_phi(bctx.env.types().i64, "jump.gas.remaining")?;
+            Some((block, gas_phi))
+        }
         false => None,
     };
 
@@ -374,16 +540,29 @@ fn build_contract_body<'ctx, 'b, S: StackBackend<'ctx>>(bctx: &'b BuildCtx<'ctx,
         // we will either jump to the next block or return from the function.
         match following_block {
             Some(next_block) => {
-                bctx.builder.build_unconditional_branch(next_block.entry_block).unwrap();
+                let pred = bctx
+                    .builder
+                    .get_insert_block()
+                    .ok_or_else(|| Error::invariant_violation("missing fallthrough predecessor"))?;
+                record_code_block_gas_incoming(bctx, next_block, pred)?;
+                bctx.builder
+                    .build_unconditional_branch(next_block.entry_block)
+                    .unwrap();
                 Ok(())
-            },
+            }
             None => ops::build_return(bctx, ReturnCode::ImplicitReturn),
         }?;
     }
 
     // Add jump table to the end of the function
-    if let Some(jump_block) = jump_block {
-        build_jump_table(bctx, jump_block, jump_cases.as_slice())?;
+    if let Some((jump_block, jump_gas_phi)) = jump_block {
+        build_jump_table(
+            bctx,
+            code_blocks,
+            jump_block,
+            jump_gas_phi,
+            jump_cases.as_slice(),
+        )?;
     }
 
     Ok(())
@@ -414,8 +593,8 @@ impl StackFault {
 /// consumed, matching the runtime backend's observable state).
 #[derive(Clone, Copy, Debug)]
 struct PlannedFault {
-    kind:         StackFault,
-    rel_pc:       usize,
+    kind: StackFault,
+    rel_pc: usize,
     fault_height: usize,
 }
 
@@ -503,14 +682,18 @@ impl AbstractStackState {
         debug_assert!(index_1_based >= 1);
         let len = self.slots.len();
         let top_idx = len.checked_sub(1).ok_or(StackFault::Underflow)?;
-        let swap_idx = len.checked_sub(index_1_based as usize + 1).ok_or(StackFault::Underflow)?;
+        let swap_idx = len
+            .checked_sub(index_1_based as usize + 1)
+            .ok_or(StackFault::Underflow)?;
         self.slots.swap(top_idx, swap_idx);
         Ok(())
     }
 
     fn merge_known_u64(&mut self, other: &Self) -> Result<bool, Error> {
         if self.slots.len() != other.slots.len() {
-            return Err(Error::invariant_violation("cannot merge symbolic stack states with different heights"));
+            return Err(Error::invariant_violation(
+                "cannot merge symbolic stack states with different heights",
+            ));
         }
 
         let mut changed = false;
@@ -526,7 +709,7 @@ impl AbstractStackState {
 
 struct AbstractSuccessor {
     block_index: usize,
-    stack:       AbstractStackState,
+    stack: AbstractStackState,
 }
 
 enum AbstractBlockOutcome {
@@ -534,7 +717,11 @@ enum AbstractBlockOutcome {
     Fault(PlannedFault),
 }
 
-fn fault_outcome(kind: StackFault, rel_pc: usize, state: &AbstractStackState) -> AbstractBlockOutcome {
+fn fault_outcome(
+    kind: StackFault,
+    rel_pc: usize,
+    state: &AbstractStackState,
+) -> AbstractBlockOutcome {
     AbstractBlockOutcome::Fault(PlannedFault {
         kind,
         rel_pc,
@@ -543,8 +730,8 @@ fn fault_outcome(kind: StackFault, rel_pc: usize, state: &AbstractStackState) ->
 }
 
 struct SymbolicAnalysis {
-    entries:      HashMap<usize, Vec<AbstractStackState>>,
-    faults:       HashMap<(usize, usize), PlannedFault>,
+    entries: HashMap<usize, Vec<AbstractStackState>>,
+    faults: HashMap<(usize, usize), PlannedFault>,
     exit_heights: HashMap<(usize, usize), usize>,
 }
 
@@ -554,8 +741,9 @@ struct SymbolicBlockVariant<'ctx> {
     block_index: usize,
     entry_state: AbstractStackState,
     entry_block: BasicBlock<'ctx>,
-    entry_phis:  Vec<PhiValue<'ctx>>,
-    fault:       Option<PlannedFault>,
+    entry_phis: Vec<PhiValue<'ctx>>,
+    gas_phi: Option<PhiValue<'ctx>>,
+    fault: Option<PlannedFault>,
     exit_height: Option<usize>,
 }
 
@@ -567,7 +755,7 @@ impl<'ctx> SymbolicBlockVariant<'ctx> {
             .iter()
             .zip(self.entry_phis.iter())
             .map(|(slot, phi)| StackValue::Word {
-                value:     phi.as_basic_value().into_int_value(),
+                value: phi.as_basic_value().into_int_value(),
                 known_u64: slot.known_u64,
             })
             .collect();
@@ -576,9 +764,9 @@ impl<'ctx> SymbolicBlockVariant<'ctx> {
 }
 
 struct SymbolicPlan<'ctx> {
-    variants:             Vec<SymbolicBlockVariant<'ctx>>,
-    by_block_height:      HashMap<(usize, usize), SymbolicVariantId>,
-    entry_variant:        SymbolicVariantId,
+    variants: Vec<SymbolicBlockVariant<'ctx>>,
+    by_block_height: HashMap<(usize, usize), SymbolicVariantId>,
+    entry_variant: SymbolicVariantId,
     original_blocks_used: HashSet<usize>,
 }
 
@@ -587,11 +775,19 @@ impl<'ctx> SymbolicPlan<'ctx> {
         self.variants[self.entry_variant].entry_block
     }
 
-    fn variant_for_stack_len(&self, block_index: usize, stack_len: usize) -> Result<SymbolicVariantId, Error> {
+    fn variant_for_stack_len(
+        &self,
+        block_index: usize,
+        stack_len: usize,
+    ) -> Result<SymbolicVariantId, Error> {
         self.by_block_height
             .get(&(block_index, stack_len))
             .copied()
-            .ok_or_else(|| Error::invariant_violation(format!("missing symbolic variant for block {block_index} with stack height {stack_len}")))
+            .ok_or_else(|| {
+                Error::invariant_violation(format!(
+                    "missing symbolic variant for block {block_index} with stack height {stack_len}"
+                ))
+            })
     }
 }
 
@@ -617,7 +813,9 @@ fn build_symbolic_plan<'ctx>(
         states.sort_by_key(AbstractStackState::len);
 
         for state in states {
-            let code_block = code_blocks.get(block_index).ok_or_else(|| Error::invariant_violation("missing code block"))?;
+            let code_block = code_blocks
+                .get(block_index)
+                .ok_or_else(|| Error::invariant_violation("missing code block"))?;
             let entry_block = if original_blocks_used.insert(block_index) {
                 code_block.entry_block
             } else {
@@ -625,13 +823,17 @@ fn build_symbolic_plan<'ctx>(
             };
             let variant_id = variants.len();
             let fault = analysis.faults.get(&(block_index, state.len())).copied();
-            let exit_height = analysis.exit_heights.get(&(block_index, state.len())).copied();
+            let exit_height = analysis
+                .exit_heights
+                .get(&(block_index, state.len()))
+                .copied();
             by_block_height.insert((block_index, state.len()), variant_id);
             variants.push(SymbolicBlockVariant {
                 block_index,
                 entry_state: state,
                 entry_block,
                 entry_phis: Vec::new(),
+                gas_phi: None,
                 fault,
                 exit_height,
             });
@@ -653,14 +855,18 @@ fn build_symbolic_plan<'ctx>(
 
 /// Returns `None` when the number of `(block, height)` states exceeds the
 /// planning limits.
-fn analyze_symbolic_entries(code_blocks: &CodeBlocks<'_, '_>) -> Result<Option<SymbolicAnalysis>, Error> {
+fn analyze_symbolic_entries(
+    code_blocks: &CodeBlocks<'_, '_>,
+) -> Result<Option<SymbolicAnalysis>, Error> {
     let mut entries: HashMap<usize, Vec<AbstractStackState>> = HashMap::new();
     let mut faults: HashMap<(usize, usize), PlannedFault> = HashMap::new();
     let mut queue = VecDeque::new();
     let mut total_states = 0usize;
 
     if code_blocks.first().is_none() {
-        return Err(Error::InvariantViolation("No code blocks found".to_string()));
+        return Err(Error::InvariantViolation(
+            "No code blocks found".to_string(),
+        ));
     }
 
     add_symbolic_entry_state(&mut entries, 0, AbstractStackState::new())?;
@@ -678,22 +884,30 @@ fn analyze_symbolic_entries(code_blocks: &CodeBlocks<'_, '_>) -> Result<Option<S
                         exit_heights.insert((block_index, entry_height), first.stack.len());
                     }
                     for successor in successors {
-                        let block_states_before = entries.get(&successor.block_index).map_or(0, Vec::len);
-                        if add_symbolic_entry_state(&mut entries, successor.block_index, successor.stack)? {
-                            let block_states = entries.get(&successor.block_index).map_or(0, Vec::len);
+                        let block_states_before =
+                            entries.get(&successor.block_index).map_or(0, Vec::len);
+                        if add_symbolic_entry_state(
+                            &mut entries,
+                            successor.block_index,
+                            successor.stack,
+                        )? {
+                            let block_states =
+                                entries.get(&successor.block_index).map_or(0, Vec::len);
                             if block_states > block_states_before {
                                 total_states += 1;
-                                if block_states > MAX_SYMBOLIC_VARIANTS_PER_BLOCK || total_states > MAX_SYMBOLIC_VARIANTS_TOTAL {
+                                if block_states > MAX_SYMBOLIC_VARIANTS_PER_BLOCK
+                                    || total_states > MAX_SYMBOLIC_VARIANTS_TOTAL
+                                {
                                     return Ok(None);
                                 }
                             }
                             queue.push_back(successor.block_index);
                         }
                     }
-                },
+                }
                 AbstractBlockOutcome::Fault(fault) => {
                     faults.insert((block_index, entry_height), fault);
-                },
+                }
             }
         }
     }
@@ -715,7 +929,10 @@ fn add_symbolic_entry_state(
     }
 
     let states = entries.entry(block_index).or_default();
-    if let Some(existing) = states.iter_mut().find(|state| state.len() == incoming.len()) {
+    if let Some(existing) = states
+        .iter_mut()
+        .find(|state| state.len() == incoming.len())
+    {
         return existing.merge_known_u64(&incoming);
     }
 
@@ -728,7 +945,9 @@ fn analyze_symbolic_successors(
     block_index: usize,
     entry_state: AbstractStackState,
 ) -> Result<AbstractBlockOutcome, Error> {
-    let code_block = code_blocks.get(block_index).ok_or_else(|| Error::invariant_violation("missing code block"))?;
+    let code_block = code_blocks
+        .get(block_index)
+        .ok_or_else(|| Error::invariant_violation("missing code block"))?;
     let mut state = entry_state;
 
     for item in instructions::Iter::new(code_block.rom) {
@@ -737,7 +956,7 @@ fn analyze_symbolic_successors(
                 if let Err(kind) = state.push_known(push_data_known_u64(data)) {
                     return Ok(fault_outcome(kind, pc, &state));
                 }
-            },
+            }
             IterItem::Instr(pc, instr) => match instr {
                 Instruction::JUMP => {
                     let target_pc = match state.peek_known_u64(0) {
@@ -749,11 +968,12 @@ fn analyze_symbolic_successors(
                     }
                     let successors = symbolic_jump_successors(code_blocks, target_pc, state)?;
                     return Ok(AbstractBlockOutcome::Successors(successors));
-                },
+                }
                 Instruction::JUMPI => {
-                    let following_index = code_blocks
-                        .following_index(block_index)
-                        .ok_or_else(|| Error::invariant_violation("JUMPI without following block"))?;
+                    let following_index =
+                        code_blocks.following_index(block_index).ok_or_else(|| {
+                            Error::invariant_violation("JUMPI without following block")
+                        })?;
                     let target_pc = match state.peek_known_u64(0) {
                         Ok(target_pc) => target_pc,
                         Err(kind) => return Ok(fault_outcome(kind, pc, &state)),
@@ -763,43 +983,43 @@ fn analyze_symbolic_successors(
                     }
                     let mut successors = vec![AbstractSuccessor {
                         block_index: following_index,
-                        stack:       state.clone(),
+                        stack: state.clone(),
                     }];
                     successors.extend(symbolic_jump_successors(code_blocks, target_pc, state)?);
                     return Ok(AbstractBlockOutcome::Successors(successors));
-                },
+                }
                 Instruction::STOP | Instruction::INVALID => {
                     return Ok(AbstractBlockOutcome::Successors(Vec::new()));
-                },
+                }
                 Instruction::RETURN | Instruction::REVERT => {
                     if let Err(kind) = state.pop_n(2) {
                         return Ok(fault_outcome(kind, pc, &state));
                     }
                     return Ok(AbstractBlockOutcome::Successors(Vec::new()));
-                },
+                }
                 _ => match apply_abstract_instruction(&mut state, code_block, pc, instr) {
-                    Ok(()) => {},
+                    Ok(()) => {}
                     Err(AbstractError::Fault(kind)) => {
                         return Ok(fault_outcome(kind, pc, &state));
-                    },
+                    }
                     Err(AbstractError::Build(e)) => return Err(e),
                 },
             },
             IterItem::Invalid(pc) => {
                 let absolute_pc = code_block.offset + pc;
                 return Err(InvalidOpcode {
-                    pc:     absolute_pc,
+                    pc: absolute_pc,
                     opcode: code_block.rom[pc],
                 }
                 .into());
-            },
+            }
         }
     }
 
     if let Some(following_index) = code_blocks.following_index(block_index) {
         Ok(AbstractBlockOutcome::Successors(vec![AbstractSuccessor {
             block_index: following_index,
-            stack:       state,
+            stack: state,
         }]))
     } else {
         Ok(AbstractBlockOutcome::Successors(Vec::new()))
@@ -880,28 +1100,28 @@ fn apply_abstract_instruction(
         | Instruction::KECCAK256 => {
             stack.pop_n(2)?;
             Ok(stack.push_unknown()?)
-        },
+        }
         Instruction::ADDMOD | Instruction::MULMOD => {
             stack.pop_n(3)?;
             Ok(stack.push_unknown()?)
-        },
+        }
         Instruction::ISZERO | Instruction::NOT | Instruction::MLOAD => {
             stack.pop()?;
             Ok(stack.push_unknown()?)
-        },
+        }
         Instruction::POP => {
             stack.pop()?;
             Ok(())
-        },
+        }
         Instruction::MSTORE | Instruction::MSTORE8 => {
             stack.pop_n(2)?;
             Ok(())
-        },
+        }
         Instruction::PC => Ok(stack.push_known(Some((code_block.offset + pc) as u64))?),
         Instruction::CALL => {
             stack.pop_n(7)?;
             Ok(stack.push_unknown()?)
-        },
+        }
         Instruction::ADDRESS
         | Instruction::ORIGIN
         | Instruction::CALLER
@@ -917,15 +1137,16 @@ fn apply_abstract_instruction(
         | Instruction::CHAINID
         | Instruction::BASEFEE
         | Instruction::BLOBBASEFEE
-        | Instruction::MSIZE => Ok(stack.push_unknown()?),
+        | Instruction::MSIZE
+        | Instruction::GAS => Ok(stack.push_unknown()?),
         Instruction::RETURNDATACOPY => {
             stack.pop_n(3)?;
             Ok(())
-        },
+        }
         Instruction::BLOCKHASH => {
             stack.pop()?;
             Ok(stack.push_unknown()?)
-        },
+        }
         Instruction::DUP1 => Ok(stack.dup(1)?),
         Instruction::DUP2 => Ok(stack.dup(2)?),
         Instruction::DUP3 => Ok(stack.dup(3)?),
@@ -970,7 +1191,6 @@ fn apply_abstract_instruction(
         | Instruction::BLOBHASH
         | Instruction::SLOAD
         | Instruction::SSTORE
-        | Instruction::GAS
         | Instruction::TLOAD
         | Instruction::TSTORE
         | Instruction::MCOPY
@@ -985,7 +1205,9 @@ fn apply_abstract_instruction(
         | Instruction::DELEGATECALL
         | Instruction::STATICCALL
         | Instruction::SELFDESTRUCT => Err(Error::UnimplementedInstruction(instr).into()),
-        Instruction::JUMP | Instruction::JUMPI | Instruction::JUMPDEST => Err(Error::UnexpectedInstruction(instr).into()),
+        Instruction::JUMP | Instruction::JUMPI | Instruction::JUMPDEST => {
+            Err(Error::UnexpectedInstruction(instr).into())
+        }
         Instruction::STOP
         | Instruction::RETURN
         | Instruction::REVERT
@@ -1026,9 +1248,16 @@ fn apply_abstract_instruction(
     }
 }
 
-fn create_symbolic_entry_phis<'ctx>(bctx: &BuildCtx<'ctx, '_, SymbolicStackBackend<'ctx>>, plan: &mut SymbolicPlan<'ctx>) -> Result<(), Error> {
+fn create_symbolic_entry_phis<'ctx>(
+    bctx: &BuildCtx<'ctx, '_, SymbolicStackBackend<'ctx>>,
+    plan: &mut SymbolicPlan<'ctx>,
+) -> Result<(), Error> {
     for variant in &mut plan.variants {
         bctx.builder.position_at_end(variant.entry_block);
+        variant.gas_phi = Some(
+            bctx.builder
+                .build_phi(bctx.env.types().i64, "gas.remaining")?,
+        );
         for _ in &variant.entry_state.slots {
             let phi = bctx.builder.build_phi(bctx.env.types().i256, "stack_phi")?;
             variant.entry_phis.push(phi);
@@ -1047,6 +1276,12 @@ fn build_symbolic_contract_body<'ctx>(
             .get(variant.block_index)
             .ok_or_else(|| Error::invariant_violation("missing code block"))?;
         bctx.builder.position_at_end(variant.entry_block);
+        let gas = variant
+            .gas_phi
+            .ok_or_else(|| Error::invariant_violation("missing symbolic variant gas phi"))?
+            .as_basic_value()
+            .into_int_value();
+        bctx.set_gas_remaining(gas);
         bctx.stack.restore(variant.entry_stack());
 
         if let Some(fault) = variant.fault {
@@ -1057,7 +1292,11 @@ fn build_symbolic_contract_body<'ctx>(
         build_symbolic_code_block(bctx, variant.block_index, code_block, code_blocks, plan)?;
 
         if let Some(exit_height) = variant.exit_height {
-            debug_assert_eq!(bctx.stack.len(), exit_height, "planned and emitted stack heights diverge at block exit");
+            debug_assert_eq!(
+                bctx.stack.len(),
+                exit_height,
+                "planned and emitted stack heights diverge at block exit"
+            );
         }
 
         if code_block.terminates() {
@@ -1068,8 +1307,9 @@ fn build_symbolic_contract_body<'ctx>(
             Some(following_index) => {
                 let target = plan.variant_for_stack_len(following_index, bctx.stack.len())?;
                 record_symbolic_variant_incoming(bctx, plan, target)?;
-                bctx.builder.build_unconditional_branch(plan.variants[target].entry_block)?;
-            },
+                bctx.builder
+                    .build_unconditional_branch(plan.variants[target].entry_block)?;
+            }
             None => ops::build_return(bctx, ReturnCode::ImplicitReturn)?,
         }
     }
@@ -1091,7 +1331,11 @@ fn terminate_unplanned_symbolic_blocks<'ctx>(
             continue;
         }
         bctx.builder.position_at_end(code_block.entry_block);
-        let return_value = bctx.env.types().i8.const_int(ReturnCode::Invalid as u64, false);
+        let return_value = bctx
+            .env
+            .types()
+            .i8
+            .const_int(ReturnCode::Invalid as u64, false);
         bctx.builder.build_return(Some(&return_value))?;
     }
     Ok(())
@@ -1116,7 +1360,7 @@ fn record_symbolic_variant_incoming<'ctx>(
 }
 
 fn record_symbolic_variant_incoming_from<'ctx>(
-    _bctx: &BuildCtx<'ctx, '_, SymbolicStackBackend<'ctx>>,
+    bctx: &BuildCtx<'ctx, '_, SymbolicStackBackend<'ctx>>,
     plan: &SymbolicPlan<'ctx>,
     target: SymbolicVariantId,
     pred: BasicBlock<'ctx>,
@@ -1124,8 +1368,19 @@ fn record_symbolic_variant_incoming_from<'ctx>(
 ) -> Result<(), Error> {
     let variant = &plan.variants[target];
     if stack.len() != variant.entry_phis.len() {
-        return Err(Error::invariant_violation(format!("symbolic stack height mismatch at block variant {}", target)));
+        return Err(Error::invariant_violation(format!(
+            "symbolic stack height mismatch at block variant {}",
+            target
+        )));
     }
+
+    let gas = bctx.gas_remaining()?;
+    variant
+        .gas_phi
+        .ok_or_else(|| {
+            Error::invariant_violation(format!("missing gas phi for block variant {target}"))
+        })?
+        .add_incoming(&[(&gas, pred)]);
 
     let slots = stack.clone_slots();
     for (phi, slot) in variant.entry_phis.iter().zip(slots.iter()) {
@@ -1135,7 +1390,60 @@ fn record_symbolic_variant_incoming_from<'ctx>(
     Ok(())
 }
 
-fn build_push_data<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>, data: &[u8]) -> Result<(), Error> {
+fn prepare_instruction_gas<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+    code_block: &CodeBlock<'ctx, '_>,
+    pc: usize,
+    instruction: Instruction,
+    needs_static_region: &mut bool,
+) -> Result<(), Error> {
+    if *needs_static_region {
+        let cost = static_region_cost(code_block, pc);
+        let failure_pc = if pc == 0 && code_block.is_jumpdest() {
+            code_block.offset.saturating_sub(1)
+        } else {
+            code_block.offset + pc
+        };
+        ops::charge_static_gas(bctx, cost, failure_pc)?;
+        *needs_static_region = false;
+    }
+    if let Some(kind) = crate::builder::gas::dynamic_kind(instruction) {
+        ops::charge_dynamic_gas(
+            bctx,
+            kind,
+            crate::builder::gas::static_cost(instruction),
+            code_block.offset + pc,
+        )?;
+    }
+    Ok(())
+}
+
+fn static_region_cost(code_block: &CodeBlock<'_, '_>, start_pc: usize) -> u64 {
+    static_region_cost_until(code_block, start_pc, usize::MAX)
+}
+
+fn static_region_cost_until(code_block: &CodeBlock<'_, '_>, start_pc: usize, end_pc: usize) -> u64 {
+    let jumpdest_cost = u64::from(start_pc == 0 && code_block.is_jumpdest())
+        * crate::builder::gas::static_cost(Instruction::JUMPDEST);
+    instructions::Iter::new(code_block.rom)
+        .filter_map(|item| match item {
+            IterItem::PushData(pc, instr, _) | IterItem::Instr(pc, instr)
+                if pc >= start_pc && pc < end_pc =>
+            {
+                Some((pc, instr))
+            }
+            _ => None,
+        })
+        .take_while(|(_, instr)| crate::builder::gas::dynamic_kind(*instr).is_none())
+        .map(|(_, instr)| crate::builder::gas::static_cost(instr))
+        .sum::<u64>()
+        + jumpdest_cost
+}
+
+fn build_push_data<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+    data: &[u8],
+) -> Result<(), Error> {
     let mut new_data = [0u8; 32];
     new_data[..data.len()].copy_from_slice(data);
     new_data[..data.len()].reverse();
@@ -1150,24 +1458,46 @@ fn build_symbolic_fault_exit<'ctx>(
     code_block: &CodeBlock<'ctx, '_>,
     fault: PlannedFault,
 ) -> Result<(), Error> {
+    let prefix_failure_pc = if code_block.is_jumpdest() {
+        code_block.offset.saturating_sub(1)
+    } else {
+        code_block.offset
+    };
+    ops::charge_static_gas(
+        bctx,
+        static_region_cost_until(code_block, 0, fault.rel_pc),
+        prefix_failure_pc,
+    )?;
+    let mut needs_static_region = false;
     for item in instructions::Iter::new(code_block.rom) {
         match item {
             IterItem::PushData(pc, ..) | IterItem::Instr(pc, _) if pc >= fault.rel_pc => break,
-            IterItem::PushData(_, _, data) => build_push_data(bctx, data)?,
-            IterItem::Instr(pc, instr) => match instr {
-                Instruction::JUMP | Instruction::JUMPI => {
-                    return Err(Error::invariant_violation("jump before planned stack fault"));
-                },
-                _ => build_non_jump_instruction(bctx, code_block, pc, instr)?,
-            },
+            IterItem::PushData(pc, instr, data) => {
+                prepare_instruction_gas(bctx, code_block, pc, instr, &mut needs_static_region)?;
+                build_push_data(bctx, data)?;
+            }
+            IterItem::Instr(pc, instr) => {
+                prepare_instruction_gas(bctx, code_block, pc, instr, &mut needs_static_region)?;
+                match instr {
+                    Instruction::JUMP | Instruction::JUMPI => {
+                        return Err(Error::invariant_violation(
+                            "jump before planned stack fault",
+                        ));
+                    }
+                    _ => build_non_jump_instruction(bctx, code_block, pc, instr)?,
+                }
+                if crate::builder::gas::dynamic_kind(instr).is_some() {
+                    needs_static_region = true;
+                }
+            }
             IterItem::Invalid(pc) => {
                 let absolute_pc = code_block.offset + pc;
                 return Err(InvalidOpcode {
-                    pc:     absolute_pc,
+                    pc: absolute_pc,
                     opcode: code_block.rom[pc],
                 }
                 .into());
-            },
+            }
         }
     }
 
@@ -1192,27 +1522,45 @@ fn build_symbolic_code_block<'ctx>(
     trace!("symbolic: Offset: {}", code_block.offset);
     trace!("symbolic: ROM: {:?}", code_block.rom);
 
+    let mut needs_static_region = true;
+    if code_block.rom.is_empty() && code_block.is_jumpdest() {
+        ops::charge_static_gas(
+            bctx,
+            crate::builder::gas::static_cost(Instruction::JUMPDEST),
+            code_block.offset.saturating_sub(1),
+        )?;
+    }
     for item in instructions::Iter::new(code_block.rom) {
         match item {
-            IterItem::PushData(_, _, data) => build_push_data(bctx, data)?,
-            IterItem::Instr(pc, instr) => match instr {
-                Instruction::JUMP => build_symbolic_jump(bctx, code_blocks, plan)?,
-                Instruction::JUMPI => {
-                    let following_index = code_blocks
-                        .following_index(block_index)
-                        .ok_or_else(|| Error::invariant_violation("JUMPI without following block"))?;
-                    build_symbolic_jumpi(bctx, following_index, code_blocks, plan)?;
-                },
-                _ => build_non_jump_instruction(bctx, code_block, pc, instr)?,
-            },
+            IterItem::PushData(pc, instr, data) => {
+                prepare_instruction_gas(bctx, code_block, pc, instr, &mut needs_static_region)?;
+                build_push_data(bctx, data)?;
+            }
+            IterItem::Instr(pc, instr) => {
+                prepare_instruction_gas(bctx, code_block, pc, instr, &mut needs_static_region)?;
+                match instr {
+                    Instruction::JUMP => build_symbolic_jump(bctx, code_blocks, plan)?,
+                    Instruction::JUMPI => {
+                        let following_index =
+                            code_blocks.following_index(block_index).ok_or_else(|| {
+                                Error::invariant_violation("JUMPI without following block")
+                            })?;
+                        build_symbolic_jumpi(bctx, following_index, code_blocks, plan)?;
+                    }
+                    _ => build_non_jump_instruction(bctx, code_block, pc, instr)?,
+                }
+                if crate::builder::gas::dynamic_kind(instr).is_some() {
+                    needs_static_region = true;
+                }
+            }
             IterItem::Invalid(pc) => {
                 let absolute_pc = code_block.offset + pc;
                 return Err(InvalidOpcode {
-                    pc:     absolute_pc,
+                    pc: absolute_pc,
                     opcode: code_block.rom[pc],
                 }
                 .into());
-            },
+            }
         }
     }
     Ok(())
@@ -1233,17 +1581,18 @@ fn build_symbolic_jump<'ctx>(
             Some(block_index) => {
                 let target = plan.variant_for_stack_len(block_index, bctx.stack.len())?;
                 record_symbolic_variant_incoming(bctx, plan, target)?;
-                bctx.builder.build_unconditional_branch(plan.variants[target].entry_block)?;
-            },
+                bctx.builder
+                    .build_unconditional_branch(plan.variants[target].entry_block)?;
+            }
             None => {
-                let current_block = bctx
-                    .builder
-                    .get_insert_block()
-                    .ok_or_else(|| Error::invariant_violation("missing current block for invalid static jump"))?;
+                let current_block = bctx.builder.get_insert_block().ok_or_else(|| {
+                    Error::invariant_violation("missing current block for invalid static jump")
+                })?;
                 let jump_failure_block = build_jump_failure_block(bctx)?;
                 bctx.builder.position_at_end(current_block);
-                bctx.builder.build_unconditional_branch(jump_failure_block)?;
-            },
+                bctx.builder
+                    .build_unconditional_branch(jump_failure_block)?;
+            }
         },
         None => build_symbolic_dynamic_jump_switch(bctx, pc, code_blocks, plan)?,
     }
@@ -1260,9 +1609,12 @@ fn build_symbolic_jumpi<'ctx>(
     let (pc, cond) = bctx.stack.pop_2(bctx)?;
     let pc = ops::truncate_jump_target(bctx, pc, "jumpi_pc")?;
     bctx.builder.build_store(bctx.registers.jump_ptr, pc)?;
-    let cmp = bctx
-        .builder
-        .build_int_compare(inkwell::IntPredicate::EQ, cond, bctx.env.types().i256.const_zero(), "jumpi_cmp")?;
+    let cmp = bctx.builder.build_int_compare(
+        inkwell::IntPredicate::EQ,
+        cond,
+        bctx.env.types().i256.const_zero(),
+        "jumpi_cmp",
+    )?;
 
     let following = plan.variant_for_stack_len(following_index, bctx.stack.len())?;
     match target_pc {
@@ -1271,24 +1623,29 @@ fn build_symbolic_jumpi<'ctx>(
                 let target = plan.variant_for_stack_len(block_index, bctx.stack.len())?;
                 record_symbolic_variant_incoming(bctx, plan, following)?;
                 record_symbolic_variant_incoming(bctx, plan, target)?;
-                bctx.builder
-                    .build_conditional_branch(cmp, plan.variants[following].entry_block, plan.variants[target].entry_block)?;
-            },
+                bctx.builder.build_conditional_branch(
+                    cmp,
+                    plan.variants[following].entry_block,
+                    plan.variants[target].entry_block,
+                )?;
+            }
             None => {
-                let current_block = bctx
-                    .builder
-                    .get_insert_block()
-                    .ok_or_else(|| Error::invariant_violation("missing current block for invalid static JUMPI"))?;
+                let current_block = bctx.builder.get_insert_block().ok_or_else(|| {
+                    Error::invariant_violation("missing current block for invalid static JUMPI")
+                })?;
                 let jump_failure_block = build_jump_failure_block(bctx)?;
                 bctx.builder.position_at_end(current_block);
                 record_symbolic_variant_incoming(bctx, plan, following)?;
-                bctx.builder
-                    .build_conditional_branch(cmp, plan.variants[following].entry_block, jump_failure_block)?;
-            },
+                bctx.builder.build_conditional_branch(
+                    cmp,
+                    plan.variants[following].entry_block,
+                    jump_failure_block,
+                )?;
+            }
         },
         None => {
             build_symbolic_dynamic_jumpi_switch(bctx, pc, cmp, following, code_blocks, plan)?;
-        },
+        }
     }
     Ok(())
 }
@@ -1305,10 +1662,22 @@ fn build_symbolic_dynamic_jumpi_switch<'ctx>(
         .builder
         .get_insert_block()
         .ok_or_else(|| Error::invariant_violation("missing current block for dynamic JUMPI"))?;
-    let target_switch_block = bctx.env.context().append_basic_block(bctx.func, "jumpi_dynamic_targets");
-    record_symbolic_variant_incoming_from(bctx, plan, following, branch_block, bctx.stack.snapshot())?;
-    bctx.builder
-        .build_conditional_branch(cmp, plan.variants[following].entry_block, target_switch_block)?;
+    let target_switch_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "jumpi_dynamic_targets");
+    record_symbolic_variant_incoming_from(
+        bctx,
+        plan,
+        following,
+        branch_block,
+        bctx.stack.snapshot(),
+    )?;
+    bctx.builder.build_conditional_branch(
+        cmp,
+        plan.variants[following].entry_block,
+        target_switch_block,
+    )?;
 
     bctx.builder.position_at_end(target_switch_block);
     build_symbolic_dynamic_jump_switch_from_current_block(bctx, pc, code_blocks, plan)
@@ -1339,9 +1708,11 @@ fn build_symbolic_dynamic_jump_switch_from_current_block<'ctx>(
     let jump_cases = symbolic_jump_cases(bctx, code_blocks, plan, switch_block, stack_len)?;
 
     if jump_cases.is_empty() {
-        bctx.builder.build_unconditional_branch(jump_failure_block)?;
+        bctx.builder
+            .build_unconditional_branch(jump_failure_block)?;
     } else {
-        bctx.builder.build_switch(pc, jump_failure_block, jump_cases.as_slice())?;
+        bctx.builder
+            .build_switch(pc, jump_failure_block, jump_cases.as_slice())?;
     }
     Ok(())
 }
@@ -1354,20 +1725,33 @@ fn symbolic_jump_cases<'ctx>(
     stack_len: usize,
 ) -> Result<Vec<(IntValue<'ctx>, BasicBlock<'ctx>)>, Error> {
     let mut jump_cases = Vec::new();
-    for (block_index, code_block) in code_blocks.blocks.iter().enumerate().filter(|(_, block)| block.is_jumpdest()) {
+    for (block_index, code_block) in code_blocks
+        .blocks
+        .iter()
+        .enumerate()
+        .filter(|(_, block)| block.is_jumpdest())
+    {
         let target = plan.variant_for_stack_len(block_index, stack_len)?;
         let jumpdest_pc = code_block
             .offset
             .checked_sub(1)
             .ok_or_else(|| Error::invariant_violation("Jump destination at offset 0"))?;
         record_symbolic_variant_incoming_from(bctx, plan, target, pred, bctx.stack.snapshot())?;
-        jump_cases.push((bctx.env.types().i32.const_int(jumpdest_pc as u64, false), plan.variants[target].entry_block));
+        jump_cases.push((
+            bctx.env.types().i32.const_int(jumpdest_pc as u64, false),
+            plan.variants[target].entry_block,
+        ));
     }
     Ok(jump_cases)
 }
 
-fn build_jump_failure_block<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<BasicBlock<'ctx>, Error> {
-    let jump_failure_block = bctx.env.context().append_basic_block(bctx.func, "jump_failure");
+fn build_jump_failure_block<'ctx, S: StackBackend<'ctx>>(
+    bctx: &BuildCtx<'ctx, '_, S>,
+) -> Result<BasicBlock<'ctx>, Error> {
+    let jump_failure_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "jump_failure");
     bctx.builder.position_at_end(jump_failure_block);
     ops::build_return(bctx, ReturnCode::JumpFailure)?;
     Ok(jump_failure_block)
@@ -1426,6 +1810,7 @@ fn build_non_jump_instruction<'ctx, S: StackBackend<'ctx>>(
         Instruction::MSTORE => ops::mstore(bctx),
         Instruction::MSTORE8 => ops::mstore8(bctx),
         Instruction::MSIZE => ops::msize(bctx),
+        Instruction::GAS => ops::gas(bctx),
         Instruction::PC => ops::pc(bctx, code_block.offset + pc),
         Instruction::CALL => ops::call(bctx),
         Instruction::ADDRESS => ops::address(bctx),
@@ -1474,7 +1859,9 @@ fn build_non_jump_instruction<'ctx, S: StackBackend<'ctx>>(
         Instruction::SWAP16 => ops::swap(bctx, 16),
 
         Instruction::BALANCE => Err(Error::UnimplementedInstruction(Instruction::BALANCE)),
-        Instruction::CALLDATACOPY => Err(Error::UnimplementedInstruction(Instruction::CALLDATACOPY)),
+        Instruction::CALLDATACOPY => {
+            Err(Error::UnimplementedInstruction(Instruction::CALLDATACOPY))
+        }
         Instruction::CODESIZE => Err(Error::UnimplementedInstruction(Instruction::CODESIZE)),
         Instruction::CODECOPY => Err(Error::UnimplementedInstruction(Instruction::CODECOPY)),
         Instruction::GASPRICE => Err(Error::UnimplementedInstruction(Instruction::GASPRICE)),
@@ -1485,7 +1872,6 @@ fn build_non_jump_instruction<'ctx, S: StackBackend<'ctx>>(
         Instruction::BLOBHASH => Err(Error::UnimplementedInstruction(Instruction::BLOBHASH)),
         Instruction::SLOAD => Err(Error::UnimplementedInstruction(Instruction::SLOAD)),
         Instruction::SSTORE => Err(Error::UnimplementedInstruction(Instruction::SSTORE)),
-        Instruction::GAS => Err(Error::UnimplementedInstruction(Instruction::GAS)),
         Instruction::TLOAD => Err(Error::UnimplementedInstruction(Instruction::TLOAD)),
         Instruction::TSTORE => Err(Error::UnimplementedInstruction(Instruction::TSTORE)),
         Instruction::MCOPY => Err(Error::UnimplementedInstruction(Instruction::MCOPY)),
@@ -1497,10 +1883,14 @@ fn build_non_jump_instruction<'ctx, S: StackBackend<'ctx>>(
         Instruction::CREATE => Err(Error::UnimplementedInstruction(Instruction::CREATE)),
         Instruction::CREATE2 => Err(Error::UnimplementedInstruction(Instruction::CREATE2)),
         Instruction::CALLCODE => Err(Error::UnimplementedInstruction(Instruction::CALLCODE)),
-        Instruction::DELEGATECALL => Err(Error::UnimplementedInstruction(Instruction::DELEGATECALL)),
+        Instruction::DELEGATECALL => {
+            Err(Error::UnimplementedInstruction(Instruction::DELEGATECALL))
+        }
         Instruction::STATICCALL => Err(Error::UnimplementedInstruction(Instruction::STATICCALL)),
 
-        Instruction::JUMP | Instruction::JUMPI | Instruction::JUMPDEST => Err(Error::UnexpectedInstruction(instr)),
+        Instruction::JUMP | Instruction::JUMPI | Instruction::JUMPDEST => {
+            Err(Error::UnexpectedInstruction(instr))
+        }
         Instruction::PUSH0
         | Instruction::PUSH1
         | Instruction::PUSH2
@@ -1540,7 +1930,7 @@ fn build_non_jump_instruction<'ctx, S: StackBackend<'ctx>>(
 fn build_code_block<'ctx, S: StackBackend<'ctx>>(
     bctx: &BuildCtx<'ctx, '_, S>,
     code_block: &CodeBlock<'ctx, '_>,
-    jump_block: Option<BasicBlock<'ctx>>,
+    jump_block: Option<(BasicBlock<'ctx>, PhiValue<'ctx>)>,
     following_block: Option<&&CodeBlock<'ctx, '_>>,
 ) -> Result<(), Error> {
     trace!("loop: Building code");
@@ -1550,44 +1940,79 @@ fn build_code_block<'ctx, S: StackBackend<'ctx>>(
     // Prepare for building the IR for this code block. Move the builder to this basic block
     // and start a relative PC at 0.
     bctx.builder.position_at_end(code_block.entry_block);
+    let gas = code_block
+        .gas_phi
+        .ok_or_else(|| Error::invariant_violation("missing code block gas phi"))?
+        .as_basic_value()
+        .into_int_value();
+    bctx.set_gas_remaining(gas);
 
+    let mut needs_static_region = true;
+    if code_block.rom.is_empty() && code_block.is_jumpdest() {
+        ops::charge_static_gas(
+            bctx,
+            crate::builder::gas::static_cost(Instruction::JUMPDEST),
+            code_block.offset.saturating_sub(1),
+        )?;
+    }
     for item in instructions::Iter::new(code_block.rom) {
         match item {
-            IterItem::PushData(_, _, data) => {
+            IterItem::PushData(pc, instr, data) => {
+                prepare_instruction_gas(bctx, code_block, pc, instr, &mut needs_static_region)?;
                 trace!("loop: Data: {:?}", data);
                 build_push_data(bctx, data)
-            },
+            }
             IterItem::Instr(pc, instr) => {
+                prepare_instruction_gas(bctx, code_block, pc, instr, &mut needs_static_region)?;
                 trace!("loop: Instruction: {:?}", instr);
-                match instr {
+                let result = match instr {
                     Instruction::JUMP => match jump_block {
-                        Some(jump_block) => ops::jump(bctx, jump_block),
+                        Some((jump_block, gas_phi)) => ops::jump(bctx, jump_block, gas_phi),
                         _ => return Err(Error::invariant_violation("JUMP without jump block")),
                     },
                     Instruction::JUMPI => match (jump_block, following_block) {
-                        (Some(jump_block), Some(following_block)) => ops::jumpi(bctx, jump_block, following_block.entry_block),
+                        (Some((jump_block, jump_gas_phi)), Some(following_block)) => {
+                            let following_gas_phi = following_block.gas_phi.ok_or_else(|| {
+                                Error::invariant_violation("missing JUMPI fallthrough gas phi")
+                            })?;
+                            ops::jumpi(
+                                bctx,
+                                jump_block,
+                                jump_gas_phi,
+                                following_block.entry_block,
+                                following_gas_phi,
+                            )
+                        }
                         (Some(_), None) => {
-                            return Err(Error::invariant_violation("JUMPI without following block"));
-                        },
+                            return Err(Error::invariant_violation(
+                                "JUMPI without following block",
+                            ));
+                        }
                         (None, Some(_)) => {
                             return Err(Error::invariant_violation("JUMPI without jump block"));
-                        },
+                        }
                         (None, None) => {
-                            return Err(Error::invariant_violation("JUMPI without jump or following blocks"));
-                        },
+                            return Err(Error::invariant_violation(
+                                "JUMPI without jump or following blocks",
+                            ));
+                        }
                     },
                     _ => build_non_jump_instruction(bctx, code_block, pc, instr),
+                };
+                if crate::builder::gas::dynamic_kind(instr).is_some() {
+                    needs_static_region = true;
                 }
-            },
+                result
+            }
             IterItem::Invalid(pc) => {
                 trace!("loop: Invalid");
                 let absolute_pc = code_block.offset + pc;
                 return Err(InvalidOpcode {
-                    pc:     absolute_pc,
+                    pc: absolute_pc,
                     opcode: code_block.rom[pc],
                 }
                 .into());
-            },
+            }
         }?
     }
     Ok(())
@@ -1595,27 +2020,50 @@ fn build_code_block<'ctx, S: StackBackend<'ctx>>(
 
 fn build_jump_table<'ctx, S: StackBackend<'ctx>>(
     bctx: &BuildCtx<'ctx, '_, S>,
+    code_blocks: &CodeBlocks<'ctx, '_>,
     jump_block: BasicBlock<'ctx>,
+    jump_gas_phi: PhiValue<'ctx>,
     jump_cases: &[(IntValue<'ctx>, BasicBlock<'ctx>)],
 ) -> Result<(), Error> {
     let t = bctx.env.types();
 
-    let jump_failure_block = bctx.env.context().append_basic_block(bctx.func, "jump_failure");
+    let jump_failure_block = bctx
+        .env
+        .context()
+        .append_basic_block(bctx.func, "jump_failure");
     bctx.builder.position_at_end(jump_failure_block);
+    let jump_gas = jump_gas_phi.as_basic_value().into_int_value();
+    bctx.builder
+        .build_store(bctx.registers.gas_remaining, jump_gas)?;
     let return_value = t.i8.const_int(ReturnCode::JumpFailure as u64, false);
     bctx.builder.build_return(Some(&return_value))?;
 
     // Build jump table logic
     // If there are no jump cases then all jumps are failures
     // If there are jump cases then we build a switch statement to jump to the correct block
+    let jump_gas = jump_gas_phi.as_basic_value().into_int_value();
+    for block in code_blocks.iter().filter(|block| block.is_jumpdest()) {
+        block
+            .gas_phi
+            .ok_or_else(|| Error::invariant_violation("missing jump target gas phi"))?
+            .add_incoming(&[(&jump_gas, jump_block)]);
+    }
     bctx.builder.position_at_end(jump_block);
+    bctx.set_gas_remaining(jump_gas);
     if jump_cases.is_empty() {
-        bctx.builder.build_unconditional_branch(jump_failure_block)?;
+        bctx.builder
+            .build_unconditional_branch(jump_failure_block)?;
         return Ok(());
     }
 
-    let jump_value = bctx.builder.build_load(t.i32, bctx.registers.jump_ptr, "jump_ptr")?;
-    bctx.builder.build_switch(IntValue::try_from(jump_value).unwrap(), jump_failure_block, jump_cases)?;
+    let jump_value = bctx
+        .builder
+        .build_load(t.i32, bctx.registers.jump_ptr, "jump_ptr")?;
+    bctx.builder.build_switch(
+        IntValue::try_from(jump_value).unwrap(),
+        jump_failure_block,
+        jump_cases,
+    )?;
     Ok(())
 }
 
@@ -1631,7 +2079,9 @@ mod tests {
         let context = Context::create();
         let module = RuntimeBuilder::new(&context, "test").build();
         let env = Env::new(&context, module, Options::new(Mode::Debug, false, true)).unwrap();
-        let func = env.module().add_function("test_contract", env.types().contract_fn, None);
+        let func = env
+            .module()
+            .add_function("test_contract", env.types().contract_fn, None);
         f(&env, func);
     }
 
@@ -1640,7 +2090,8 @@ mod tests {
     // Each iteration leaves one extra word on the stack, so the loop head
     // accumulates one entry state per height.
     const NET_GROWTH_LOOP: [u8; 20] = [
-        0x60, 0x05, 0x5B, 0x80, 0x15, 0x60, 0x12, 0x57, 0x60, 0x2A, 0x90, 0x60, 0x01, 0x90, 0x03, 0x60, 0x02, 0x56, 0x5B, 0x00,
+        0x60, 0x05, 0x5B, 0x80, 0x15, 0x60, 0x12, 0x57, 0x60, 0x2A, 0x90, 0x60, 0x01, 0x90, 0x03,
+        0x60, 0x02, 0x56, 0x5B, 0x00,
     ];
 
     #[test]
@@ -1660,5 +2111,44 @@ mod tests {
             let plan = build_symbolic_plan(env, func, &code_blocks).unwrap();
             assert!(plan.is_some());
         });
+    }
+
+    #[test]
+    fn static_region_emits_single_gas_check() {
+        let context = Context::create();
+        let module = RuntimeBuilder::new(&context, "test").build();
+        let env = Env::new(&context, module, Options::new(Mode::Debug, false, true)).unwrap();
+        let func = env
+            .module()
+            .add_function("test_contract", env.types().contract_fn, None);
+
+        let builder = context.create_builder();
+        let preamble = context.append_basic_block(func, "preamble");
+        builder.position_at_end(preamble);
+
+        let bctx = BuildCtx::new(&env, &builder, func, RuntimeStackBackend);
+        let rom = [0x60, 0x01, 0x60, 0x02, 0x01, 0x00]; // PUSH1 1; PUSH1 2; ADD; STOP
+        let mut code_blocks = find_code_blocks(&env, func, &rom).unwrap();
+        create_code_block_gas_phis(&bctx, &mut code_blocks).unwrap();
+        build_contract_body(&bctx, &code_blocks).unwrap();
+
+        let entry = code_blocks.first().unwrap();
+        builder.position_at_end(preamble);
+        let initial_gas = load_context_gas(&bctx).unwrap();
+        entry
+            .gas_phi
+            .unwrap()
+            .add_incoming(&[(&initial_gas, preamble)]);
+        builder
+            .build_unconditional_branch(entry.entry_block)
+            .unwrap();
+
+        let ir = env.module().print_to_string().to_string();
+        let checks = ir.matches("icmp uge i64 %gas.remaining").count();
+        assert_eq!(
+            checks, 1,
+            "expected one aggregated gas check, found {}",
+            checks
+        );
     }
 }

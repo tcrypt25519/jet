@@ -11,6 +11,7 @@ pub const FN_MEM_STORE_WORD: &str = "jet.mem.store.word";
 pub const FN_MEM_STORE_BYTE: &str = "jet.mem.store.byte";
 pub const FN_MEM_LOAD: &str = "jet.mem.load";
 pub const FN_MEM_EXPAND: &str = "jet.mem.expand";
+pub const FN_GAS_FAILURE_STATIC: &str = "jet.gas.failure.static";
 pub const FN_CONTRACT_CALL: &str = "jet.contract.call";
 pub const FN_CONTRACT_CALL_VALUES: &str = "jet.contract.call.values";
 pub const FN_CONTRACT_CALL_RETURN_DATA_COPY: &str = "jet.contracts.call_return_data_copy";

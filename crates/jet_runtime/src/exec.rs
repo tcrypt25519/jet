@@ -17,6 +17,65 @@ pub type Hash = [u8; 32];
 /// A ring buffer of the [`BLOCK_HASH_HISTORY_SIZE`] most recent block hashes.
 pub type HashHistory = [Hash; BLOCK_HASH_HISTORY_SIZE];
 
+/// Additional inputs retained when a gas charge cannot be paid.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum GasFailureDetails {
+    /// The failed charge has no data-dependent component.
+    Static,
+    /// A memory expansion charge failed.
+    Memory {
+        /// Accessible memory length before the attempted expansion.
+        old_size: u32,
+        /// End of the memory range requested by the operation.
+        requested_size: u32,
+        /// Expansion charge included in the failed operation.
+        expansion_cost: u64,
+    },
+}
+
+/// Diagnostic snapshot of an unaffordable gas charge.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GasFailure {
+    pc: u32,
+    available_gas: u64,
+    required_gas: u64,
+    static_cost: u64,
+    dynamic_cost: u64,
+    details: GasFailureDetails,
+}
+
+impl GasFailure {
+    /// Returns the EVM program counter of the first unaffordable instruction.
+    pub fn pc(&self) -> u32 {
+        self.pc
+    }
+
+    /// Returns the gas available immediately before the failed charge.
+    pub fn available_gas(&self) -> u64 {
+        self.available_gas
+    }
+
+    /// Returns the complete charge that could not be paid.
+    pub fn required_gas(&self) -> u64 {
+        self.required_gas
+    }
+
+    /// Returns the static component of the failed charge.
+    pub fn static_cost(&self) -> u64 {
+        self.static_cost
+    }
+
+    /// Returns the dynamic component of the failed charge.
+    pub fn dynamic_cost(&self) -> u64 {
+        self.dynamic_cost
+    }
+
+    /// Returns category-specific inputs to the failed calculation.
+    pub fn details(&self) -> &GasFailureDetails {
+        &self.details
+    }
+}
+
 /// The C ABI of a JIT-compiled EVM contract function.
 ///
 /// Every compiled contract is exposed as a function with this signature.
@@ -46,13 +105,13 @@ pub type ContractFunc = unsafe extern "C" fn(*const Context, *const BlockInfo) -
 #[repr(C)]
 pub struct Context {
     stack_ptr: u32,
-    jump_ptr:  u32,
+    jump_ptr: u32,
 
     return_off: u32,
     return_len: u32,
 
     sub_call: Option<Box<Context>>,
-    stack:    [Word; STACK_SIZE_WORDS as usize],
+    stack: [Word; STACK_SIZE_WORDS as usize],
 
     // Pointer-based memory layout as per ADR-002
     // u32 is safe for offsets/sizes; values above u32::MAX are rejected explicitly
@@ -61,6 +120,8 @@ pub struct Context {
     pub(crate) memory_cap: u32,
 
     call_info: *mut CallInfo,
+    gas_remaining: u64,
+    gas_failure: Option<Box<GasFailure>>,
 }
 
 impl Context {
@@ -77,13 +138,17 @@ impl Context {
     pub fn new(call_info: CallInfo) -> Result<Self> {
         // Allocate memory buffer on the heap
         let memory_size = (WORD_SIZE_BYTES * MEMORY_INITIAL_SIZE_WORDS) as usize;
-        let memory_layout = std::alloc::Layout::from_size_align(memory_size, 32).map_err(|e| RuntimeError::MemoryLayout(e.to_string()))?;
+        let memory_layout = std::alloc::Layout::from_size_align(memory_size, 32)
+            .map_err(|e| RuntimeError::MemoryLayout(e.to_string()))?;
         let memory_ptr = unsafe { std::alloc::alloc_zeroed(memory_layout) };
 
         if memory_ptr.is_null() {
-            return Err(RuntimeError::MemoryAllocation("Failed to allocate memory for EVM context".to_string()));
+            return Err(RuntimeError::MemoryAllocation(
+                "Failed to allocate memory for EVM context".to_string(),
+            ));
         }
 
+        let gas_remaining = call_info.gas_limit();
         let call_info = Box::into_raw(Box::new(call_info));
 
         Ok(Context {
@@ -97,6 +162,8 @@ impl Context {
             memory_len: 0,
             memory_cap: memory_size as u32, // Use calculated memory_size
             call_info,
+            gas_remaining,
+            gas_failure: None,
         })
     }
 
@@ -186,6 +253,33 @@ impl Context {
         unsafe { &*self.call_info }
     }
 
+    /// Returns the gas remaining in this call frame.
+    pub fn gas_remaining(&self) -> u64 {
+        self.gas_remaining
+    }
+
+    /// Returns diagnostic information for an unaffordable gas charge.
+    pub fn gas_failure(&self) -> Option<&GasFailure> {
+        self.gas_failure.as_deref()
+    }
+
+    pub(crate) fn record_static_gas_failure(
+        &mut self,
+        pc: u32,
+        available_gas: u64,
+        required_gas: u64,
+    ) {
+        self.gas_remaining = 0;
+        self.gas_failure = Some(Box::new(GasFailure {
+            pc,
+            available_gas,
+            required_gas,
+            static_cost: required_gas,
+            dynamic_cost: 0,
+            details: GasFailureDetails::Static,
+        }));
+    }
+
     // Mutators; internal-only
     //
     // These functions are not meant to be exposed to the outside world. They are used internally
@@ -268,7 +362,7 @@ impl Drop for Context {
                 Err(e) => {
                     // Log the error but don't panic in drop
                     log::error!("Failed to create memory layout during dealloc: {}", e);
-                },
+                }
             }
         }
     }
@@ -277,7 +371,7 @@ impl Drop for Context {
 /// Represents the result of a contract execution.
 pub struct ContractRun {
     result: ReturnCode,
-    ctx:    Context,
+    ctx: Context,
 }
 
 impl ContractRun {
@@ -303,16 +397,16 @@ impl ContractRun {
 /// Information about the current block that gets exposed to the EVM.
 #[repr(C)]
 pub struct BlockInfo {
-    number:        u64,
-    difficulty:    u64,
-    gas_limit:     u64,
-    timestamp:     u64,
-    base_fee:      u64,
+    number: u64,
+    difficulty: u64,
+    gas_limit: u64,
+    timestamp: u64,
+    base_fee: u64,
     blob_base_fee: u64,
-    chain_id:      u64,
-    hash:          Hash,
-    hash_history:  HashHistory,
-    coinbase:      Address,
+    chain_id: u64,
+    hash: Hash,
+    hash_history: HashHistory,
+    coinbase: Address,
 }
 
 impl BlockInfo {
@@ -417,26 +511,28 @@ pub enum ReturnCode {
     /// The jump-dispatch table was given a block index with no corresponding `JUMPDEST`.
     InvalidJumpBlock = -1,
     /// A `POP`-style instruction was executed on an empty stack.
-    StackUnderflow   = -2,
+    StackUnderflow = -2,
     /// A push-style instruction was executed on a full stack.
-    StackOverflow    = -3,
+    StackOverflow = -3,
 
     // EVM-level successes
     /// The contract ran to the end of its bytecode without a `RETURN` or `STOP`.
     #[default]
-    ImplicitReturn   = 0,
+    ImplicitReturn = 0,
     /// The contract executed a `RETURN` instruction.
-    ExplicitReturn   = 1,
+    ExplicitReturn = 1,
     /// The contract executed a `STOP` instruction.
-    Stop             = 2,
+    Stop = 2,
 
     // EVM-level failures
     /// The contract executed a `REVERT` instruction.
-    Revert           = 64,
+    Revert = 64,
     /// The contract executed an `INVALID` instruction.
-    Invalid          = 65,
+    Invalid = 65,
     /// A `JUMP` or `JUMPI` targeted a byte that is not a `JUMPDEST`.
-    JumpFailure      = 66,
+    JumpFailure = 66,
+    /// The current call frame could not pay an instruction gas charge.
+    OutOfGas = 67,
 }
 
 /// Mangles the given address into a contract function name.
@@ -468,6 +564,6 @@ pub fn jet_contract_fn_lookup(jit_engine: &ExecutionEngine, addr_slice: &[u8]) -
         Err(e) => {
             error!("Error looking up contract function {}: {}", fn_name, e);
             0
-        },
+        }
     }
 }

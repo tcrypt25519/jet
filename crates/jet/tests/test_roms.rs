@@ -84,6 +84,7 @@ define_ops!(
     BASEFEE,
     BLOBBASEFEE,
     MSIZE,
+    GAS,
     REVERT,
     INVALID
 );
@@ -2501,13 +2502,38 @@ fn push20_addr(addr: u8) -> Vec<u8> {
     v
 }
 
-fn make_call_info(address: u8, origin: u8, caller: u8, value: u8, calldata: &[u8]) -> impl Fn() -> CallInfo + '_ {
-    move || CallInfo::new(addr_byte(address), addr_byte(origin), addr_byte(caller), value_word(value), calldata).unwrap()
+fn make_call_info(
+    address: u8,
+    origin: u8,
+    caller: u8,
+    value: u8,
+    calldata: &[u8],
+) -> impl Fn() -> CallInfo + '_ {
+    move || {
+        CallInfo::new(
+            addr_byte(address),
+            addr_byte(origin),
+            addr_byte(caller),
+            value_word(value),
+            calldata,
+            u64::MAX,
+        )
+        .unwrap()
+    }
 }
 
-fn run_both_modes(make_call_info: impl Fn() -> CallInfo, contracts: &[(Address, Vec<u8>)], expected: &TestContractRun) -> Result<(), Error> {
+fn run_both_modes(
+    make_call_info: impl Fn() -> CallInfo,
+    contracts: &[(Address, Vec<u8>)],
+    expected: &TestContractRun,
+) -> Result<(), Error> {
     _test_contracts_with_call_info(&make_call_info, contracts, expected, StackMode::RuntimeOnly)?;
-    _test_contracts_with_call_info(&make_call_info, contracts, expected, StackMode::SymbolicPreferred)
+    _test_contracts_with_call_info(
+        &make_call_info,
+        contracts,
+        expected,
+        StackMode::SymbolicPreferred,
+    )
 }
 
 #[test]
@@ -2573,7 +2599,10 @@ fn calldataload_reads_first_word() -> Result<(), Error> {
     let data = [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF];
     let mut want = [0u8; 32];
     want[..data.len()].copy_from_slice(&data);
-    let contracts = [(addr_byte(0x01), bytecode![PUSH1!(0x00), CALLDATALOAD!(), STOP!()])];
+    let contracts = [(
+        addr_byte(0x01),
+        bytecode![PUSH1!(0x00), CALLDATALOAD!(), STOP!()],
+    )];
     let expected = TestContractRun {
         result: ReturnCode::Stop,
         stack_ptr: 1,
@@ -2588,7 +2617,10 @@ fn calldataload_partial_word() -> Result<(), Error> {
     let data = [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF];
     let mut want = [0u8; 32];
     want[..data.len() - 1].copy_from_slice(&data[1..]);
-    let contracts = [(addr_byte(0x01), bytecode![PUSH1!(0x01), CALLDATALOAD!(), STOP!()])];
+    let contracts = [(
+        addr_byte(0x01),
+        bytecode![PUSH1!(0x01), CALLDATALOAD!(), STOP!()],
+    )];
     let expected = TestContractRun {
         result: ReturnCode::Stop,
         stack_ptr: 1,
@@ -2601,7 +2633,10 @@ fn calldataload_partial_word() -> Result<(), Error> {
 #[test]
 fn calldataload_beyond_length_is_zero() -> Result<(), Error> {
     let data = [0xAA, 0xBB, 0xCC];
-    let contracts = [(addr_byte(0x01), bytecode![PUSH1!(0x40), CALLDATALOAD!(), STOP!()])];
+    let contracts = [(
+        addr_byte(0x01),
+        bytecode![PUSH1!(0x40), CALLDATALOAD!(), STOP!()],
+    )];
     let expected = TestContractRun {
         result: ReturnCode::Stop,
         stack_ptr: 1,
@@ -2626,7 +2661,10 @@ fn calldatasize_empty_is_zero() -> Result<(), Error> {
 #[test]
 fn calldataload_full_word() -> Result<(), Error> {
     let data = [0xAB; 32];
-    let contracts = [(addr_byte(0x01), bytecode![PUSH1!(0x00), CALLDATALOAD!(), STOP!()])];
+    let contracts = [(
+        addr_byte(0x01),
+        bytecode![PUSH1!(0x00), CALLDATALOAD!(), STOP!()],
+    )];
     let expected = TestContractRun {
         result: ReturnCode::Stop,
         stack_ptr: 1,
@@ -2656,7 +2694,14 @@ fn nested_address_propagates() -> Result<(), Error> {
         MLOAD!(),
         STOP!(),
     ];
-    let callee = bytecode![ADDRESS!(), PUSH1!(0x00), MSTORE!(), PUSH1!(0x20), PUSH1!(0x00), RETURN!(),];
+    let callee = bytecode![
+        ADDRESS!(),
+        PUSH1!(0x00),
+        MSTORE!(),
+        PUSH1!(0x20),
+        PUSH1!(0x00),
+        RETURN!(),
+    ];
     let contracts = [(addr_byte(0x02), caller), (addr_byte(0x01), callee)];
     let expected = TestContractRun {
         result: ReturnCode::Stop,
@@ -2664,7 +2709,11 @@ fn nested_address_propagates() -> Result<(), Error> {
         stack: vec![stack_byte(0x01), stack_byte(0x01)],
         ..Default::default()
     };
-    run_both_modes(make_call_info(0x02, 0x03, 0x04, 0, &data), &contracts, &expected)
+    run_both_modes(
+        make_call_info(0x02, 0x03, 0x04, 0, &data),
+        &contracts,
+        &expected,
+    )
 }
 
 #[test]
@@ -2687,7 +2736,14 @@ fn nested_origin_propagates() -> Result<(), Error> {
         MLOAD!(),
         STOP!(),
     ];
-    let callee = bytecode![ORIGIN!(), PUSH1!(0x00), MSTORE!(), PUSH1!(0x20), PUSH1!(0x00), RETURN!(),];
+    let callee = bytecode![
+        ORIGIN!(),
+        PUSH1!(0x00),
+        MSTORE!(),
+        PUSH1!(0x20),
+        PUSH1!(0x00),
+        RETURN!(),
+    ];
     let contracts = [(addr_byte(0x02), caller), (addr_byte(0x01), callee)];
     let expected = TestContractRun {
         result: ReturnCode::Stop,
@@ -2695,7 +2751,11 @@ fn nested_origin_propagates() -> Result<(), Error> {
         stack: vec![stack_byte(0x01), stack_byte(0x03)],
         ..Default::default()
     };
-    run_both_modes(make_call_info(0x02, 0x03, 0x04, 0, &data), &contracts, &expected)
+    run_both_modes(
+        make_call_info(0x02, 0x03, 0x04, 0, &data),
+        &contracts,
+        &expected,
+    )
 }
 
 #[test]
@@ -2718,7 +2778,14 @@ fn nested_caller_propagates() -> Result<(), Error> {
         MLOAD!(),
         STOP!(),
     ];
-    let callee = bytecode![CALLER!(), PUSH1!(0x00), MSTORE!(), PUSH1!(0x20), PUSH1!(0x00), RETURN!(),];
+    let callee = bytecode![
+        CALLER!(),
+        PUSH1!(0x00),
+        MSTORE!(),
+        PUSH1!(0x20),
+        PUSH1!(0x00),
+        RETURN!(),
+    ];
     let contracts = [(addr_byte(0x02), caller), (addr_byte(0x01), callee)];
     let expected = TestContractRun {
         result: ReturnCode::Stop,
@@ -2726,7 +2793,11 @@ fn nested_caller_propagates() -> Result<(), Error> {
         stack: vec![stack_byte(0x01), stack_byte(0x02)],
         ..Default::default()
     };
-    run_both_modes(make_call_info(0x02, 0x03, 0x04, 0, &data), &contracts, &expected)
+    run_both_modes(
+        make_call_info(0x02, 0x03, 0x04, 0, &data),
+        &contracts,
+        &expected,
+    )
 }
 
 #[test]
@@ -2749,7 +2820,14 @@ fn nested_callvalue_propagates() -> Result<(), Error> {
         MLOAD!(),
         STOP!(),
     ];
-    let callee = bytecode![CALLVALUE!(), PUSH1!(0x00), MSTORE!(), PUSH1!(0x20), PUSH1!(0x00), RETURN!(),];
+    let callee = bytecode![
+        CALLVALUE!(),
+        PUSH1!(0x00),
+        MSTORE!(),
+        PUSH1!(0x20),
+        PUSH1!(0x00),
+        RETURN!(),
+    ];
     let contracts = [(addr_byte(0x02), caller), (addr_byte(0x01), callee)];
     let expected = TestContractRun {
         result: ReturnCode::Stop,
@@ -2757,5 +2835,166 @@ fn nested_callvalue_propagates() -> Result<(), Error> {
         stack: vec![stack_byte(0x01), value_word(0x0A)],
         ..Default::default()
     };
-    run_both_modes(make_call_info(0x02, 0x03, 0x04, 0, &data), &contracts, &expected)
+    run_both_modes(
+        make_call_info(0x02, 0x03, 0x04, 0, &data),
+        &contracts,
+        &expected,
+    )
+}
+
+fn run_with_gas_both_modes(
+    gas_limit: u64,
+    rom: Vec<u8>,
+    expected: &TestContractRun,
+) -> Result<(), Error> {
+    let contracts = [(Address::ZERO, rom)];
+    let make_call_info = || {
+        CallInfo::new(
+            Address::ZERO,
+            Address::ZERO,
+            Address::ZERO,
+            [0; 32],
+            &[],
+            gas_limit,
+        )
+        .unwrap()
+    };
+    run_both_modes(make_call_info, &contracts, expected)
+}
+
+#[test]
+fn static_block_uses_exact_gas() -> Result<(), Error> {
+    let expected = TestContractRun {
+        result: ReturnCode::Stop,
+        stack_ptr: 1,
+        stack: vec![stack_byte(3)],
+        gas_remaining: Some(0),
+        ..Default::default()
+    };
+    run_with_gas_both_modes(
+        9,
+        bytecode![PUSH1!(1), PUSH1!(2), ADD!(), STOP!()],
+        &expected,
+    )
+}
+
+#[test]
+fn static_block_out_of_gas_preserves_diagnostics() -> Result<(), Error> {
+    let expected = TestContractRun {
+        result: ReturnCode::OutOfGas,
+        gas_remaining: Some(0),
+        gas_failure: Some((0, 8, 9)),
+        ..Default::default()
+    };
+    run_with_gas_both_modes(
+        8,
+        bytecode![PUSH1!(1), PUSH1!(2), ADD!(), STOP!()],
+        &expected,
+    )
+}
+
+#[test]
+fn gas_pushes_remaining_after_its_own_charge() -> Result<(), Error> {
+    let expected = TestContractRun {
+        result: ReturnCode::Stop,
+        stack_ptr: 1,
+        stack: vec![stack_byte(2)],
+        gas_remaining: Some(2),
+        ..Default::default()
+    };
+    run_with_gas_both_modes(4, bytecode![GAS!(), STOP!()], &expected)
+}
+
+#[test]
+fn memory_expansion_gas_is_charged_before_store() -> Result<(), Error> {
+    let expected = TestContractRun {
+        result: ReturnCode::Stop,
+        memory_len: Some(32),
+        gas_remaining: Some(0),
+        ..Default::default()
+    };
+    run_with_gas_both_modes(
+        12,
+        bytecode![PUSH1!(1), PUSH1!(0), MSTORE!(), STOP!()],
+        &expected,
+    )
+}
+
+#[test]
+fn unaffordable_memory_expansion_does_not_expand_memory() -> Result<(), Error> {
+    let expected = TestContractRun {
+        result: ReturnCode::OutOfGas,
+        stack_ptr: 2,
+        stack: vec![stack_byte(1), stack_byte(0)],
+        memory_len: Some(0),
+        gas_remaining: Some(0),
+        ..Default::default()
+    };
+    run_with_gas_both_modes(
+        11,
+        bytecode![PUSH1!(1), PUSH1!(0), MSTORE!(), STOP!()],
+        &expected,
+    )
+}
+
+#[test]
+fn exp_charges_per_exponent_byte() -> Result<(), Error> {
+    let expected = TestContractRun {
+        result: ReturnCode::Stop,
+        stack_ptr: 1,
+        stack: vec![stack_byte(8)],
+        gas_remaining: Some(0),
+        ..Default::default()
+    };
+    run_with_gas_both_modes(
+        66,
+        bytecode![PUSH1!(3), PUSH1!(2), EXP!(), STOP!()],
+        &expected,
+    )
+}
+
+fn run_with_gas_symbolic(
+    gas_limit: u64,
+    rom: Vec<u8>,
+    expected: &TestContractRun,
+) -> Result<(), Error> {
+    let contracts = [(Address::ZERO, rom)];
+    let make_call_info = || {
+        CallInfo::new(
+            Address::ZERO,
+            Address::ZERO,
+            Address::ZERO,
+            [0; 32],
+            &[],
+            gas_limit,
+        )
+        .unwrap()
+    };
+    _test_contracts_with_call_info(
+        &make_call_info,
+        &contracts,
+        expected,
+        StackMode::SymbolicPreferred,
+    )
+}
+
+#[test]
+fn planned_stack_fault_charges_instructions_before_fault() -> Result<(), Error> {
+    let expected = TestContractRun {
+        result: ReturnCode::StackUnderflow,
+        gas_remaining: Some(0),
+        ..Default::default()
+    };
+    run_with_gas_symbolic(3, bytecode![PUSH1!(1), ADD!()], &expected)
+}
+
+#[test]
+fn planned_stack_fault_out_of_gas_before_fault() -> Result<(), Error> {
+    let expected = TestContractRun {
+        result: ReturnCode::OutOfGas,
+        gas_remaining: Some(0),
+        gas_failure: Some((0, 2, 3)),
+        ..Default::default()
+    };
+    run_with_gas_symbolic(2, bytecode![PUSH1!(1), ADD!()], &expected)
 }

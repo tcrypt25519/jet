@@ -127,13 +127,23 @@ fn build_cmd(args: BuildArgs) -> Result<(), Error> {
 
     // Build the contracts
     let alice_addr: Address = "0x1234".parse().expect("valid address");
-    let bob_addr: Address = "0x0000000000000000000000000000000000000001".parse().expect("valid address");
+    let bob_addr: Address = "0x0000000000000000000000000000000000000001"
+        .parse()
+        .expect("valid address");
     engine.build_contract(alice_addr, alice_rom.as_slice())?;
     engine.build_contract(bob_addr, bob_rom.as_slice())?;
 
     // Run Alice's contract with a test block
     let block_info = new_test_block_info();
-    let call_info = CallInfo::new(alice_addr, Address::ZERO, Address::ZERO, [0u8; 32], &[]).expect("valid call info");
+    let call_info = CallInfo::new(
+        alice_addr,
+        Address::ZERO,
+        Address::ZERO,
+        [0u8; 32],
+        &[],
+        u64::MAX,
+    )
+    .expect("valid call info");
     let run = engine.run_contract(call_info, &block_info)?;
     info!("{}", run);
 
@@ -159,9 +169,9 @@ fn main() -> Result<(), Error> {
     match cli.cmd {
         Some(Commands::Build(args)) => build_cmd(args),
         None => build_cmd(BuildArgs {
-            mode:      cli.mode,
+            mode: cli.mode,
             emit_llvm: cli.emit_llvm,
-            assert:    cli.assert,
+            assert: cli.assert,
         }),
     }?;
 
@@ -170,12 +180,24 @@ fn main() -> Result<(), Error> {
 
 fn new_test_block_info() -> exec::BlockInfo {
     let hash = [
-        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+        25, 26, 27, 28, 29, 30, 31,
     ];
     let hash_history = new_test_block_info_hash_history();
     let coinbase = Address::new([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
 
-    exec::BlockInfo::new(42, 100, 100, 1717354173, 5_000_000, 1_000_000, 1, hash, hash_history, coinbase)
+    exec::BlockInfo::new(
+        42,
+        100,
+        100,
+        1717354173,
+        5_000_000,
+        1_000_000,
+        1,
+        hash,
+        hash_history,
+        coinbase,
+    )
 }
 
 fn new_test_block_info_hash_history() -> exec::HashHistory {

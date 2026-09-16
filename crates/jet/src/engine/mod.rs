@@ -87,9 +87,17 @@ impl<'ctx> Engine<'ctx> {
     ///
     /// Returns [`Error::FunctionLookup`] if no contract was compiled for
     /// `call_info.address()`, or [`Error::LLVM`] if the JIT engine cannot be created.
-    pub fn run_contract(&self, call_info: CallInfo, block_info: &BlockInfo) -> Result<ContractRun, Error> {
+    pub fn run_contract(
+        &self,
+        call_info: CallInfo,
+        block_info: &BlockInfo,
+    ) -> Result<ContractRun, Error> {
         // Create a JIT execution engine
-        let jit = self.build_manager.env().module().create_jit_execution_engine(OptimizationLevel::None)?;
+        let jit = self
+            .build_manager
+            .env()
+            .module()
+            .create_jit_execution_engine(OptimizationLevel::None)?;
         self.link_in_runtime(&jit);
 
         // Load and run the contract function
@@ -97,12 +105,14 @@ impl<'ctx> Engine<'ctx> {
             Ok(f) => f,
             Err(e) => {
                 return Err(Error::FunctionLookup(e));
-            },
+            }
         };
 
         trace!("Running function...");
-        let ctx = exec::Context::new(call_info).map_err(|e| Error::Build(builder::Error::Runtime(e)))?;
-        let result = unsafe { contract_exec_fn.call(&ctx as *const exec::Context, block_info as *const _) };
+        let ctx =
+            exec::Context::new(call_info).map_err(|e| Error::Build(builder::Error::Runtime(e)))?;
+        let result =
+            unsafe { contract_exec_fn.call(&ctx as *const exec::Context, block_info as *const _) };
         trace!("Function returned");
 
         Ok(ContractRun::new(result, ctx))
@@ -119,21 +129,44 @@ impl<'ctx> Engine<'ctx> {
 
         // Link in external runtime functions (contract calls and crypto)
         // Stack and memory operations are now generated as IR, so they don't need linking
-        map_fn(sym.contract_call(), builtins::jet_contract_call as *const () as usize);
-        map_fn(sym.contract_call_values(), builtins::jet_contract_call_values as *const () as usize);
+        map_fn(
+            sym.contract_call(),
+            builtins::jet_contract_call as *const () as usize,
+        );
+        map_fn(
+            sym.contract_call_values(),
+            builtins::jet_contract_call_values as *const () as usize,
+        );
         map_fn(
             sym.contract_call_return_data_copy(),
             builtins::jet_contract_call_return_data_copy as *const () as usize,
         );
-        map_fn(sym.keccak256(), builtins::jet_ops_keccak256 as *const () as usize);
-        map_fn(sym.call_data_load(), builtins::jet_call_data_load as *const () as usize);
+        map_fn(
+            sym.keccak256(),
+            builtins::jet_ops_keccak256 as *const () as usize,
+        );
+        map_fn(
+            sym.call_data_load(),
+            builtins::jet_call_data_load as *const () as usize,
+        );
         map_fn(sym.exp(), builtins::jet_ops_exp as *const () as usize);
         map_fn(sym.addmod(), builtins::jet_ops_addmod as *const () as usize);
         map_fn(sym.mulmod(), builtins::jet_ops_mulmod as *const () as usize);
-        map_fn(sym.mem_expand(), builtins::jet_mem_expand as *const () as usize);
+        map_fn(
+            sym.mem_expand(),
+            builtins::jet_mem_expand as *const () as usize,
+        );
+        map_fn(
+            sym.gas_failure_static(),
+            builtins::jet_gas_failure_static as *const () as usize,
+        );
     }
 
-    fn get_contract_exec_fn(&self, ee: &ExecutionEngine<'ctx>, addr: Address) -> Result<JitFunction<'_, ContractFunc>, FunctionLookupError> {
+    fn get_contract_exec_fn(
+        &self,
+        ee: &ExecutionEngine<'ctx>,
+        addr: Address,
+    ) -> Result<JitFunction<'_, ContractFunc>, FunctionLookupError> {
         let name = exec::mangle_contract_fn(&addr);
         info!("Looking up contract function {}", name);
         unsafe { ee.get_function(name.as_str()) }
