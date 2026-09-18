@@ -81,12 +81,10 @@ pub(crate) struct Symbols<'ctx> {
 }
 ```
 
-Initialize it in `Symbols::new()` by looking up the declared function:
+Initialize it in `Symbols::new()`, which returns `Option<Self>`, by looking up the declared function:
 
 ```rust
-let new_func = module
-    .get_function(jet_runtime::symbols::FN_NEW_FUNC)
-    .ok_or(Error::MissingSymbol(jet_runtime::symbols::FN_NEW_FUNC))?;
+let new_func = module.get_function(jet_runtime::symbols::FN_NEW_FUNC)?;
 ```
 
 Add a public accessor:
@@ -114,8 +112,8 @@ This binds the symbol name to the Rust function pointer at the time the JIT engi
 **File**: `crates/jet/src/builder/ops.rs`
 
 ```rust
-pub(crate) fn newop(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let arg = stack_pop_1(bctx)?;
+pub(crate) fn newop<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
+    let arg = bctx.stack.pop_word(bctx)?;
 
     bctx.builder.build_call(
         bctx.env.symbols().new_func(),
@@ -126,6 +124,8 @@ pub(crate) fn newop(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
     Ok(())
 }
 ```
+
+Stack words are `IntValue`s of type `i256`, so a builtin that needs a pointer to a word must store the value into an `alloca` first, as `call` does for the value operand.
 
 ### 7. Test
 
@@ -144,4 +144,4 @@ See `docs/process/new-opcode.md` for the full test checklist.
 
 **Signature mismatch**: The Rust `extern "C"` signature must exactly match the LLVM IR declaration in `RuntimeBuilder`. Parameter count, types, and return type must all agree.
 
-**Memory expansion before access**: If the builtin reads or writes EVM memory, call `jet.mem.expand` from the opcode handler in `ops.rs` before invoking the builtin.
+**Memory expansion before access**: If the builtin reads or writes EVM memory, obtain a `MemoryRegion` through `expand_memory_region` in the opcode handler in `ops.rs` and pass its offset and size to the builtin. Only that function can construct a `MemoryRegion`, so the expansion cannot be skipped (ADR 006).

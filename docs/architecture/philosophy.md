@@ -171,8 +171,7 @@ A guide to the naming conventions and domain language used throughout the codeba
 |---------|-------|---------|
 | `build_*` | IR construction functions | `build_contract_body` |
 | `find_*` | Discovery/analysis functions | `find_code_blocks` |
-| `load_*` | LLVM load operations | `load_i256` |
-| `__*` | Internal helpers (not public) | `__stack_pop_2` |
+| `charge_*` | Gas accounting emitters | `charge_static_gas` |
 | `jet_*` | External API (FFI) | `jet_contract_call` |
 
 #### Types
@@ -304,7 +303,7 @@ jet.ops.keccak256       - Compute keccak256 hash
 | Runtime context | `crates/jet_runtime/src/exec.rs` |
 | FFI builtins | `crates/jet_runtime/src/builtins.rs` |
 | Symbol names | `crates/jet_runtime/src/symbols.rs` |
-| LLVM IR runtime | `runtime-ir/jet.ll` |
+| LLVM IR runtime | `crates/jet_runtime/src/runtime_builder.rs` |
 | Tests | `crates/jet/tests/` |
 
 ### Common Operations
@@ -313,9 +312,10 @@ jet.ops.keccak256       - Compute keccak256 hash
 |------|----------|----------|
 | Add opcode | `instructions.rs` | `instructions!` macro |
 | Implement opcode | `ops.rs` | `pub(crate) fn name()` |
-| Pop from stack | `ops.rs` | `__stack_pop_N()` |
-| Push to stack | `ops.rs` | `__stack_push_int/ptr()` |
-| Load value | `ops.rs` | `load_iN()` |
+| Pop from stack | `stack.rs` | `bctx.stack.pop_word()`, `pop_2()`, `pop_3()`, `pop_7()` |
+| Push to stack | `stack.rs` | `bctx.stack.push_word()` |
+| Expand memory | `ops.rs` | `expand_memory_region()` |
+| Charge gas | `ops.rs` / `gas.rs` | `charge_static_gas()`, `dynamic_kind()` |
 | Build IR | `contract.rs` | `BuildCtx.builder.*` |
 | Add runtime fn | `builtins.rs` | `extern "C" fn` |
 
@@ -324,12 +324,15 @@ jet.ops.keccak256       - Compute keccak256 hash
 | Code | Meaning |
 |------|---------|
 | -1 | `InvalidJumpBlock` - Jet error |
+| -2 | `StackUnderflow` - Pop or DUP/SWAP below the stack base |
+| -3 | `StackOverflow` - Push past 1024 words |
 | 0 | `ImplicitReturn` - Normal completion |
 | 1 | `ExplicitReturn` - RETURN opcode |
 | 2 | `Stop` - STOP opcode |
 | 64 | `Revert` - REVERT opcode |
 | 65 | `Invalid` - INVALID opcode |
 | 66 | `JumpFailure` - Invalid jump target |
+| 67 | `OutOfGas` - Gas exhausted; diagnostics in `Context::gas_failure` |
 
 ---
 

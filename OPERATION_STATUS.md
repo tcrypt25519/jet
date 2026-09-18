@@ -1,6 +1,6 @@
 # EVM operation status
 
-This inventory reflects the current tree. The categories describe separate kinds of work, so an operation appears in more than one category when it has independent gaps. This covers EVM instructions recognized by `Instruction` plus runtime stack operations used by the compiler.
+This inventory reflects the current tree. The categories describe separate kinds of work, so an operation appears in more than one category when it has independent gaps. This covers EVM instructions recognized by `Instruction` plus runtime stack operations used by the compiler. Per-opcode test coverage is in `docs/test_coverage.md`.
 
 ## Unimplemented
 
@@ -20,7 +20,6 @@ These opcodes are recognized during bytecode decoding, but compilation returns `
 | `BLOBHASH` | `0x49` | Transaction blob hash lookup |
 | `SLOAD` | `0x54` | Persistent storage read |
 | `SSTORE` | `0x55` | Persistent storage write |
-| `GAS` | `0x5a` | Remaining gas |
 | `TLOAD` | `0x5c` | Transient storage read |
 | `TSTORE` | `0x5d` | Transient storage write |
 | `MCOPY` | `0x5e` | Overlap-safe memory copy |
@@ -42,8 +41,8 @@ These operations compile and execute, but omit required EVM behavior.
 
 | Operation | What exists | What is missing |
 |---|---|---|
-| Gas accounting for every implemented opcode | Opcode semantics execute without a gas counter | Base gas, dynamic gas, memory expansion gas, out-of-gas failure and gas forwarding are future execution-layer work. |
-| `CALL` (`0xf1`) | Looks up another JIT-compiled contract, creates a subcontext and copies return data to the caller | It discards the gas, value, input offset and input length operands. It has no value transfer, account state, call-depth rule, gas forwarding or normal external-account behavior. |
+| Gas accounting | Osaka static costs charged once per basic block through SSA gas values, dynamic costs computed in generated IR for memory expansion, `KECCAK256`, `EXP`, `RETURNDATACOPY` and `CALL` memory, the `GAS` opcode, and `OutOfGas` failures that record the pc and the available and required gas. | Gas forwarding to callees (`CALL` runs the callee with an unbounded limit), the 63/64 rule, refunds, and the access-list costs of the unimplemented state opcodes. |
+| `CALL` (`0xf1`) | Looks up another JIT-compiled contract, creates a sub-context carrying the callee address, caller, origin and value, charges input and output memory expansion, and copies return data to the caller. | It discards the gas, input offset and input length operands, so the callee sees empty calldata and an unbounded gas limit. It has no value transfer, account state, call-depth rule or external-account behavior. |
 
 ## Implemented with a bug
 
@@ -55,8 +54,9 @@ No confirmed entries remain in this category.
 
 ## Source locations
 
-* Opcode dispatch and the explicit unimplemented list: `crates/jet/src/builder/contract.rs`
+* Opcode dispatch, the symbolic stack planner and the explicit unimplemented list: `crates/jet/src/builder/contract.rs`
 * Implemented opcode emitters: `crates/jet/src/builder/ops.rs`
+* Static and dynamic gas tables: `crates/jet/src/builder/gas.rs`
 * Runtime stack IR: `crates/jet_runtime/src/runtime_builder.rs`
 * Call and return-data helpers: `crates/jet_runtime/src/builtins.rs`
-* Existing symbolic stack findings: `docs/symbolic-stack-completion-plan.md`
+* Symbolic stack design: `docs/architecture/symbolic-stack.md` and `docs/adrs/adr-007.md`

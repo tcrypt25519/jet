@@ -2,162 +2,125 @@
 
 Process documentation for implementing EVM opcodes in the Jet compiler.
 
+Before starting, read the opcode's reference page in
+`.agents/skills/evm-opcodes/references/docs/<HEX>.md` for its stack inputs and
+outputs, gas cost and edge cases. `OPERATION_STATUS.md` lists which opcodes are
+still unimplemented.
+
 ## Checklist
 
 ### 1. Instruction Definition
 
 **File**: `crates/jet/src/instructions.rs`
 
-Add the opcode to the `Instruction` enum:
+Every opcode in the current EVM is already in the `Instruction` enum. If a new
+one is needed, add it with its opcode byte:
 ```rust
-pub enum Instruction {
-    // ...
-    NEWOP = 0xNN,
-}
+NEWOP = 0xNN,
 ```
 
-Verify:
-- Correct opcode value (match EVM spec)
-- Entry in `opcode()` method
-- Entry in `from_opcode()` method
-- Entry in `name()` method for debugging
-
-### 2. Opcode Handler Implementation
+### 2. Opcode Emitter
 
 **File**: `crates/jet/src/builder/ops.rs`
 
-Implement the opcode function:
+Emitters are generic over the stack backend, so the same code serves the
+runtime stack and the symbolic stack:
 ```rust
-pub(crate) fn newop(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    // Implementation
+pub(crate) fn newop<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
+    let (a, b) = bctx.stack.pop_2(bctx)?;
+    let result = bctx.builder.build_int_add(a, b, "newop_result")?;
+    bctx.stack.push_word(bctx, result)
 }
 ```
 
 Requirements:
-- Pop stack arguments using `__stack_pop_1()`, `__stack_pop_2()`, etc.
-- Push results using `__stack_push_int()` or `__stack_push_ptr()`
-- Call builtins via `bctx.env.symbols().builtin_name()`
-- Handle errors with `Result<(), Error>`
+- Pop operands with `bctx.stack.pop_word(bctx)`, `pop_2`, `pop_3` or `pop_7`. Words are `i256` `IntValue`s.
+- Push results with `bctx.stack.push_word(bctx, value)`. Narrower integers are zero-extended to `i256`. Use `push_word_with_known_u64` when the pushed value is a compile-time constant that a later `JUMP` may consume.
+- Call builtins through `bctx.env.symbols().<name>()`.
+- Never touch `Context.stack` directly.
 
-### 3. Opcode Routing
+### 3. Routing and Stack Effect
 
-**File**: `crates/jet/src/builder/mod.rs`
+**File**: `crates/jet/src/builder/contract.rs`
 
-Add case to match statement in instruction compiler:
-```rust
-match instr {
-    // ...
-    Instruction::NEWOP => ops::newop(&bctx)?,
-}
-```
+Two match statements need the opcode:
 
-### 4. Data Representation (Critical)
+1. `build_non_jump_instruction` dispatches to the emitter. Replace the
+   `Err(Error::UnimplementedInstruction(...))` arm:
+   ```rust
+   Instruction::NEWOP => ops::newop(bctx),
+   ```
+2. `apply_abstract_instruction` tells the symbolic planner the stack effect.
+   Move the opcode out of the unimplemented group into the arm matching its
+   pops and pushes, for example:
+   ```rust
+   Instruction::NEWOP => {
+       stack.pop_n(2)?;
+       stack.push_unknown()
+   }
+   ```
+   If the pushed value is a known constant, use `push_known(Some(value))` so
+   static jump targets survive.
+
+Emission asserts in debug builds that the planned and emitted stack heights
+agree, so a mismatch fails at the block that diverged.
+
+### 4. Gas
+
+**File**: `crates/jet/src/builder/gas.rs`
+
+Add the static cost to `static_cost`. If the cost depends on operands (memory
+expansion, data length), add a `DynamicGas` kind, return it from
+`dynamic_kind`, and implement its cost next to the existing kinds. Dynamic
+charges run before the operation has any side effect, so an unaffordable
+memory expansion leaves memory unchanged.
+
+### 5. Data Representation (Critical)
 
 **Endianness**: Stack words are stored **little-endian** internally.
 
-- PUSH immediates are byte-reversed on load
-- By the time data reaches builtins, it's already little-endian
-- Use `from_le_bytes()` / `to_le_bytes()` in Rust builtins
-- Use bnum's `from_digits()` with `u64::from_le_bytes()` for 256-bit values
+- PUSH immediates are byte-reversed when the bytecode is decoded
+- By the time data reaches builtins, it is already little-endian
+- Use `from_le_bytes()` / `to_le_bytes()` in Rust builtins; `builtins.rs` has
+  `read_u256` and `write_u256` for whole words
 
-Example (EXP opcode):
+### 6. Complex Operations (Builtins)
+
+For operations that need Rust, follow
+[`new-runtime-function.md`](new-runtime-function.md): symbol constant in
+`symbols.rs`, declaration in `RuntimeBuilder::declare_external_builtins`,
+`unsafe extern "C"` implementation in `builtins.rs`, `Symbols` field and
+accessor in `env.rs`, and `map_fn` linking in `engine/mod.rs`.
+
+### 7. Memory Operations
+
+Memory helpers take a `MemoryRegion`, and only `expand_memory_region` can
+construct one (ADR 006):
 ```rust
-let read = |b: &[u8; 32]| {
-    U256::from_digits([
-        u64::from_le_bytes(b[0..8].try_into().unwrap()),
-        u64::from_le_bytes(b[8..16].try_into().unwrap()),
-        u64::from_le_bytes(b[16..24].try_into().unwrap()),
-        u64::from_le_bytes(b[24..32].try_into().unwrap()),
-    ])
-};
+let (loc, val) = bctx.stack.pop_2(bctx)?;
+let loc_i32 = truncate_to_i32(bctx, loc, "newop_loc")?;
+let size = bctx.env.types().i32.const_int(32, false);
+let region = expand_memory_region(bctx, loc_i32, size, "newop")?;
+build_mem_store_value(bctx, &region, val)
 ```
 
-### 5. Complex Operations (Builtins)
+- `truncate_to_i32` maps values above `u32::MAX` to a sentinel that expansion rejects (ADR 004)
+- Expansion rounds to 32-byte boundaries, updates `memory_len` monotonically and reallocates if needed
+- Expansion gas is charged before memory changes
 
-For operations requiring Rust implementation:
-
-**File**: `crates/jet_runtime/src/builtins.rs`
-
-```rust
-pub extern "C" fn jet_ops_newop(arg: &mut [u8; 32]) -> i8 {
-    // Implementation using little-endian representation
-    0 // success
-}
-```
-
-**File**: `crates/jet_runtime/src/symbols.rs`
-
-```rust
-pub const FN_NEWOP: &str = "jet.ops.newop";
-```
-
-**File**: `crates/jet_runtime/src/runtime_builder.rs`
-
-Declare in `declare_external_builtins()`:
-```rust
-self.module.add_function(
-    "jet.ops.newop",
-    self.types.i8.fn_type(&[self.types.ptr.into()], false),
-    None,
-);
-```
-
-**File**: `crates/jet/src/builder/env.rs`
-
-Add to `Symbols` struct:
-```rust
-pub(crate) struct Symbols<'ctx> {
-    // ...
-    newop: FunctionValue<'ctx>,
-}
-```
-
-Initialize in `new()`:
-```rust
-let newop = module.get_function(jet_runtime::symbols::FN_NEWOP)?;
-```
-
-Add to struct initialization and accessor method.
-
-**File**: `crates/jet/src/engine/mod.rs`
-
-Link in JIT engine:
-```rust
-map_fn(sym.newop(), builtins::jet_ops_newop as *const () as usize);
-```
-
-### 6. Memory Operations
-
-If the opcode reads/writes memory:
-
-**Call memory expansion before access**:
-```rust
-let offset_i32 = load_i32(bctx, offset_ptr)?;
-let size = bctx.env.types().i32.const_int(SIZE, false);
-bctx.builder.build_call(
-    bctx.env.symbols().mem_expand(),
-    &[bctx.registers.exec_ctx.into(), offset_i32.into(), size.into()],
-    "expand",
-)?;
-```
-
-Memory expansion:
-- Rounds to 32-byte boundaries
-- Updates `memory_len` monotonically
-- Reallocates if needed
-- Must be called BEFORE memory access
-
-### 7. Tests
+### 8. Tests
 
 **File**: `crates/jet/tests/test_roms.rs`
 
-Add test cases to `rom_tests!` macro:
+Add the opcode to `define_ops!` at the top of the file, then add cases to a
+`rom_tests!` block. Each case runs under both stack backends.
 
 ```rust
-opcode_basic_case: Test {
-    roms: vec![vec![
-        Instruction::PUSH1.opcode(), 0x42,
-        Instruction::NEWOP.opcode(),
+// Tests NEWOP basic case: <constraint from the reference page>
+newop_basic_case: Test {
+    roms: vec![bytecode![
+        PUSH1!(0x42),
+        NEWOP!(),
     ]],
     expected: TestContractRun {
         stack_ptr: 1,
@@ -172,59 +135,46 @@ opcode_basic_case: Test {
 - Edge cases (zero, max values, boundaries)
 - Endianness-sensitive tests (multi-byte values)
 - Error conditions
-- Memory expansion (if applicable)
+- Memory expansion and gas where applicable, using `memory_len`,
+  `gas_remaining` and `gas_failure` in `TestContractRun`
 
 **Endianness test pattern**:
 ```rust
-// Test that catches big-endian bugs
-opcode_endian_test: Test {
-    roms: vec![vec![
-        Instruction::PUSH2.opcode(), 0x01, 0x00, // 0x0100 big-endian = 256
-        Instruction::NEWOP.opcode(),
+// Tests NEWOP with a multi-byte value; catches big-endian bugs
+newop_endian_test: Test {
+    roms: vec![bytecode![
+        PUSH2!(0x01, 0x00), // 0x0100 big-endian = 256
+        NEWOP!(),
     ]],
     expected: TestContractRun {
         stack_ptr: 1,
-        stack: vec![{
-            let mut w = [0u8; 32];
-            w[0] = 0x00;  // Little-endian LSB
-            w[1] = 0x01;  // Little-endian MSB
-            w
-        }],
+        stack: vec![stack_word(&[0x00, 0x01])], // little-endian bytes
         ..Default::default()
     },
 },
 ```
 
-### 8. Gas Accounting (Future)
-
-Placeholder for when gas is implemented:
-- Check EVM Yellow Paper for gas costs
-- Add metering calls before expensive operations
-- Include memory expansion costs
+Tests that need a specific `CallInfo` are plain `#[test]` functions using
+`run_both_modes`; see the ADDRESS and CALLDATALOAD tests.
 
 ### 9. EVM Spec Verification
 
-Confirm implementation matches Ethereum spec:
+Confirm the implementation matches the reference page:
 - Stack arguments (number and order)
 - Stack results
 - Side effects (memory, storage, logs)
 - Error conditions (stack underflow, invalid jumps)
-- Edge cases in Yellow Paper
-
-Reference: `docs/ext/evm/opcodes.json`
+- Gas
 
 ### 10. Build and CI
 
 Run locally:
 ```bash
-make test
-cargo clippy --all-targets --all-features
+make commit-check   # fmt-check, check, clippy, test-all
 ```
 
-CI will:
-- Run clippy (enforces Rust idioms)
-- Run all tests with nextest
-- Check formatting with rustfmt
+CI runs clippy with `-D warnings`, all tests with nextest, and doctests, and
+auto-commits `cargo +nightly fmt` changes.
 
 Common clippy issues:
 - `manual_div_ceil`: Use `.div_ceil()` instead of `((x + n - 1) / n)`
@@ -233,18 +183,16 @@ Common clippy issues:
 
 ### 11. Documentation
 
-Add inline documentation for complex logic:
+Document the emitter when the logic is not obvious:
 ```rust
-/// Implements the NEWOP opcode (0xNN).
-///
-/// Pops two values from stack, performs operation, pushes result.
-/// Uses little-endian representation internally.
-pub(crate) fn newop(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
+/// Implements NEWOP (0xNN): pops two words, ..., pushes the result.
+pub(crate) fn newop<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
 ```
 
-Update docs if behavior differs from standard EVM:
-- `docs/ext/evm/evm.md` for EVM semantics
-- ADR document if architectural decision made
+Then update:
+- `OPERATION_STATUS.md`: remove the opcode from the unimplemented table
+- `docs/test_coverage.md`: mark it implemented and tested
+- An ADR if an architectural decision was made
 
 ## Common Pitfalls
 
@@ -252,25 +200,26 @@ Update docs if behavior differs from standard EVM:
 Stack words are little-endian after PUSH. Test with multi-byte values.
 
 ### Stack Management
-Use helper functions consistently:
-- `__stack_pop_1()`, `__stack_pop_2()`, etc.
-- `__stack_push_int()`, `__stack_push_ptr()`
+Use the backend consistently:
+- `bctx.stack.pop_word()`, `pop_2()`, `pop_3()`, `pop_7()`
+- `bctx.stack.push_word()`, `push_word_with_known_u64()`
 
-Never manipulate stack directly.
+Never manipulate `Context.stack` directly, and keep the planner's stack effect
+in `apply_abstract_instruction` in step with the emitter.
 
 ### Memory Expansion
-Always call `mem_expand` BEFORE accessing memory. Expansion must:
-- Check offset + size overflow
-- Round to 32-byte boundary
-- Update `memory_len` before use
+Always obtain a `MemoryRegion` before accessing memory. Expansion:
+- Rejects offset + size overflow
+- Rounds to a 32-byte boundary
+- Updates `memory_len` before use
 
 ### Type Conversions
-- Stack pointers point to 32-byte values
-- Use `load_i32()` / `load_i256()` to convert
+- Stack words are `i256` values
+- Use `truncate_to_i32()` for offsets and sizes; values above `u32::MAX` become a rejected sentinel
 - Check if arithmetic ops need i256 or can use smaller types
 
 ### Builtin Function Signatures
-Match Rust function signature to LLVM IR declaration exactly:
+Match the Rust function signature to the LLVM IR declaration exactly:
 - Parameter types (ptr, i32, i256)
 - Return type (usually i8 for error code)
 - Calling convention (extern "C")
@@ -294,7 +243,7 @@ The stack state is:
 - Stack after first PUSH: `[0x03]`
 - Stack after second PUSH: `[0x0A, 0x03]` (0x0A on top)
 
-When `__stack_pop_2()` is called:
+When `bctx.stack.pop_2(bctx)` is called:
 1. First pop gets **top** of stack (0x0A) → returned as tuple element `a`
 2. Second pop gets **second** from top (0x03) → returned as tuple element `b`
 3. Returns `(a, b)` = `(0x0A, 0x03)`
@@ -305,14 +254,14 @@ For SUB, the operation computes: `a - b` = `0x0A - 0x03` = `7` ✓
 
 **WRONG**: "The EVM spec says `a - b` where `a` is Stack Index 0 and `b` is Stack Index 1, so I need to do `b - a` in the implementation."
 
-**CORRECT**: The EVM spec's "Stack Index 0" refers to the value pushed first (deeper in stack), but `__stack_pop_2` returns `(top, second)`, so the implementation should use `a - b` directly (where `a` is the first tuple element = top = most recently pushed).
+**CORRECT**: The EVM spec's "Stack Index 0" is the top of the stack (the value pushed last), and `pop_2` returns `(top, second)`, so the implementation uses `a - b` directly.
 
 #### Verification Method
 
 **Always verify with a simple manual trace:**
 1. Write down the PUSH sequence
 2. Draw the stack state after each PUSH (top of stack on left)
-3. Check what `__stack_pop_2` will return (first pop = top)
+3. Check what `pop_2` will return (first pop = top)
 4. Verify the operation produces the expected result
 
 #### Test Coverage Required
@@ -328,37 +277,18 @@ For **every** non-commutative operation (SUB, DIV, MOD, etc.):
 
 **EVM spec requirement**: Division and modulo by zero must return 0, NOT trigger undefined behavior.
 
-#### The Bug
-
-LLVM's `build_int_unsigned_div` and `build_int_unsigned_rem` have **undefined behavior** when the divisor is zero. Using them directly violates EVM semantics and can cause:
-- Crashes
-- Platform-dependent results
-- Security vulnerabilities
-
-#### The Fix
-
-Always check for zero divisor BEFORE the operation:
+LLVM's `build_int_unsigned_div` and `build_int_unsigned_rem` are undefined for
+a zero divisor, and a `select` does not help because both arms are evaluated.
+Use `build_zero_guarded_value`, which branches around the operation and merges
+the result with a phi:
 
 ```rust
-pub(crate) fn div(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let (a, b) = __stack_pop_2(bctx)?;
-    let a = load_i256(bctx, a)?;
-    let b = load_i256(bctx, b)?;
-
-    let zero = bctx.env.types().i256.const_zero();
-    let b_is_zero = bctx.builder.build_int_compare(
-        inkwell::IntPredicate::EQ,
-        b,
-        zero,
-        "b_is_zero",
-    )?;
-
-    let div_result = bctx.builder.build_int_unsigned_div(a, b, "div_result")?;
-    let result = bctx.builder.build_select(b_is_zero, zero, div_result, "div_final")?;
-    let result = result.into_int_value();
-
-    __stack_push_int(bctx, result)?;
-    Ok(())
+pub(crate) fn div<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
+    let (a, b) = bctx.stack.pop_2(bctx)?;
+    let result = build_zero_guarded_value(bctx, b, "div", |bctx| {
+        bctx.builder.build_int_unsigned_div(a, b, "div_result")
+    })?;
+    bctx.stack.push_word(bctx, result)
 }
 ```
 
@@ -366,19 +296,12 @@ Same pattern applies to MOD, SDIV, SMOD, and any other division-like operations.
 
 ### CRITICAL: Read Opcode Documentation
 
-**Before writing ANY test**, read the corresponding file in `docs/opcodes/[HEX].mdx`.
-
-#### What I Did Wrong
-
-1. Made assumptions about operand order without checking spec
-2. Wrote tests based on "what seemed right" instead of spec examples
-3. Didn't verify edge cases listed in the documentation
-
-#### What You Must Do
+**Before writing ANY test**, read the corresponding file in
+`.agents/skills/evm-opcodes/references/docs/<HEX>.md`.
 
 For **each** opcode you test:
 
-1. **Read** `docs/opcodes/[OPCODE_HEX].mdx` completely
+1. **Read** the reference page completely
 2. **Check** the "Stack input" section for operand order
 3. **Review** all examples in the documentation
 4. **Identify** all edge cases mentioned (zero values, overflow, special conditions)
@@ -387,7 +310,7 @@ For **each** opcode you test:
 
 Example:
 ```rust
-// Tests MOD by zero: EVM spec (docs/opcodes/06.mdx) requires a % 0 = 0
+// Tests MOD by zero: the reference page for 0x06 requires a % 0 = 0
 mod_by_zero: Test {
     // ...
 }
@@ -397,30 +320,10 @@ mod_by_zero: Test {
 
 **Rust lints enforce `snake_case` for macro names.**
 
-#### The Bug
-
-Defining macros with ALL_CAPS names:
-```rust
-macro_rules! PUSH1 {  // ❌ Will fail clippy
-    ($b:expr) => { ... };
-}
-```
-
-This triggers `non_snake_case` warnings and fails CI with `-D warnings`.
-
-#### The Fix
-
-Either:
-1. Use `snake_case` names: `macro_rules! push1 { ... }`
-2. Or add `#[allow(non_snake_case)]` attribute:
-```rust
-#[allow(non_snake_case)]
-macro_rules! PUSH1 {
-    ($b:expr) => { ... };
-}
-```
-
-**Note**: If using a meta-macro that generates multiple macros, you need `#[allow]` on BOTH the generator and generated macros.
+Defining macros with ALL_CAPS names triggers `non_snake_case` warnings and
+fails CI with `-D warnings`. The opcode macros are generated by `define_ops!`
+with the necessary `#[allow(non_snake_case)]`; add new opcodes there instead
+of writing macros by hand.
 
 ### Test Comments Are Mandatory
 
@@ -461,23 +364,16 @@ Good examples to reference:
 
 - **Pure LLVM IR**: `SIGNEXTEND` in `ops.rs` (shifts and selects)
 - **Rust builtin**: `EXP` in `builtins.rs` (external function)
-- **Memory ops**: `MSTORE` / `MSTORE8` (memory expansion)
+- **Memory ops**: `MSTORE` / `MSTORE8` / `RETURNDATACOPY` (memory regions)
 - **Simple arithmetic**: `ADD` / `MUL` (basic stack operations)
+- **Struct field reads**: `TIMESTAMP` and the other block info opcodes
+- **Builtin-backed context reads**: `CALLDATALOAD`
 
 ## Commit Message
 
-Follow conventional commits:
+Follow conventional commits, without trailers:
 ```
-feat: implement [OPCODE] (0xNN)
+feat: implement NEWOP (0xNN)
 
-[Brief description of what the opcode does]
-
-Implementation:
-- [Key technical details]
-- [Approach taken]
-
-Tests:
-- [Test coverage summary]
-
-Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+Brief description of what the opcode does and how it is lowered.
 ```

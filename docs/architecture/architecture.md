@@ -95,12 +95,13 @@ This extends to a broader architectural pattern: contracts could be lowered dire
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Four Cooperating Components
+### Five Cooperating Crates
 
-1. **Compiler (`crates/jet`)**: Parses bytecode, identifies basic blocks, and builds LLVM IR for each opcode.
-2. **Runtime (`crates/jet_runtime`)**: Defines the execution context and provides builtin functions for stack, memory, and contract calls. Also generates runtime IR via `RuntimeBuilder`.
+1. **Compiler (`crates/jet`)**: Parses bytecode, discovers basic blocks, plans the symbolic stack, emits LLVM IR for each opcode with per-block gas charges, and drives the JIT through `Engine`.
+2. **Runtime (`crates/jet_runtime`)**: Defines the execution `Context`, `CallInfo` and `BlockInfo`, provides builtin functions for memory expansion, calls, calldata and wide arithmetic, and generates the runtime IR module via `RuntimeBuilder`.
 3. **Shared types (`crates/jet_ir`)**: Unified LLVM type registry (`jet_ir::Types`) and constants shared by both compiler and runtime to prevent layout drift.
-4. **Push macros (`crates/jet_push_macros`)**: Proc-macro crate generating `PUSH0`..`PUSH32` bytecode helper macros.
+4. **Push macros (`crates/jet_push_macros`)**: Proc-macro crate generating `PUSH0`..`PUSH32` bytecode helper macros for tests.
+5. **Debug CLI (`crates/jetdbg`)**: Compiles two sample contracts, runs a CALL between them, and prints the generated IR.
 
 ### Crate Structure
 
@@ -110,18 +111,19 @@ jet/
 │   ├── jet/                    # Main compiler crate
 │   │   ├── src/
 │   │   │   ├── lib.rs          # Module exports
-│   │   │   ├── instructions.rs # EVM opcode definitions
+│   │   │   ├── instructions.rs # EVM opcode definitions and bytecode iterator
 │   │   │   ├── builder/        # IR construction
 │   │   │   │   ├── mod.rs      # Error types
-│   │   │   │   ├── contract.rs # Core compilation logic
-│   │   │   │   ├── env.rs      # LLVM environment setup
+│   │   │   │   ├── contract.rs # Block discovery, symbolic planning, dispatch, jumps
+│   │   │   │   ├── env.rs      # Options, Mode, StackMode, Env, Symbols
+│   │   │   │   ├── gas.rs      # Static costs and dynamic gas kinds
 │   │   │   │   ├── manager.rs  # Build orchestration
-│   │   │   │   └── ops.rs      # Opcode implementations
+│   │   │   │   ├── ops.rs      # Opcode emitters, memory regions, gas charges
+│   │   │   │   ├── stack.rs    # StackBackend trait, runtime and symbolic backends
+│   │   │   │   └── symbolic.rs # SymbolicStack of LLVM values
 │   │   │   └── engine/         # JIT execution
 │   │   │       └── mod.rs      # Engine wrapper
-│   │   ├── bin/
-│   │   │   └── jetdbg.rs       # Debug/testing utility
-│   │   └── tests/              # Integration tests
+│   │   └── tests/              # Integration tests (test_roms.rs, roms/mod.rs harness)
 │   │
 │   ├── jet_ir/                 # Shared IR types and constants
 │   │   └── src/
@@ -133,15 +135,21 @@ jet/
 │   │   └── src/
 │   │       └── lib.rs          # generate_push_macros! proc-macro
 │   │
-│   └── jet_runtime/            # Runtime support crate
+│   ├── jet_runtime/            # Runtime support crate
+│   │   └── src/
+│   │       ├── lib.rs          # Re-exports (including jet_ir::*)
+│   │       ├── address.rs      # Address newtype ([u8; 20])
+│   │       ├── call_info.rs    # Per-frame CallInfo
+│   │       ├── exec.rs         # Execution context, BlockInfo, ReturnCode
+│   │       ├── builtins.rs     # Extern "C" runtime functions
+│   │       ├── runtime_builder.rs  # Programmatic IR generation
+│   │       ├── symbols.rs      # Symbol name constants
+│   │       ├── layout_tests.rs # Rust/LLVM layout checks
+│   │       └── binding/        # Display implementations
+│   │
+│   └── jetdbg/                 # Debug CLI
 │       └── src/
-│           ├── lib.rs          # Re-exports (including jet_ir::*)
-│           ├── address.rs      # Address newtype ([u8; 20])
-│           ├── exec.rs         # Execution context
-│           ├── builtins.rs     # Extern "C" runtime functions
-│           ├── runtime_builder.rs  # Programmatic IR generation
-│           ├── symbols.rs      # Symbol name constants
-│           └── binding/        # Display implementations
+│           └── main.rs
 ```
 
 ### Tiered Compilation Strategy
@@ -184,29 +192,25 @@ enum IteratorItem {
 
 ### 2. Environment (`env.rs`)
 
-**Purpose**: Set up the LLVM compilation environment with types and symbols.
+**Purpose**: Build-time configuration and the LLVM compilation environment.
 
 **Key Structures**:
 
 ```rust
-struct Types<'ctx> {
-    i8, i32, i64, i160, i256,     // Integer types
-    ptr,                           // Pointer type
-    word_bytes: [32 x i8],        // 32-byte array
-    stack: [1024 x i256],         // EVM stack
-    exec_ctx: struct,             // Execution context
-    block_info: struct,           // Block metadata
-    contract_fn: fn(ptr, ptr) -> i8,  // Contract signature
-}
+pub struct Options { mode: Mode, emit_llvm: bool, assert: bool, stack_mode: StackMode }
+pub enum Mode { Debug, Release }
+pub enum StackMode { RuntimeOnly, SymbolicPreferred }   // RuntimeOnly is the default
 
 struct Symbols<'ctx> {
     jit_engine: GlobalValue,
     stack_push_word, stack_push_ptr, stack_pop, stack_peek, stack_swap,
-    mem_store, mem_store_byte, mem_load,
-    contract_call, contract_call_return_data_copy,
-    keccak256,
+    mem_expand, gas_failure_static,
+    contract_call, contract_call_values, contract_call_return_data_copy,
+    call_data_load, keccak256, exp, addmod, mulmod,
 }
 ```
+
+`Env` wraps the LLVM `Context`, `Module`, the `jet_ir::Types` registry and `Symbols`. `Options::with_stack_mode` selects the stack backend for a compilation session.
 
 ### 3. Contract Builder (`contract.rs`)
 
@@ -216,19 +220,23 @@ struct Symbols<'ctx> {
 
 ```rust
 struct Registers<'ctx> {
-    exec_ctx: PointerValue,      // Pointer to execution context
-    block_info: PointerValue,    // Pointer to block info
+    exec_ctx: PointerValue,      // Pointer to execution context (function parameter)
+    block_info: PointerValue,    // Pointer to block info (function parameter)
     jump_ptr: PointerValue,      // Pointer to jump target
     return_offset: PointerValue, // Return data offset
     return_length: PointerValue, // Return data length
     sub_call: PointerValue,      // Sub-call context pointer
+    call_info: PointerValue,     // Per-frame call info pointer
+    gas_remaining: PointerValue, // Gas remaining slot
 }
 
-struct BuildCtx<'ctx, 'b> {
+struct BuildCtx<'ctx, 'b, S: StackBackend<'ctx>> {
     env: &Env,
     builder: &Builder,
     registers: Registers,
     func: FunctionValue,
+    stack: S,                    // RuntimeStackBackend or SymbolicStackBackend
+    gas_remaining: Cell<Option<IntValue>>,  // Current block's SSA gas value
 }
 
 struct CodeBlock<'ctx, 'b> {
@@ -240,15 +248,18 @@ struct CodeBlock<'ctx, 'b> {
 }
 ```
 
+`find_code_blocks` partitions the bytecode, `build_non_jump_instruction` dispatches every non-jump opcode to its emitter for both backends, and `apply_abstract_instruction` models each opcode's stack effect for the symbolic planner.
+
 ### 4. Operations (`ops.rs`)
 
 **Purpose**: Implement each EVM opcode as LLVM IR generation.
 
-**Pattern**: Each opcode function follows:
-1. Pop operands from stack (as pointers)
-2. Load values from pointers into SSA values
-3. Perform LLVM operation
-4. Push result back to stack
+**Pattern**: Each emitter is generic over `S: StackBackend` and follows:
+1. Pop operands as `i256` SSA values through `bctx.stack`
+2. Perform the LLVM operation, or call a runtime builtin
+3. Push the result through `bctx.stack`
+
+Memory-touching emitters first obtain a `MemoryRegion` from `expand_memory_region` (ADR 006), and dynamic gas is charged before any side effect.
 
 ### 5. Engine (`engine/mod.rs`)
 
@@ -258,9 +269,9 @@ struct CodeBlock<'ctx, 'b> {
 
 ```rust
 impl Engine {
-    fn new(context, opts) -> Self;           // Create with options
-    fn build_contract(addr, rom) -> Result;  // Compile bytecode
-    fn run_contract(addr, block_info) -> ContractRun;  // Execute
+    fn new(context, opts) -> Result<Self>;                          // Create with options
+    fn build_contract(addr, rom) -> Result<()>;                     // Compile bytecode
+    fn run_contract(call_info, block_info) -> Result<ContractRun>;  // Execute the contract at call_info.address
 }
 ```
 
@@ -270,40 +281,41 @@ impl Engine {
 
 ```rust
 #[repr(C)]
-struct Context {
-    stack_ptr: u32,              // Stack depth (top-of-stack index)
-    jump_ptr: u32,               // Dynamic jump target (temporary storage)
+pub struct Context {
+    stack_ptr: u32,              // Stack depth (next free slot)
+    jump_ptr: u32,               // Dynamic jump target (runtime backend)
     return_off: u32,             // Return data offset (window in memory)
     return_len: u32,             // Return data length
-    sub_call: Option<Box<Context>>,  // Nested call context (optional nested Context for CALL)
-    stack: [[u8; 32]; 1024],     // The EVM stack (fixed array of 1024 EVM words)
-    memory: [u8; 32768],         // EVM memory (linear memory buffer, initially 32KB)
+    sub_call: Option<Box<Context>>,  // Nested call context for CALL
+    stack: [Word; 1024],         // The EVM stack
+    memory_ptr: *mut u8,         // Heap-allocated EVM memory (ADR-002)
     memory_len: u32,             // Used memory length
-    memory_cap: u32,             // Memory capacity
+    memory_cap: u32,             // Allocated capacity
+    call_info: *mut CallInfo,    // Per-frame call context
+    gas_remaining: u64,          // Gas left for this frame
+    gas_failure: Option<Box<GasFailure>>,  // Out-of-gas diagnostics
 }
 ```
 
-**Important**: This struct is passed by pointer into JIT-compiled contract functions. The compiler assumes a specific field order when performing struct GEPs (getelementptr operations).
+**Important**: This struct is passed by pointer into JIT-compiled contract functions. The compiler assumes a specific field order when performing struct GEPs (getelementptr operations), and `layout_tests.rs` checks that Rust and `jet_ir::Types` agree.
+
+`CallInfo` (`call_info.rs`) carries the calldata pointer and length, the frame's address, origin, caller and value, and the gas limit. It is required by `Engine::run_contract` and is created for the callee by the CALL builtin.
 
 ### 7. BlockInfo (`exec.rs`)
 
-**Purpose**: Carries chain data exposed to opcodes like BLOCKHASH.
+**Purpose**: Carries chain data exposed to the block information opcodes.
 
-Fields include:
-- number, difficulty, gas_limit, timestamp
-- base_fee, blob_base_fee, chain_id
-- hash (current block hash), hash_history (last 256), coinbase
+Fields: number, difficulty, gas_limit, timestamp, base_fee, blob_base_fee, chain_id, hash (current block hash), hash_history (last 256 hashes), coinbase.
 
-The compiler currently only uses block hash access; additional opcodes are stubbed.
+`COINBASE`, `TIMESTAMP`, `NUMBER`, `DIFFICULTY`, `GASLIMIT`, `CHAINID`, `BASEFEE` and `BLOBBASEFEE` load their field directly through the `block_info` register; `BLOCKHASH` consumes its block number and reads `hash_history`, pushing zero outside the window.
 
 ### 8. ReturnCode (`exec.rs`)
 
 **Purpose**: Encode execution outcomes.
 
-Return codes encode execution outcomes:
-- **Negative values**: Jet-level failures (e.g., InvalidJumpBlock = -1)
-- **0..63**: EVM-level success (ImplicitReturn = 0, ExplicitReturn = 1, Stop = 2)
-- **64+**: EVM-level failure (Revert = 64, Invalid = 65, JumpFailure = 66)
+- **Negative values**: Jet-level failures (`InvalidJumpBlock` = -1, `StackUnderflow` = -2, `StackOverflow` = -3)
+- **0..63**: EVM-level success (`ImplicitReturn` = 0, `ExplicitReturn` = 1, `Stop` = 2)
+- **64+**: EVM-level failure (`Revert` = 64, `Invalid` = 65, `JumpFailure` = 66, `OutOfGas` = 67)
 
 Compiled functions always return one of these values.
 
@@ -311,14 +323,15 @@ Compiled functions always return one of these values.
 
 **Purpose**: Rust functions callable from compiled LLVM IR.
 
-All functions use `extern "C"` ABI and are marked `unsafe`:
+All functions use the `extern "C"` ABI and are marked `unsafe`. By symbol name:
 
-- `stack_push_ptr`, `stack_pop`, `stack_peek`, `stack_swap`
-- `mem_store`, `mem_store_byte`, `mem_load`
-- `jet_contract_call`, `jet_contract_call_return_data_copy`
-- `jet_ops_keccak256`
+- `jet.mem.expand`: memory expansion with overflow checks (ADR 005)
+- `jet.contract.call`, `jet.contract.call.values`, `jet.contracts.call_return_data_copy`: JIT-to-JIT calls and return data
+- `jet.call.dataload`: `CALLDATALOAD` word reads
+- `jet.ops.keccak256`, `jet.ops.exp`, `jet.ops.addmod`, `jet.ops.mulmod`: hashing and wide arithmetic
+- `jet.gas.failure.static`: records out-of-gas diagnostics
 
-These are declared in runtime IR and mapped at runtime using `ExecutionEngine::add_global_mapping`.
+These are declared in the runtime IR module and mapped at JIT creation with `ExecutionEngine::add_global_mapping`. Stack helpers (`jet.stack.*`) and simple memory helpers (`jet.mem.store.*`, `jet.mem.load`) are defined in IR by `RuntimeBuilder` rather than in Rust.
 
 ---
 
@@ -342,34 +355,26 @@ LLVM IR is a **register machine** with SSA (Static Single Assignment): every val
 %c = add i256 %a, %b
 ```
 
-### JET's Solution: Real Stack Model
+### JET's Solution: Two Stack Backends
 
-JET uses a **real stack** in the `Context` struct as the single source of truth. Every stack operation is a runtime function call:
+Opcode emitters are written once against the `StackBackend` trait in `stack.rs`, and the backend is chosen per compilation with `Options::with_stack_mode`:
+
+- **`RuntimeStackBackend`** (default): the EVM stack lives in `Context.stack` and every push, pop, peek and swap is a call to an IR-defined runtime helper (`jet.stack.*`). The helpers bounds-check, so underflow and overflow return `StackUnderflow` or `StackOverflow`.
+- **`SymbolicStackBackend`**: stack slots are LLVM SSA values held in a `SymbolicStack` during IR construction. A fixed-point abstract interpretation over the code blocks plans the control flow first, creating entry phis per block variant and specialising blocks by incoming stack height. The stack is materialized into `Context.stack` only at contract exits, so the observable context matches the runtime backend. Planning is bounded (64 entry states per block, 4096 total) and falls back to the runtime backend when exceeded.
 
 ```rust
-pub fn add(bctx: &BuildCtx) -> Result<(), Error> {
-    let (a, b) = stack_pop_2(bctx)?;     // Calls runtime `stack_pop`
-    let a = load_i256(bctx, a)?;          // LLVM load from pointer
-    let b = load_i256(bctx, b)?;
+pub(crate) fn add<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
+    let (a, b) = bctx.stack.pop_2(bctx)?;
     let result = bctx.builder.build_int_add(a, b, "add_result")?;
-    call_stack_push_i256(bctx, result)?;  // Calls runtime `stack_push`
-    Ok(())
+    bctx.stack.push_word(bctx, result)
 }
 ```
 
-This preserves EVM stack semantics by keeping the canonical stack in runtime memory and operating on it via builtins. In LLVM IR:
-- Stack values are handled as pointers to 32-byte words
-- Arithmetic opcodes load i256 values from those pointers, compute in SSA, and then push the result back to the runtime stack
-
-This avoids complex SSA stack simulation at the cost of runtime calls.
+Only `JUMP` and `JUMPI` lowering differs between backends. See [`symbolic-stack.md`](symbolic-stack.md) and ADR 007 for the planner, fault exits and limits.
 
 ### Why This Design?
 
-1. **Correctness First**: The real stack ensures correct semantics even with complex control flow
-
-**Trade-offs**:
-- **Pros**: Simplifies opcode lowering; avoids complex SSA stack modeling
-- **Cons**: Frequent runtime calls and memory traffic; more JIT overhead
+The runtime backend keeps correctness simple and serves as the differential oracle: every rom test runs under both backends. The symbolic backend removes the per-opcode runtime calls and memory traffic on the paths it can plan, which is where the performance is.
 
 ---
 
@@ -480,7 +485,9 @@ fn run_contract(&self, addr, block_info) -> ContractRun {
 
 ### Gas Accounting
 
-Gas accounting is designed but not yet implemented. The intended approach exploits LLVM's basic block structure: since a basic block either executes completely or not at all, gas costs can be amortized across the entire block. Many contracts have infrequent jumps, resulting in large basic blocks where gas accounting reduces to a single addition at the block's end. Instructions with dynamic gas costs require additional logic only when needed.
+Gas is charged per basic block. `gas.rs` holds the Osaka static cost of every opcode and classifies the ones with dynamic costs (`DynamicGas`). For each block, the static costs of the instructions up to the next dynamic charge are summed at compile time and emitted as one affordability check and one subtraction. Gas values flow in SSA across block edges with phis at joins and backedges. Dynamic costs for memory expansion, `KECCAK256`, `EXP`, `RETURNDATACOPY` and `CALL` memory are computed in IR and charged before the operation mutates anything. Out-of-gas returns `ReturnCode::OutOfGas`, zeroes `gas_remaining`, and stores a `GasFailure` (pc, available, required) in the context. `GAS` pushes the remaining gas after its own charge.
+
+Gas is not yet forwarded to callees; `CALL` runs the callee with an unbounded limit.
 
 ---
 
@@ -488,13 +495,13 @@ Gas accounting is designed but not yet implemented. The intended approach exploi
 
 ### Execution Context Layout
 
-The `Context` struct uses **pointer-based memory** (ADR-002) — memory is heap-allocated and referenced by pointer, not stored inline. This matches EVM semantics (unbounded growth) and eliminates layout drift between Rust and generated IR.
+The `Context` struct uses **pointer-based memory** (ADR-002): memory is heap-allocated and referenced by pointer, not stored inline. This matches EVM semantics (unbounded growth) and eliminates layout drift between Rust and generated IR.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                        Context (repr(C))                         │
 ├─────────────────────────────────────────────────────────────────┤
-│  stack_ptr: u32      │ Current stack depth (0-1023)             │
+│  stack_ptr: u32      │ Current stack depth (0-1024)             │
 │  jump_ptr: u32       │ Target offset for dynamic JUMP           │
 │  return_off: u32     │ Return data start offset in memory       │
 │  return_len: u32     │ Return data length in bytes              │
@@ -509,11 +516,17 @@ The `Context` struct uses **pointer-based memory** (ADR-002) — memory is heap-
 │  memory_ptr: *mut u8  │ Pointer to heap-allocated memory buffer │
 │  memory_len: u32      │ Used memory length                       │
 │  memory_cap: u32      │ Allocated capacity                       │
+├─────────────────────────────────────────────────────────────────┤
+│  call_info: *mut CallInfo │ Frame address, origin, caller,       │
+│                           │ value, calldata and gas limit        │
+│  gas_remaining: u64       │ Gas left for this frame              │
+│  gas_failure: Option<Box<GasFailure>> │ Out-of-gas diagnostics   │
 └─────────────────────────────────────────────────────────────────┘
 
 LLVM field indices (for GEP operations):
   0: stack_ptr, 1: jump_ptr, 2: return_off, 3: return_len,
-  4: sub_call, 5: stack, 6: memory_ptr, 7: memory_len, 8: memory_cap
+  4: sub_call, 5: stack, 6: memory_ptr, 7: memory_len, 8: memory_cap,
+  9: call_info, 10: gas_remaining, 11: gas_failure
 ```
 
 Memory is initially allocated as `WORD_SIZE_BYTES * MEMORY_INITIAL_SIZE_WORDS` bytes (32 KB) with 32-byte alignment, and freed in `Context::drop`. The `jet_ir::Types` struct defines an identical layout in LLVM IR so that generated code and Rust agree on every field offset.
@@ -558,7 +571,7 @@ SWAP1:  swap(stack[stack_ptr-1], stack[stack_ptr-2])
 
 ### Jump Table Implementation
 
-All dynamic jumps go through a central `jump_block`. Dynamic jumps are handled by a late jump block:
+In runtime mode all dynamic jumps go through a central `jump_block` (symbolic mode is described under JUMPI below):
 
 1. `JUMP` / `JUMPI` store the target into `exec_ctx.jump_ptr`
 2. Control branches to the shared jump block
@@ -598,25 +611,23 @@ This keeps target validation centralized and avoids indirect branches.
 
 ### JUMPI (Conditional Jump) Implementation
 
+In runtime mode:
+
 ```rust
-fn jumpi(bctx, jump_block, jump_else_block) {
-    let (pc, cond) = __stack_pop_2(bctx)?;
-
-    // Store target for potential jump
-    builder.build_store(registers.jump_ptr, pc);
-
-    // Compare condition to zero
-    let cmp = builder.build_int_compare(EQ, cond, zero, "jumpi_cmp");
-
-    // Branch: if cond == 0, fall through; else jump
-    builder.build_conditional_branch(cmp, jump_else_block, jump_block);
-}
+let (pc, cond) = bctx.stack.pop_2(bctx)?;
+let target = /* narrow i256 to i32; values above u32::MAX become a sentinel no jumpdest can match */;
+bctx.builder.build_store(bctx.registers.jump_ptr, target)?;
+let is_zero = bctx.builder.build_int_compare(EQ, cond, zero, "jumpi_cmp")?;
+bctx.builder.build_conditional_branch(is_zero, fallthrough_block, jump_block)?;
 ```
+
+In symbolic mode a `JUMPI` whose target slot carries `known_u64` metadata branches directly to the planned block variant; otherwise the taken edge is a site-local `switch` over every `JUMPDEST` variant at the current stack height. Both backends narrow targets through the same helper, so wide targets fail the jump rather than wrap onto a real jumpdest.
 
 ### Control Flow Opcodes
 
 - `PC` is baked as a constant using `code_block.offset + pc` to yield the absolute bytecode index
-- `JUMP`/`JUMPI` use the shared jump block as described above
+- `JUMP`/`JUMPI` use the shared jump block in runtime mode and planned edges or site-local switches in symbolic mode
+- Bytes after `STOP`, `RETURN`, `REVERT`, `INVALID` or `JUMP` and before the next `JUMPDEST` belong to no block; they are still scanned so push data cannot fake a `JUMPDEST`
 
 ---
 
@@ -758,32 +769,27 @@ Contract symbols are mangled with `jet.contracts.` prefix and the address string
 
 ### Adding a New Opcode
 
-1. **Define opcode** in `instructions.rs` (if not present):
+See [`docs/process/new-opcode.md`](../process/new-opcode.md) for the full checklist. In short:
+
+1. **Implement the emitter** in `ops.rs`:
 
    ```rust
-   instructions! {
-       // ...
-       NEWOP = 0xNN,
+   pub(crate) fn newop<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
+       let (a, b) = bctx.stack.pop_2(bctx)?;
+       let result = bctx.builder.build_int_add(a, b, "newop_result")?;
+       bctx.stack.push_word(bctx, result)
    }
    ```
 
-2. **Implement operation** in `ops.rs`:
-
-   ```rust
-   pub(crate) fn newop(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-       let a = __stack_pop_1(bctx)?;
-       let a_val = load_i256(bctx, a)?;
-       // ... perform operation ...
-       __stack_push_int(bctx, result)?;
-       Ok(())
-   }
-   ```
-
-3. **Add dispatch** in `contract.rs`:
+2. **Dispatch it** in `build_non_jump_instruction` in `contract.rs`:
 
    ```rust
    Instruction::NEWOP => ops::newop(bctx),
    ```
+
+3. **Model its stack effect** in `apply_abstract_instruction` in `contract.rs` so the symbolic planner can track heights.
+
+4. **Add its gas cost** to `static_cost` in `gas.rs`, plus a `DynamicGas` kind if the cost depends on operands.
 
 ### Adding a New Runtime Function
 
@@ -794,8 +800,7 @@ See [`docs/process/new-runtime-function.md`](../process/new-runtime-function.md)
 ## File-by-File Summary
 
 ### `jet/src/lib.rs`
-- Module structure declaration
-- Enables `allocator_api` feature
+- Module structure declaration and crate docs
 
 ### `jet/src/instructions.rs`
 - Macro-based EVM opcode enum definition (`instruction!` macro)
@@ -808,27 +813,37 @@ See [`docs/process/new-runtime-function.md`](../process/new-runtime-function.md)
 - Module declarations
 
 ### `jet/src/builder/contract.rs`
-- **`Registers`**: Caches pointers into exec_ctx (jump_ptr, return_offset, return_length, sub_call)
-- **`BuildCtx`**: Wraps Env, Builder, current function, and Registers
-- **`CodeBlock`**: Represents a basic block with offset, ROM slice, flags
-- **`CodeBlocks`**: Collection of CodeBlocks with helper methods
-- **`build()`**: Main entry point - creates function, discovers blocks, generates IR
-- **`find_code_blocks()`**: First pass - discovers basic block boundaries
-- **`build_contract_body()`**: Second pass - generates IR for all blocks
-- **`build_code_block()`**: Generates IR for a single block
-- **`build_jump_table()`**: Creates the switch statement for dynamic jumps
+- **`Registers`**: Caches pointers into exec_ctx and block_info
+- **`BuildCtx<S>`**: Wraps Env, Builder, current function, Registers, the stack backend and the block's gas value
+- **`CodeBlock`** / **`CodeBlocks`**: Basic blocks with offset, ROM slice, flags, and a `jumpdest_pc -> block_index` map
+- **`build()`**: Main entry point - creates function, discovers blocks, plans (symbolic mode), generates IR
+- **`find_code_blocks()`**: First pass - discovers basic block boundaries, skips dead code
+- **`apply_abstract_instruction()`**: Stack effect of every opcode for the symbolic planner
+- **`build_non_jump_instruction()`**: Shared opcode dispatch for both backends, with static and dynamic gas charges
+- **`build_jump_table()`**: The runtime-mode switch for dynamic jumps
 
 ### `jet/src/builder/env.rs`
-- **`Options`**: Build configuration (mode Debug/Release, emit_llvm, assert)
-- **`Types`**: All LLVM type definitions (i8/i32/i64/i160/i256, ptr, word_bytes, stack, mem, exec_ctx)
+- **`Options`**: Build configuration (mode Debug/Release, emit_llvm, assert, stack_mode)
+- **`Mode`** and **`StackMode`** enums
 - **`Symbols`**: Runtime function lookups, mapped to `jet_runtime::symbols`
-- **`Env`**: Wraps context, module, types, symbols
+- **`Env`**: Wraps context, module, `jet_ir::Types`, symbols
 
 ### `jet/src/builder/ops.rs`
-- Implementations for each EVM opcode
-- Helper functions for stack operations (`stack_pop_1/2/3/7`, `stack_push_int`, `call_stack_push_i256`)
-- **Pattern**: Pop inputs → Load values → LLVM operation → Push result
-- Many opcodes return `Error::UnimplementedInstruction`
+- Emitters for each implemented EVM opcode, generic over `StackBackend`
+- **`MemoryRegion`** and `expand_memory_region`: type-level guarantee that memory is expanded before access (ADR 006)
+- `charge_static_gas` and the dynamic gas charge helpers
+- `build_zero_guarded_value` for division-like opcodes, `truncate_to_i32` for offsets and sizes
+
+### `jet/src/builder/stack.rs`
+- **`StackBackend`** trait: `push_word`, `push_word_with_known_u64`, `pop_word`, `pop_2`, `pop_3`, `pop_7`, `peek_word`, `dup`, `swap`, `materialize_for_return`
+- **`RuntimeStackBackend`**: calls the `jet.stack.*` runtime helpers
+- **`SymbolicStackBackend`**: operates on a `SymbolicStack` and materializes it at exits
+
+### `jet/src/builder/symbolic.rs`
+- **`SymbolicStack`**: stack slots as LLVM `IntValue`s with optional `known_u64` metadata
+
+### `jet/src/builder/gas.rs`
+- `static_cost` table and `DynamicGas` classification per opcode
 
 ### `jet/src/builder/manager.rs`
 - **`Manager`**: Wraps Env and adds functions per contract address
@@ -839,7 +854,11 @@ See [`docs/process/new-runtime-function.md`](../process/new-runtime-function.md)
 - Calls `RuntimeBuilder::build()` to generate the runtime LLVM module
 - Creates JIT execution engine
 - Links `extern "C"` builtins at JIT time via `add_global_mapping`
-- Executes contracts and returns `ContractRun`
+- Executes contracts with a `CallInfo` and `BlockInfo`, returning `ContractRun`
+
+### `jetdbg/src/main.rs`
+- Debug CLI: compiles two sample contracts, runs a CALL between them, prints IR
+- `--mode`, `--emit-llvm`, `--assert` and `--log-level` flags
 
 ### `jet_ir/src/constants.rs`
 - Canonical constants: `WORD_SIZE_BYTES`, `STACK_SIZE_WORDS`, `ADDRESS_SIZE_BYTES`, `MEMORY_INITIAL_SIZE_WORDS`, etc.
@@ -848,9 +867,8 @@ See [`docs/process/new-runtime-function.md`](../process/new-runtime-function.md)
 ### `jet_ir/src/types.rs`
 - **`Types<'ctx>`**: Unified LLVM type registry built from an inkwell `Context`
 - Defines all primitive types (`i8`, `i32`, `i64`, `i160`, `i256`, `ptr`)
-- Defines `exec_ctx` struct layout (9 fields, packed) — single authoritative definition
-- Defines `block_info` struct layout
-- Re-used by both `RuntimeBuilder` and compiler's `env.rs` to guarantee layout consistency
+- Defines the `exec_ctx` (12 fields, packed), `call_info` and `block_info` struct layouts, the single authoritative definitions
+- Re-used by both `RuntimeBuilder` and the compiler's `env.rs` to guarantee layout consistency
 
 ### `jet_push_macros/src/lib.rs`
 - **`generate_push_macros!(0..=32)`** proc-macro
@@ -859,7 +877,7 @@ See [`docs/process/new-runtime-function.md`](../process/new-runtime-function.md)
 
 ### `jet_runtime/src/lib.rs`
 - Module declarations; re-exports `jet_ir::*` (constants flow from `jet_ir`)
-- Public surface: `Address`, `Result`, `RuntimeError`, `RuntimeBuilder`
+- Public surface: `Address`, `CallInfo`, `Result`, `RuntimeError`, `RuntimeBuilder`
 
 ### `jet_runtime/src/address.rs`
 - **`Address([u8; 20])`** newtype with `#[repr(transparent)]`
@@ -868,28 +886,32 @@ See [`docs/process/new-runtime-function.md`](../process/new-runtime-function.md)
 - `FromStr`/`TryFrom<&str>` parse hex strings with optional `0x` prefix
 - `From<[u8; 20]>`, `Into<[u8; 20]>`, `AsRef<[u8]>` for zero-cost interop
 
+### `jet_runtime/src/call_info.rs`
+- **`CallInfo`**: calldata pointer and length, address, origin, caller, value, gas limit
+- `#[repr(C)]`, matched by `jet_ir::Types::call_info`
+
 ### `jet_runtime/src/exec.rs`
 - **`Word`**: 32-byte array type alias (`[u8; 32]`)
-- **`Context`**: Execution context with pointer-based memory (ADR-002)
-  - `memory_ptr: *mut u8` — heap-allocated buffer, freed in `Drop`
-  - `memory_len`/`memory_cap` track usage and allocated capacity
+- **`Context`**: Execution context with pointer-based memory (ADR-002), call info, gas remaining and gas failure diagnostics
 - **`BlockInfo`**: EVM block metadata struct
 - **`ReturnCode`**: Enum for execution results (EVM and Jet-level success/failure)
 - **`ContractRun`**: Wraps result and context
 - **`ContractFunc`**: Function pointer type for compiled contracts
 
 ### `jet_runtime/src/builtins.rs`
-- Unsafe `extern "C"` functions for complex operations that need Rust stdlib/deps
-- Contract calls, keccak256, EXP, ADDMOD, MULMOD, memory expansion
+- Unsafe `extern "C"` functions for operations that need Rust stdlib/deps
+- Contract calls, calldata loads, keccak256, EXP, ADDMOD, MULMOD, memory expansion, gas failure recording
 - These are declared in the runtime IR module and linked via `add_global_mapping`
 
 ### `jet_runtime/src/runtime_builder.rs`
 - **`RuntimeBuilder`**: Generates the runtime LLVM module programmatically
-- Replaces the old static `runtime-ir/jet.ll` file
 - `build()` returns a `Module<'ctx>` containing all IR-defined runtime functions
 - Uses `jet_ir::Types` for consistent struct layouts
-- IR-defined functions: all stack and basic memory operations
-- Declared-only functions: contract calls, crypto, arithmetic ops
+- IR-defined functions: bounds-checked stack push, pop, peek and swap, and basic memory operations
+- Declared-only functions: contract calls, crypto, arithmetic ops, memory expansion, gas failure
+
+### `jet_runtime/src/layout_tests.rs`
+- Asserts `Context`, `CallInfo` and `BlockInfo` sizes, field counts and field types match `jet_ir::Types`
 
 ### `jet_runtime/src/symbols.rs`
 - String constants for all symbol names
@@ -907,51 +929,56 @@ See [`docs/process/new-runtime-function.md`](../process/new-runtime-function.md)
 
 ```rust
 // Binary operation pattern
-pub(crate) fn binop(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    // 1. Pop operands (returns pointers)
-    let (a, b) = __stack_pop_2(bctx)?;
+pub(crate) fn binop<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
+    // 1. Pop operands as i256 SSA values (top first)
+    let (a, b) = bctx.stack.pop_2(bctx)?;
 
-    // 2. Load values from pointers
-    let a = load_i256(bctx, a)?;
-    let b = load_i256(bctx, b)?;
-
-    // 3. Perform LLVM operation
+    // 2. Perform LLVM operation
     let result = bctx.builder.build_int_xxx(a, b, "binop_result")?;
 
-    // 4. Push result
-    __stack_push_int(bctx, result)?;
-
-    Ok(())
+    // 3. Push result
+    bctx.stack.push_word(bctx, result)
 }
 ```
 
 ### Runtime Call Pattern
 
 ```rust
-pub(crate) fn runtime_op(bctx: &BuildCtx<'_, '_>) -> Result<(), Error> {
-    let arg = __stack_pop_1(bctx)?;
+pub(crate) fn runtime_op<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
+    let arg = bctx.stack.pop_word(bctx)?;
 
-    bctx.builder.build_call(
+    let ret = bctx.builder.build_call(
         bctx.env.symbols().runtime_function(),
         &[bctx.registers.exec_ctx.into(), arg.into()],
         "runtime_op_result",
     )?;
+    let value = ret.try_as_basic_value().unwrap_basic().into_int_value();
 
-    Ok(())
+    bctx.stack.push_word(bctx, value)
 }
 ```
 
-### Control Flow Pattern
+### Memory Access Pattern
 
 ```rust
-pub(crate) fn control_op(
-    bctx: &BuildCtx<'_, '_>,
-    target_block: BasicBlock,
-) -> Result<(), Error> {
-    // Build branch
-    bctx.builder.build_unconditional_branch(target_block)?;
+pub(crate) fn mstore<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
+    let (loc, val) = bctx.stack.pop_2(bctx)?;
+    let loc_i32 = truncate_to_i32(bctx, loc, "mstore_loc")?;
+    let size = bctx.env.types().i32.const_int(32, false);
+    let region = expand_memory_region(bctx, loc_i32, size, "mstore")?;
+    build_mem_store_value(bctx, &region, val)
+}
+```
 
-    Ok(())
+### Zero-Guarded Division Pattern
+
+```rust
+pub(crate) fn div<'ctx, S: StackBackend<'ctx>>(bctx: &BuildCtx<'ctx, '_, S>) -> Result<(), Error> {
+    let (a, b) = bctx.stack.pop_2(bctx)?;
+    let result = build_zero_guarded_value(bctx, b, "div", |bctx| {
+        bctx.builder.build_int_unsigned_div(a, b, "div_result")
+    })?;
+    bctx.stack.push_word(bctx, result)
 }
 ```
 
@@ -963,18 +990,19 @@ pub(crate) fn control_op(
 
 The test framework uses a declarative macro. Tests under `crates/jet/tests` compile synthetic ROMs and assert on:
 
-- Stack contents and pointer depth
+- Return code, stack contents and pointer depth
 - Jump pointer values
 - Return offset/length
-- Memory contents after MSTORE/MLOAD/RETURNDATACOPY
+- Memory contents and length after memory opcodes
+- Gas remaining and out-of-gas diagnostics
 
 ```rust
 rom_tests! {
     test_name: Test {
-        roms: vec![vec![
-            Instruction::PUSH1.opcode(), 0x01,
-            Instruction::PUSH1.opcode(), 0x02,
-            Instruction::ADD.opcode(),
+        roms: vec![bytecode![
+            PUSH1!(0x01),
+            PUSH1!(0x02),
+            ADD!(),
         ]],
         expected: TestContractRun {
             stack_ptr: 1,
@@ -985,20 +1013,25 @@ rom_tests! {
 }
 ```
 
-These tests serve as executable specs for the subset of opcodes currently implemented.
+Every case expands to two tests, one per `StackMode`, so the runtime backend acts as a differential oracle for the symbolic backend. Tests that need a specific `CallInfo` are plain `#[test]` functions using `run_both_modes`.
 
 ### Test Categories
 
-1. **Arithmetic**: ADD, MUL, SUB, DIV, MOD
-2. **Control Flow**: JUMP, JUMPI, PC
-3. **Memory**: MLOAD, MSTORE, MSTORE8
-4. **Contract Calls**: CALL, RETURNDATASIZE, RETURNDATACOPY
-5. **Cryptographic**: KECCAK256
+1. **Arithmetic, comparison, bitwise**: every opcode from `ADD` to `SAR`, including division by zero and signed edge cases
+2. **Control flow**: static and dynamic `JUMP`/`JUMPI`, joins, backedges, wide targets, dead code, `PC`
+3. **Stack faults**: underflow and overflow in both backends, planned symbolic fault exits, runtime fallback
+4. **Memory**: expansion rounding, monotonicity, overflow rejection, `MSIZE`
+5. **Calls and context**: `CALL`, `RETURNDATASIZE`, `RETURNDATACOPY`, `ADDRESS`, `ORIGIN`, `CALLER`, `CALLVALUE`, `CALLDATALOAD`, `CALLDATASIZE`, block info propagation
+6. **Gas**: static block charges, dynamic costs, out-of-gas diagnostics
+7. **Runtime unit tests**: memory expansion builtin, runtime IR generation, struct layouts, address parsing
+
+See [`docs/test_coverage.md`](../test_coverage.md) for the per-opcode table.
 
 ### Running Tests
 
 ```bash
-cargo test -p jet
+make test           # cargo nextest, all crates
+make test-all       # plus doctests
 ```
 
 ---
@@ -1007,60 +1040,62 @@ cargo test -p jet
 
 ### Currently Unimplemented Opcodes
 
-Several opcode families are stubbed:
+See [`OPERATION_STATUS.md`](../../OPERATION_STATUS.md) for the authoritative list. The missing families are:
 
+- **Account state and code**: BALANCE, SELFBALANCE, EXTCODESIZE, EXTCODECOPY, EXTCODEHASH, CODESIZE, CODECOPY
 - **Storage**: SLOAD, SSTORE, TLOAD, TSTORE
-- **Environment**: ADDRESS, BALANCE, CALLER, CALLVALUE, ORIGIN
-- **Call data**: CALLDATALOAD, CALLDATASIZE, CALLDATACOPY
-- **Block Info**: COINBASE, TIMESTAMP, NUMBER, DIFFICULTY, etc.
+- **Data copies**: CALLDATACOPY, MCOPY
+- **Transaction data**: GASPRICE, BLOBHASH
 - **Logging**: LOG0-LOG4
 - **Creation**: CREATE, CREATE2
-- **Delegate Calls**: DELEGATECALL, STATICCALL, CALLCODE
+- **Other calls**: CALLCODE, DELEGATECALL, STATICCALL
+- **SELFDESTRUCT**
 
 ### Known TODOs and Constraints
 
-1. **Gas accounting**: Not implemented. The intended approach amortizes cost per basic block.
-2. **Code eviction**: No memory management for compiled contracts; the JIT cache grows unbounded.
-3. **Stack overflow checking**: `stack_pop` returns null on underflow (handled); `stack_push` does not yet check for overflow at depth 1024.
-4. **Memory bounds checking**: `jet.mem.expand` is declared but bounds validation in memory read/write paths may be incomplete.
+1. **Gas forwarding**: `CALL` discards its gas operand and runs the callee with an unbounded limit; the 63/64 rule and refunds are not modelled.
+2. **CALL data and value**: the input offset and length are discarded, so the callee sees empty calldata, and no balance moves.
+3. **Code eviction**: No memory management for compiled contracts; the JIT cache grows unbounded.
+4. **Dynamic jump precision**: a dynamic jump dispatches over every `JUMPDEST` (shared jump block in runtime mode, per-site switch in symbolic mode).
 
 **Previously resolved limitations** (no longer issues):
-- ~~Runtime IR target triple mismatch~~ — eliminated when `runtime-ir/jet.ll` was replaced by `RuntimeBuilder`
-- ~~Struct layout mismatches between Rust and LLVM IR~~ — resolved by `jet_ir::Types` as the single source of truth (ADR-002)
-- ~~Symbol naming inconsistency (`jet.stack.push.word` vs `.i256`)~~ — resolved in `RuntimeBuilder`
-- ~~`ADDRESS_SIZE_BYTES = 2` in tests~~ — corrected to 20 in `jet_ir::constants`
+- ~~No gas accounting~~: per-block static charges and IR-computed dynamic costs, see Gas Accounting
+- ~~Stack overflow unchecked~~: the runtime push, peek and swap helpers bounds-check, and the symbolic planner proves faults ahead of time
+- ~~Memory bounds checking incomplete~~: `MemoryRegion` makes expansion a precondition of every memory helper (ADR 006)
+- ~~Runtime IR target triple mismatch~~: eliminated when `runtime-ir/jet.ll` was replaced by `RuntimeBuilder`
+- ~~Struct layout mismatches between Rust and LLVM IR~~: resolved by `jet_ir::Types` as the single source of truth (ADR-002)
 
 ### Design Decisions and Trade-offs
 
-1. **Runtime stack as source of truth**
-   - Pros: Simplifies opcode lowering; avoids complex SSA stack modeling
-   - Cons: Frequent runtime calls and memory traffic; more JIT overhead
+1. **Runtime stack by default, symbolic stack on request**
+   - Pros: the runtime backend is simple and serves as the oracle; the symbolic backend removes runtime calls where it can plan
+   - Cons: two lowering paths for `JUMP`/`JUMPI`, and bounded planning falls back to the runtime backend on hostile bytecode
 
-2. **Jump table for dynamic jumps**
-   - Pros: Validates jump targets centrally; uses LLVM switch for clarity
-   - Cons: Adds an extra block and indirect branch on every JUMP/JUMPI
+2. **Switch dispatch for dynamic jumps**
+   - Pros: validates jump targets centrally; uses LLVM switch for clarity
+   - Cons: adds a switch on every dynamic `JUMP`/`JUMPI`
 
-3. **IR stub module for runtime symbols**
-   - Pros: Keeps symbol discovery centralized; allows IR helpers like `jet.stack.push.i256` to be optimized by LLVM
-   - Cons: Requires careful alignment between Rust structs and LLVM types
+3. **IR-defined runtime helpers**
+   - Pros: keeps symbol discovery centralized; lets LLVM inline and optimize stack and memory helpers
+   - Cons: requires careful alignment between Rust structs and LLVM types, enforced by layout tests
 
-4. **Minimal opcode subset**
-   - Pros: Enables rapid iteration on compiler correctness
-   - Cons: Many opcodes are currently unimplemented
+4. **JIT-to-JIT calls only**
+   - Pros: enables rapid iteration on the compiler without an account model
+   - Cons: no external state, so most state opcodes remain unimplemented
 
 ### Future Optimization Opportunities
 
-1. **Inline more builtins**: Convert remaining Rust builtins (e.g., ADDMOD/MULMOD) to IR-defined functions in `RuntimeBuilder` for better LLVM optimization.
-2. **Gas amortization**: Compute gas per basic block, not per instruction.
-3. **Stack overflow checking**: Add `stack_ptr >= 1024` guard to `stack_push` functions.
-4. **Profile-guided optimization**: Use ORC's profiling for hot path optimization.
-5. **Shared library extraction**: Compile contracts to standalone `.so`/`.dll` files.
-6. **Expand opcode coverage**: With a test-first approach (storage, environment, call data, logs).
+1. **Constant folding** through arithmetic so more jump targets are static in symbolic mode
+2. **Shared switches** between dynamic jump sites of the same stack height
+3. **Symbolic mode by default** once the opcode surface is complete
+4. **Inline more builtins**: convert remaining Rust builtins (e.g., ADDMOD/MULMOD) to IR-defined functions
+5. **Profile-guided optimization**: use ORC's profiling for hot path optimization
+6. **Shared library extraction**: compile contracts to standalone `.so`/`.dll` files
 
 ### Suggested Next Steps
 
-1. Add stack overflow guard in `RuntimeBuilder::build_stack_push_*`
-2. Implement full memory bounds checking in memory read/write paths
+1. Forward gas and calldata through `CALL`
+2. Add an account and storage model behind the state opcodes
 3. Expand opcode coverage with a test-first approach
 
 ---
@@ -1071,12 +1106,14 @@ Several opcode families are stubbed:
 
 | Task | Primary Files |
 |------|---------------|
-| Add new opcode | `instructions.rs`, `ops.rs`, `contract.rs` |
+| Add new opcode | `ops.rs`, `contract.rs` (dispatch and stack effect), `gas.rs`, `test_roms.rs` |
 | Add IR-defined runtime function | `runtime_builder.rs`, `symbols.rs`, `env.rs` |
-| Add extern "C" runtime function | `builtins.rs`, `runtime_builder.rs` (declare), `symbols.rs`, `engine/mod.rs` (link) |
-| Modify execution context layout | `exec.rs`, `jet_ir/types.rs` (must stay in sync) |
+| Add extern "C" runtime function | `builtins.rs`, `runtime_builder.rs` (declare), `symbols.rs`, `env.rs`, `engine/mod.rs` (link) |
+| Change stack lowering | `stack.rs`, `symbolic.rs`, `contract.rs` (planner) |
+| Change gas costs | `gas.rs`, `ops.rs` (dynamic charges) |
+| Modify execution context layout | `exec.rs`, `call_info.rs`, `jet_ir/types.rs`, `layout_tests.rs` (must stay in sync) |
 | Modify shared constants | `jet_ir/constants.rs` |
-| Debug compilation | `jetdbg.rs`, enable `emit_llvm` option |
+| Debug compilation | `jetdbg`, `--emit-llvm` |
 | Add tests | `tests/test_roms.rs`, `tests/roms/mod.rs` |
 
 ### Common Types
@@ -1086,6 +1123,7 @@ Several opcode families are stubbed:
 | `Word` | 32 bytes | EVM stack word |
 | `i256` | 256 bits | LLVM integer for arithmetic |
 | `Context` | ~33KB | Execution state |
+| `CallInfo` | 1 frame | Address, origin, caller, value, calldata, gas limit |
 | `ReturnCode` | 1 byte | Execution result |
 
 ### Build Commands
@@ -1095,13 +1133,13 @@ Several opcode families are stubbed:
 make build
 
 # Run debug tool
-cargo run --bin jetdbg
+cargo run -p jetdbg
 
 # Run tests
-cargo test -p jet
+make test
 
-# Build with LLVM output
-cargo run --bin jetdbg -- build --emit-llvm
+# Compile the samples in release mode
+cargo run -p jetdbg -- --mode release
 ```
 
 ---

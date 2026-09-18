@@ -7,9 +7,10 @@ This document describes the development workflow, tooling, and CI/CD setup for t
 ### Required Tools
 
 1. **Rust Toolchain**
-   - Stable Rust (for building, testing, formatting, and linting)
+   - Stable Rust for building, testing, and linting, selected by `rust-toolchain.toml`
+   - A nightly toolchain with the `rustfmt` component; `make fmt` and `make fmt-check` run `cargo +nightly fmt`
 
-2. **LLVM 21**
+2. **LLVM 22**
    - Required for building the project
    - See [installation instructions](#installing-llvm)
 
@@ -28,7 +29,7 @@ This will install `cargo-nextest` for running tests.
 
 ## Installing LLVM
 
-The project requires LLVM 21. Use the provided script:
+The project requires LLVM 22. Use the provided script:
 
 ```bash
 make install-llvm
@@ -68,7 +69,7 @@ make test-cargo
 
 ### Formatting
 
-Format code with rustfmt:
+Format code with nightly rustfmt (`rustup toolchain install nightly --component rustfmt` once):
 
 ```bash
 # Format all code
@@ -113,19 +114,20 @@ This runs:
 | Target | Description |
 |--------|-------------|
 | `make build` | Build the project |
+| `make run` | Run the `jetdbg` debug CLI |
 | `make test` | Run tests with cargo-nextest |
 | `make test-all` | Run all tests including doctests |
 | `make test-cargo` | Run tests with built-in cargo test |
 | `make doctest` | Run only doctests |
 | `make check` | Run cargo check |
-| `make fmt` | Format code with rustfmt |
+| `make fmt` | Format code with nightly rustfmt |
 | `make fmt-check` | Check code formatting |
 | `make clippy` | Run clippy linting |
 | `make clippy-fix` | Run clippy with auto-fixes |
 | `make ci` | Run all CI checks locally |
 | `make commit-check` | Full pre-commit check |
 | `make install-tools` | Install cargo-nextest |
-| `make install-llvm` | Install LLVM 21 |
+| `make install-llvm` | Install LLVM 22 |
 
 ## Continuous Integration
 
@@ -133,27 +135,28 @@ The CI pipeline runs on GitHub Actions as a single sequential job with the follo
 
 ### CI Workflow Steps
 
-1. **Cache LLVM 21** - Checks for cached LLVM installation
+1. **Cache LLVM 22** - Checks for cached LLVM installation
 2. **Restore LLVM from cache** - Restores if cache hit (conditional)
-3. **Install LLVM 21** - Uses `scripts/install-llvm.sh` if not cached (conditional)
+3. **Install LLVM 22** - Uses `scripts/install-llvm.sh` if not cached (conditional)
 4. **Log LLVM shared libraries** - Verification step
-5. **Set LLVM environment variables** - Configures LLVM_SYS_211_PREFIX
+5. **Set LLVM environment variables** - Configures LLVM_SYS_221_PREFIX
 6. **Cache Rust build artifacts** - Uses Swatinem/rust-cache
-7. **Install Rust stable** - With rustfmt and clippy components
-8. **Apply formatting fixes** - `cargo fmt --all`
-9. **Commit formatting fixes** - Automatically commits and pushes formatting changes (conditional)
-10. **Run clippy** - `cargo clippy --all-targets --all-features -- -D warnings`
-11. **Install cargo-nextest** - Test runner
-12. **Check all targets** - `cargo check --all-targets --all-features`
-13. **Build** - `cargo build --verbose --all-features`
-14. **Run tests with nextest** - `cargo nextest run --all-features --no-fail-fast`
-15. **Run doctests** - `cargo test --doc --all-features`
+7. **Install Rust nightly rustfmt** - Only the `rustfmt` component, matching `make fmt`
+8. **Install Rust stable** - With rustfmt and clippy components
+9. **Apply formatting fixes** - `cargo +nightly fmt --all`
+10. **Commit formatting fixes** - Automatically commits and pushes formatting changes (conditional)
+11. **Run clippy** - `cargo clippy --all-targets --all-features -- -D warnings`
+12. **Install cargo-nextest** - Test runner
+13. **Check all targets** - `cargo check --all-targets --all-features`
+14. **Build** - `cargo build --verbose --all-features`
+15. **Run tests with nextest** - `cargo nextest run --all-features --no-fail-fast`
+16. **Run doctests** - `cargo test --doc --all-features`
 
 ### CI Features
 
 - **Sequential execution**: Steps run in order, failing fast on errors
 - **Smart caching**: Uses `Swatinem/rust-cache` for optimized Rust artifact caching and LLVM binary caching
-- **LLVM Setup**: Automatically installs and caches LLVM 21 using project scripts
+- **LLVM Setup**: Automatically installs and caches LLVM 22 using project scripts
 - **Strict Mode**: Warnings are treated as errors (`-D warnings`)
 - **Auto-formatting**: Automatically applies formatting fixes and pushes them back to the branch on push/PR
 
@@ -163,7 +166,7 @@ The CI pipeline runs on GitHub Actions as a single sequential job with the follo
 Configures cargo-nextest test runner behavior with sensible defaults.
 
 ### `rust-toolchain.toml`
-Specifies stable Rust as the default toolchain for all operations.
+Specifies stable Rust as the default toolchain. Formatting is the one exception and uses `cargo +nightly fmt`.
 
 ### `.github/workflows/ci.yml`
 GitHub Actions workflow configuration.
@@ -190,7 +193,7 @@ GitHub Actions workflow configuration.
 If you get LLVM-related errors:
 
 ```bash
-# Install LLVM 21
+# Install LLVM 22
 make install-llvm
 
 # Verify LLVM is detected
